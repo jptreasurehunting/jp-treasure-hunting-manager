@@ -1,0 +1,514 @@
+/* ==========================================================================
+   eBay 利益管理アプリ (MVP) - デザインシステム & スタイルシート
+   ========================================================================== */
+
+:root {
+  /* カラーパレット */
+  --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+  --card-bg: rgba(30, 41, 59, 0.7);
+  --card-border: rgba(255, 255, 255, 0.1);
+  --card-border-glow: rgba(99, 102, 241, 0.3);
+  
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  
+  --accent-primary: #6366f1;
+  --accent-primary-hover: #4f46e5;
+  --accent-glow: rgba(99, 102, 241, 0.25);
+  
+  --profit-positive: #10b981;
+  --profit-positive-glow: rgba(16, 185, 129, 0.2);
+  --profit-negative: #ef4444;
+  --profit-negative-glow: rgba(239, 68, 68, 0.2);
+  
+  --input-bg: rgba(15, 23, 42, 0.6);
+  --input-border: rgba(255, 255, 255, 0.12);
+  --input-focus: #818cf8;
+  
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  
+  --shadow-main: 0 20px 40px -15px rgba(0, 0, 0, 0.5);
+  --transition-fast: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 基本リセット & フォント設定 */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg-gradient);
+  background-attachment: fixed;
+  color: var(--text-primary);
+  min-height: 100vh;
+  padding: 2rem 1.5rem;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app-container {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* ヘッダー */
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.logo-area {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.logo-icon {
+  width: 48px;
+  height: 48px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  box-shadow: 0 8px 16px var(--accent-glow);
+}
+
+.app-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  background: linear-gradient(to right, #ffffff, #cbd5e1);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.app-subtitle {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.header-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #34d399;
+  padding: 0.4rem 0.9rem;
+  border-radius: 9999px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  background-color: #10b981;
+  border-radius: 50%;
+  box-shadow: 0 0 10px #10b981;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { transform: scale(0.95); opacity: 0.8; }
+  50% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(0.95); opacity: 0.8; }
+}
+
+/* レベルレイアウト (レスポンシブ2カラム) */
+.main-layout {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (max-width: 992px) {
+  .main-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* カードスタイル */
+.card {
+  background: var(--card-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  box-shadow: var(--shadow-main);
+  transition: var(--transition-smooth);
+}
+
+.card:hover {
+  border-color: var(--card-border-glow);
+}
+
+.card-header {
+  margin-bottom: 1.25rem;
+  display: flex;
+  align-items: center;
+}
+
+.card-header.space-between {
+  justify-content: space-between;
+}
+
+.card-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--text-primary);
+}
+
+.card-icon {
+  width: 20px;
+  height: 20px;
+  color: var(--accent-primary);
+}
+
+/* フォーム要素 */
+.grid-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.grid-3col {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1rem;
+}
+
+@media (max-width: 640px) {
+  .grid-2col, .grid-3col {
+    grid-template-columns: 1fr;
+  }
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.form-label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tooltip-badge {
+  font-size: 0.72rem;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+}
+
+.form-control {
+  width: 100%;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 1rem;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  font-family: inherit;
+  transition: var(--transition-fast);
+}
+
+.form-control:focus {
+  outline: none;
+  border-color: var(--input-focus);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.form-control[readonly] {
+  background: rgba(15, 23, 42, 0.3);
+  color: var(--text-muted);
+  border-color: rgba(255, 255, 255, 0.05);
+  cursor: not-allowed;
+}
+
+/* 通貨/単位入力ラッパー */
+.input-currency-wrapper, .input-suffix-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.currency-symbol {
+  position: absolute;
+  left: 0.85rem;
+  color: var(--text-muted);
+  font-weight: 500;
+  pointer-events: none;
+}
+
+.currency-input {
+  padding-left: 2rem;
+}
+
+.suffix {
+  position: absolute;
+  right: 0.85rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  pointer-events: none;
+}
+
+.settings-input {
+  padding-right: 2.2rem;
+}
+
+/* ロック / アンロック ボタン */
+.btn-lock {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.9rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: var(--transition-fast);
+}
+
+.btn-lock.locked {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.btn-lock.locked:hover {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: var(--accent-primary);
+  color: #a5b4fc;
+}
+
+.btn-lock.unlocked {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+}
+
+.btn-lock.unlocked:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(245, 158, 11, 0.4);
+}
+
+.settings-card.editing-mode {
+  border-color: rgba(245, 158, 11, 0.5);
+  background: rgba(30, 41, 59, 0.85);
+}
+
+.settings-footer-info {
+  margin-top: 1rem;
+  padding: 0.6rem 0.8rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+/* 右カラム: 予想利益表示カード */
+.result-card {
+  background: linear-gradient(160deg, rgba(30, 41, 59, 0.85), rgba(15, 23, 42, 0.95));
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  position: sticky;
+  top: 1.5rem;
+}
+
+.result-badge-container {
+  text-align: center;
+  padding: 1.25rem 0.5rem;
+}
+
+.result-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.profit-amount-display {
+  font-family: 'Outfit', sans-serif;
+  font-size: 3.25rem;
+  font-weight: 800;
+  line-height: 1.1;
+  margin: 0.5rem 0;
+  transition: var(--transition-smooth);
+}
+
+.profit-positive {
+  color: var(--profit-positive);
+  text-shadow: 0 0 25px var(--profit-positive-glow);
+}
+
+.profit-negative {
+  color: var(--profit-negative);
+  text-shadow: 0 0 25px var(--profit-negative-glow);
+}
+
+.profit-zero {
+  color: var(--text-secondary);
+}
+
+.margin-badge {
+  display: inline-block;
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 0.3rem 0.8rem;
+  border-radius: 9999px;
+  margin-top: 0.25rem;
+}
+
+.margin-positive {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.margin-negative {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.margin-zero {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+}
+
+.divider {
+  height: 1px;
+  background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.12), transparent);
+  margin: 1.25rem 0;
+}
+
+.breakdown-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 0.9rem;
+}
+
+.breakdown-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.breakdown-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+}
+
+.breakdown-item .item-name {
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.breakdown-item .item-sub {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.breakdown-item .item-value {
+  font-weight: 600;
+  font-family: 'Outfit', sans-serif;
+  font-size: 1rem;
+}
+
+.breakdown-item.highlight-sales .item-name {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.breakdown-item.highlight-sales .item-value {
+  color: #818cf8;
+}
+
+.breakdown-item.minus .item-value {
+  color: #f87171;
+}
+
+.total-summary {
+  background: rgba(15, 23, 42, 0.5);
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+}
+
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text-secondary);
+}
+
+.summary-row strong {
+  color: var(--text-primary);
+  font-family: 'Outfit', sans-serif;
+  font-size: 1.1rem;
+}
+
+/* 計算公式ガイドカード */
+.formula-guide-card {
+  padding: 1.2rem 1.5rem;
+}
+
+.formula-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.formula-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.formula-list code {
+  background: rgba(0, 0, 0, 0.3);
+  color: #a5b4fc;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-family: monospace;
+}

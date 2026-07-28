@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>eBay 利益管理アプリ | 最小構成 MVP</title>
+  <meta name="description" content="eBay出品における予想利益、手数料、関税を自動計算する簡易管理アプリ">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./src/style.css">
+</head>
+<body>
+  <div id="app" class="app-container">
+    <!-- ヘッダー -->
+    <header class="app-header">
+      <div class="logo-area">
+        <div class="logo-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="app-title">eBay 利益管理アプリ</h1>
+          <p class="app-subtitle">最小構成 (MVP) | 手数料・関税・予想利益リアルタイムシミュレーター</p>
+        </div>
+      </div>
+      <div class="header-badge">
+        <span class="status-dot"></span> ライブ計算中
+      </div>
+    </header>
+
+    <!-- メインコンテンツ -->
+    <main class="main-layout">
+      <!-- 左カラム: 入力フォーム群 -->
+      <div class="input-section">
+        
+        <!-- カード 1: 商品基本情報 -->
+        <section class="card">
+          <div class="card-header">
+            <h2 class="card-title">
+              <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m4 10v10l8-4"/></svg>
+              1. 商品基本情報
+            </h2>
+          </div>
+          <div class="card-body grid-2col">
+            <div class="form-group">
+              <label for="productName" class="form-label">商品名</label>
+              <input type="text" id="productName" class="form-control" placeholder="例: Canon AE-1 Vintage Camera" value="Canon AE-1 Program Vintage Camera">
+            </div>
+            <div class="form-group">
+              <label for="category" class="form-label">カテゴリー</label>
+              <input type="text" id="category" class="form-control" placeholder="例: カメラ・光学機器" value="Cameras & Photo">
+            </div>
+          </div>
+        </section>
+
+        <!-- カード 2: 価格・コスト情報 -->
+        <section class="card">
+          <div class="card-header">
+            <h2 class="card-title">
+              <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v12M15 9.5H9.5a2.5 2.5 0 0 0 0 5h5a2.5 2.5 0 0 1 0 5H8.5"/></svg>
+              2. 価格・コスト設定
+            </h2>
+          </div>
+          <div class="card-body grid-2col">
+            <div class="form-group">
+              <label for="sellingPrice" class="form-label">販売価格 ($)</label>
+              <div class="input-currency-wrapper">
+                <span class="currency-symbol">$</span>
+                <input type="number" id="sellingPrice" class="form-control currency-input" placeholder="0.00" value="300" step="0.01" min="0">
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="purchaseCost" class="form-label">仕入価格 ($)</label>
+              <div class="input-currency-wrapper">
+                <span class="currency-symbol">$</span>
+                <input type="number" id="purchaseCost" class="form-control currency-input" placeholder="0.00" value="100" step="0.01" min="0">
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="shippingCost" class="form-label">送料 ($)</label>
+              <div class="input-currency-wrapper">
+                <span class="currency-symbol">$</span>
+                <input type="number" id="shippingCost" class="form-control currency-input" placeholder="0.00" value="20" step="0.01" min="0">
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="otherExpenses" class="form-label">その他経費 ($)</label>
+              <div class="input-currency-wrapper">
+                <span class="currency-symbol">$</span>
+                <input type="number" id="otherExpenses" class="form-control currency-input" placeholder="0.00" value="5" step="0.01" min="0">
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- カード 3: eBay手数料 & 関税設定 (ロック／アンロック機能付き) -->
+        <section class="card settings-card" id="settingsCard">
+          <div class="card-header space-between">
+            <h2 class="card-title">
+              <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              3. 手数料・関税設定
+            </h2>
+            <button type="button" id="toggleLockButton" class="btn-lock locked" title="設定の変更を許可/防止します">
+              <span id="lockIcon">🔒</span>
+              <span id="lockText">固定中 (ロック)</span>
+            </button>
+          </div>
+
+          <div class="card-body grid-3col">
+            <div class="form-group">
+              <label for="ebayFeeRate" class="form-label">
+                eBay手数料率 (%)
+                <span class="tooltip-badge" title="デフォルト初期値: 20%">初期値: 20%</span>
+              </label>
+              <div class="input-suffix-wrapper">
+                <input type="number" id="ebayFeeRate" class="form-control settings-input" value="20" step="0.1" min="0" max="100" readonly>
+                <span class="suffix">%</span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="tariffDenominator" class="form-label">
+                関税計算の分母
+                <span class="tooltip-badge" title="デフォルト初期値: 3 (販売価格 / 3)">初期値: 3</span>
+              </label>
+              <div class="input-suffix-wrapper">
+                <input type="number" id="tariffDenominator" class="form-control settings-input" value="3" step="0.1" min="0.001" readonly>
+                <span class="suffix">分母</span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="tariffRate" class="form-label">
+                関税率 (%)
+                <span class="tooltip-badge" title="デフォルト初期値: 20%">初期値: 20%</span>
+              </label>
+              <div class="input-suffix-wrapper">
+                <input type="number" id="tariffRate" class="form-control settings-input" value="20" step="0.1" min="0" max="100" readonly>
+                <span class="suffix">%</span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="settings-footer-info" id="lockNotice">
+            <span>💡 誤操作防止のため設定値は固定されています。変更する場合は右上ボタンを押してください。</span>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- 右カラム: 予想利益ダッシュボード & 内訳表示 -->
+      <div class="result-section">
+        
+        <!-- メイン結果カード -->
+        <section class="card result-card" id="profitResultCard">
+          <div class="result-badge-container">
+            <span class="result-label">予想利益 (Estimated Profit)</span>
+            <div class="profit-amount-display" id="profitDisplay">$0.00</div>
+            <div class="margin-badge" id="marginBadge">利益率 0.0%</div>
+          </div>
+
+          <div class="divider"></div>
+
+          <!-- 計算内訳 -->
+          <h3 class="breakdown-title">計算内訳サマリー</h3>
+
+          <div class="breakdown-list">
+            <div class="breakdown-item highlight-sales">
+              <span class="item-name">販売価格 (+)</span>
+              <span class="item-value" id="valSellingPrice">$0.00</span>
+            </div>
+
+            <div class="breakdown-item minus">
+              <span class="item-name">
+                eBay手数料 (-)
+                <small class="item-sub text-muted" id="subEbayFee">(20.0%)</small>
+              </span>
+              <span class="item-value" id="valEbayFee">-$0.00</span>
+            </div>
+
+            <div class="breakdown-item minus">
+              <span class="item-name">
+                関税額 (-)
+                <small class="item-sub text-muted" id="subTariff">(価格/3 × 20.0%)</small>
+              </span>
+              <span class="item-value" id="valTariff">-$0.00</span>
+            </div>
+
+            <div class="breakdown-item minus">
+              <span class="item-name">仕入価格 (-)</span>
+              <span class="item-value" id="valPurchase">-$0.00</span>
+            </div>
+
+            <div class="breakdown-item minus">
+              <span class="item-name">送料 (-)</span>
+              <span class="item-value" id="valShipping">-$0.00</span>
+            </div>
+
+            <div class="breakdown-item minus">
+              <span class="item-name">その他経費 (-)</span>
+              <span class="item-value" id="valOther">-$0.00</span>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="total-summary">
+            <div class="summary-row">
+              <span>コスト・手数料・経費の合計</span>
+              <strong id="valTotalCosts">$0.00</strong>
+            </div>
+          </div>
+        </section>
+
+        <!-- ロジックガイドカード -->
+        <section class="card formula-guide-card">
+          <h3 class="formula-title">
+            <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            README.md 計算ロジック
+          </h3>
+          <ul class="formula-list">
+            <li><strong>関税額:</strong> <code>(販売価格 ÷ 分母) × 関税率</code></li>
+            <li><strong>eBay手数料額:</strong> <code>販売価格 × eBay手数料率</code></li>
+            <li><strong>予想利益:</strong> <code>販売価格 - eBay手数料額 - 関税額 - 仕入価格 - 送料 - その他経費</code></li>
+          </ul>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
