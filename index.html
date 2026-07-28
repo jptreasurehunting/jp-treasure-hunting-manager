@@ -55,6 +55,73 @@
           </div>
         </section>
 
+        <!-- カード 1.5: eBay API 売上・注文連携データ (10項目) -->
+        <section class="card ebay-order-card">
+          <div class="card-header space-between">
+            <h2 class="card-title">
+              <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+              1.5. eBay API 売上・注文連携データ
+            </h2>
+            <span class="api-sync-badge">✓ eBay API 連携済</span>
+          </div>
+
+          <div class="card-body">
+            <div class="ebay-order-grid">
+              <!-- 商品サムネイル画像 -->
+              <div class="order-image-box">
+                <img id="ebayProductImage" src="https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=300&auto=format&fit=crop&q=80" alt="商品写真" class="product-thumb">
+                <span class="image-label">商品写真 (Item Photo)</span>
+              </div>
+
+              <!-- 注文詳細 9項目 -->
+              <div class="order-details-box grid-2col">
+                <div class="form-group">
+                  <label class="form-label">1. eBay注文番号 (Order ID)</label>
+                  <input type="text" id="ebayOrderId" class="form-control readonly-input" value="14-12345-67890" readonly>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">2. eBay商品番号 (Item ID)</label>
+                  <input type="text" id="ebayItemId" class="form-control readonly-input" value="256123456789" readonly>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">5. 数量 (Quantity)</label>
+                  <input type="number" id="ebayQuantity" class="form-control readonly-input" value="1" readonly>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">6. 実際の販売価格 (Actual Price)</label>
+                  <div class="input-currency-wrapper">
+                    <span class="currency-symbol">$</span>
+                    <input type="number" id="ebayActualSellingPrice" class="form-control currency-input readonly-input" value="300.00" readonly>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">7. 通貨 (Currency)</label>
+                  <input type="text" id="ebayCurrency" class="form-control readonly-input" value="USD ($)" readonly>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">8. 配送先国 (Country)</label>
+                  <input type="text" id="ebayShippingCountry" class="form-control readonly-input" value="United States (US)" readonly>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">9. 注文日時 (Order Date)</label>
+                  <input type="text" id="ebayOrderDate" class="form-control readonly-input" value="2026-07-28 15:30 (JST)" readonly>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">10. 発送状況 (Status)</label>
+                  <span class="status-pill status-paid" id="ebayFulfillmentStatus">Paid / Ready for Shipment</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <!-- カード 2: 価格・コスト情報 -->
         <section class="card">
           <div class="card-header">
@@ -91,6 +158,13 @@
                 <span class="currency-symbol">$</span>
                 <input type="number" id="otherExpenses" class="form-control currency-input" placeholder="0.00" value="5" step="0.01" min="0">
               </div>
+            </div>
+            <div class="form-group grid-span-2">
+              <label for="shippingMethod" class="form-label">配送方法</label>
+              <select id="shippingMethod" class="form-control select-input">
+                <option value="japanpost" selected>🇯🇵 日本郵政 海外便 (Zonos Prepay連動)</option>
+                <option value="other">✈️ その他 (FedEx / DHL / UPS 等)</option>
+              </select>
             </div>
           </div>
         </section>
@@ -147,6 +221,84 @@
             <span>💡 誤操作防止のため設定値は固定されています。変更する場合は右上ボタンを押してください。</span>
           </div>
         </section>
+
+        <!-- カード 4: 日本郵政 海外便 / Zonos Prepay 申告補助カード -->
+        <section class="card zonos-card" id="zonosCard">
+          <div class="card-header space-between">
+            <h2 class="card-title">
+              <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+              4. 日本郵政 海外便 Zonos Prepay 申告補助
+            </h2>
+            <span class="zonos-badge">Zonos Prepay 対応</span>
+          </div>
+
+          <div class="card-body">
+            <!-- 1. 売れた商品のZonos申告価格候補 (販売価格の1/3) -->
+            <div class="form-group margin-bottom-md">
+              <label for="zonosProductDeclaredPrice" class="form-label">
+                売れた商品の Zonos 申告価格候補 ($)
+                <span class="tooltip-badge">候補額 (実際の販売価格 ÷ 3)</span>
+              </label>
+              <div class="input-currency-wrapper">
+                <span class="currency-symbol">$</span>
+                <input type="number" id="zonosProductDeclaredPrice" class="form-control currency-input" placeholder="0.00" value="100.00" step="0.01" min="0">
+              </div>
+              <p class="field-hint">💡 実際の販売価格の1/3で毎回自動計算される申告価格候補です。発送時に利用者が確認の上、必要に応じて自由に修正できます。</p>
+            </div>
+
+            <!-- 2. おまけ (ノベルティ) 登録リスト (写真対応) -->
+            <div class="bonus-section">
+              <div class="bonus-header">
+                <h3 class="bonus-title">おまけ（ノベルティ等）の Zonos 申告登録</h3>
+                <button type="button" id="addBonusItemBtn" class="btn-secondary btn-sm">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  おまけを追加
+                </button>
+              </div>
+
+              <div id="bonusItemsContainer" class="bonus-items-container">
+                <!-- JavaScriptでおまけ行（写真対応）が挿入されます -->
+              </div>
+              <p class="field-hint">※ おまけ単価は自動予測されません。発送時に利用者がZonos画面を確認の上、手入力してください。</p>
+            </div>
+
+            <div class="divider"></div>
+
+            <!-- 3. Zonos 申告額合計サマリー -->
+            <div class="zonos-summary-box">
+              <div class="zonos-summary-row">
+                <span>売れた商品の申告価格候補:</span>
+                <strong id="valZonosProductDeclared">$100.00</strong>
+              </div>
+              <div class="zonos-summary-row">
+                <span>おまけの申告額合計:</span>
+                <strong id="valZonosBonusTotal">$0.00</strong>
+              </div>
+              <div class="zonos-summary-row grand-total">
+                <span>Zonos 申告総額:</span>
+                <strong id="valZonosGrandTotal">$100.00</strong>
+              </div>
+            </div>
+
+            <!-- 4. コピー・転記補助 & Zonos画面を開くアクション -->
+            <div class="zonos-action-box">
+              <div class="action-btn-group">
+                <button type="button" id="copyZonosInfoBtn" class="btn-secondary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  申告情報をコピー
+                </button>
+                <button type="button" id="openZonosBtn" class="btn-zonos">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                  Zonos Prepayを開く (要確認)
+                </button>
+              </div>
+              <p class="action-notice">※ Zonosへの自動入力・自動送信・自動支払いは一切行われません。手動確認モーダル承認後に別タブで開きます。</p>
+              <div id="copyNotification" class="copy-notification hidden">✓ 転記用申告情報をクリップボードにコピーしました！</div>
+            </div>
+          </div>
+        </section>
+
+
 
       </div>
 
@@ -231,6 +383,74 @@
     </main>
   </div>
 
+  <!-- 二段階確認モーダル (最終確認画面) -->
+  <div id="confirmModalOverlay" class="modal-overlay hidden">
+    <div class="modal-card" id="confirmModal">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-alert-icon">🔒</span>
+          <h2 class="modal-title">最終確認画面</h2>
+        </div>
+        <button type="button" id="closeModalBtn" class="modal-close-btn" aria-label="閉じる">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="modal-info-banner">
+          <p>⚠️ <strong>最終確認です。</strong> 下記の7項目を確認し、「確認しました」にチェックを入れた後、「実行する」ボタンを押してください。</p>
+        </div>
+
+        <!-- 7項目の詳細テーブル -->
+        <table class="modal-details-table">
+          <tr>
+            <th>1. 売れた商品</th>
+            <td id="modalProductList">-</td>
+          </tr>
+          <tr>
+            <th>2. 販売価格</th>
+            <td id="modalSellingPrice">$0.00</td>
+          </tr>
+          <tr>
+            <th>3. 1/3申告価格候補</th>
+            <td id="modalProductDeclaredPrice" class="text-highlight">$0.00</td>
+          </tr>
+          <tr>
+            <th>4. おまけ一覧</th>
+            <td id="modalBonusItemsList">-</td>
+          </tr>
+          <tr>
+            <th>5. Zonos申告総額</th>
+            <td id="modalGrandTotal" class="text-highlight-gold">$0.00</td>
+          </tr>
+          <tr>
+            <th>6. 発送方法</th>
+            <td id="modalShippingMethod">日本郵政 海外便</td>
+          </tr>
+          <tr>
+            <th>7. 配送先国</th>
+            <td id="modalDestinationCountry">United States (US)</td>
+          </tr>
+        </table>
+
+        <div class="modal-confirm-checkbox-group">
+          <input type="checkbox" id="confirmCheckbox" class="custom-checkbox">
+          <label for="confirmCheckbox" class="checkbox-label">
+            <strong>確認しました</strong> (上記7項目の内容およびZonos画面への遷移を承認する)
+          </label>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" id="cancelActionBtn" class="btn-secondary">キャンセル</button>
+        <button type="button" id="executeActionBtn" class="btn-danger" disabled>
+          <span class="btn-icon">⚡</span>
+          実行する
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="./src/main.js"></script>
 </body>
 </html>
+
+
