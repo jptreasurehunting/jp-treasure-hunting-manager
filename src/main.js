@@ -641,6 +641,37 @@ function initEventListeners() {
       window.open('https://dashboard.zonosprepay.com/ja/ship', '_blank', 'noopener,noreferrer');
     });
   }
+
+  // ページ切り替えタブのリスナー登録
+  const tabProfitCalculator = document.getElementById('tabProfitCalculator');
+  const tabSellSimilar = document.getElementById('tabSellSimilar');
+  const tabZonosCustoms = document.getElementById('tabZonosCustoms');
+
+  const pageProfitCalculator = document.getElementById('pageProfitCalculator');
+  const pageSellSimilar = document.getElementById('pageSellSimilar');
+  const pageZonosCustoms = document.getElementById('pageZonosCustoms');
+
+  const switchTab = (activeTab, activePage) => {
+    [tabProfitCalculator, tabSellSimilar, tabZonosCustoms].forEach(tab => {
+      if (tab) tab.classList.remove('active');
+    });
+    [pageProfitCalculator, pageSellSimilar, pageZonosCustoms].forEach(page => {
+      if (page) page.classList.add('hidden');
+    });
+
+    if (activeTab) activeTab.classList.add('active');
+    if (activePage) activePage.classList.remove('hidden');
+  };
+
+  if (tabProfitCalculator) {
+    tabProfitCalculator.addEventListener('click', () => switchTab(tabProfitCalculator, pageProfitCalculator));
+  }
+  if (tabSellSimilar) {
+    tabSellSimilar.addEventListener('click', () => switchTab(tabSellSimilar, pageSellSimilar));
+  }
+  if (tabZonosCustoms) {
+    tabZonosCustoms.addEventListener('click', () => switchTab(tabZonosCustoms, pageZonosCustoms));
+  }
 }
 
 // ドキュメントロード時の初期化処理
