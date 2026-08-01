@@ -1,0 +1,11 @@
+warning: in the working copy of 'src/components/ZonosCustoms/ShippingRecordView.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/ZonosCustoms/ZonosCustomsValidator.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/style.css', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/types/zonosCustoms.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/utils/zonosCustomsValidation.ts', LF will be replaced by CRLF the next time Git touches it
+ src/components/ZonosCustoms/ShippingRecordView.tsx |  20 [32m+++[m
+ .../ZonosCustoms/ZonosCustomsValidator.tsx         | 140 [32m++++++++++++++++[m[31m-----[m
+ src/style.css                                      | 101 [32m+++++++++++++++[m
+ src/types/zonosCustoms.ts                          |  16 [32m+++[m
+ src/utils/zonosCustomsValidation.ts                |  67 [32m++++++++[m[31m--[m
+ 5 files changed, 299 insertions(+), 45 deletions(-)

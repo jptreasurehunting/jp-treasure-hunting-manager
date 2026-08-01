@@ -1,0 +1,5 @@
+[35msrc/components/ZonosCustoms/ShippingRecordView.tsx[m[36m:[m[32m62[m[36m:[m            <strong className="cell-value">{snapshot.carrier || '日本郵便 ([1;31mJAPAN_POST[m)'}</strong>
+[35msrc/components/ZonosCustoms/ZonosCustomsValidator.tsx[m[36m:[m[32m29[m[36m:[m    carrier: '[1;31mJAPAN_POST[m',
+[35msrc/components/ZonosCustoms/ZonosCustomsValidator.tsx[m[36m:[m[32m243[m[36m:[m      carrier: '[1;31mJAPAN_POST[m',
+[35msrc/types/zonosCustoms.ts[m[36m:[m[32m18[m[36m:[m  carrier: '[1;31mJAPAN_POST[m';              // 配送会社 (Ver.1.1は "[1;31mJAPAN_POST[m" で固定)
+[35msrc/utils/zonosCustomsValidation.ts[m[36m:[m[32m118[m[36m:[m  const carrierInvalid = declaration.carrier !== '[1;31mJAPAN_POST[m';

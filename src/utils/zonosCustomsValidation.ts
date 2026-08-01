@@ -57,7 +57,7 @@ export function reallocateDeclaredValues(declaration: ZonosCustomsDeclaration): 
 }
 
 /**
- * Validates Zonos Customs Declaration according to Ver 1.0 specifications
+ * Validates Zonos Customs Declaration according to Ver 1.1 specifications
  */
 export function validateDeclaration(declaration: ZonosCustomsDeclaration): CustomsValidationStatus {
   const errors: string[] = [];
@@ -114,8 +114,42 @@ export function validateDeclaration(declaration: ZonosCustomsDeclaration): Custo
     }
   }
 
-  // Spec #9 Error conditions:
-  // 1. Included item value <= 0
+  // Ver.1.1 Shipping Conditions Checks
+  const carrierInvalid = declaration.carrier !== 'JAPAN_POST';
+  const originInvalid = declaration.originCountry !== 'JP';
+  
+  const destClean = (declaration.destinationCountry || '').trim().toLowerCase();
+  const isDomesticShipment = destClean === 'japan' || destClean === 'jp' || destClean.includes('日本') || destClean.includes('japan');
+  const destinationMissing = !destClean;
+
+  const shippingMethodMissing = !declaration.shippingMethod || !declaration.shippingMethod.trim();
+
+  // 1. Domestic shipment check (Spec #7)
+  if (isDomesticShipment) {
+    errors.push('国内発送にはZonos Prepayを使用できません。発送先国を確認してください。');
+  }
+
+  // 2. Carrier check (Spec #8)
+  if (carrierInvalid) {
+    errors.push('配送会社を日本郵便にしてください。');
+  }
+
+  // 3. Origin check
+  if (originInvalid) {
+    errors.push('発送元国は日本である必要があります。');
+  }
+
+  // 4. Destination missing check
+  if (destinationMissing) {
+    errors.push('発送先国を選択・入力してください。');
+  }
+
+  // 5. Shipping method missing check (Spec #4 & #5)
+  if (shippingMethodMissing) {
+    errors.push('配送方法を選択してください。');
+  }
+
+  // 6. Included item value <= 0
   for (const item of items) {
     if (item.isIncludedItem && item.declaredValueCents <= 0) {
       errors.push('同梱品の申告価格は0より大きい金額を入力してください。');
@@ -123,48 +157,51 @@ export function validateDeclaration(declaration: ZonosCustomsDeclaration): Custo
     }
   }
 
-  // 2. Quantity <= 0
+  // 7. Quantity <= 0
   if (quantityInvalid) {
     errors.push('数量が正しくありません。1以上の数値を入力してください。');
   }
 
-  // 3. Sum of included items >= eBay Transaction Value
+  // 8. Sum of included items >= eBay Transaction Value
   if (sumIncludedCents >= ebayCents) {
     errors.push('同梱品の申告価格合計がeBay取引金額以上になっています。');
   }
 
-  // 4. Reallocated sold item value <= 0
+  // 9. Reallocated sold item value <= 0
   if (soldItemCents <= 0) {
     errors.push('販売商品の申告価格を0以下にすることはできません。');
   }
 
-  // 5. Total declared value != eBay Transaction Value
+  // 10. Total declared value != eBay Transaction Value
   const diffCents = ebayCents - totalCents;
   if (diffCents !== 0) {
     errors.push('申告価格合計がeBay取引金額と一致していません。');
   }
 
-  // 6. Missing materials
+  // 11. Missing materials
   if (materialMissing) {
     errors.push('未入力の材質があります。');
   }
 
-  // 7. Missing product types
+  // 12. Missing product types
   if (productTypeMissing) {
     errors.push('未入力の商品種類があります。');
   }
 
-  // 8. Missing country of origin
+  // 13. Missing country of origin
   if (originMissing) {
     errors.push('原産国が未入力です。');
   }
 
-  const canLock = errors.length === 0 && !declaration.declarationLocked;
+  const shippingConditionsValid = !carrierInvalid && !originInvalid && !isDomesticShipment && !destinationMissing && !shippingMethodMissing;
   const isValid = errors.length === 0;
+  const canLock = isValid && !declaration.declarationLocked && !isDomesticShipment;
+  const canCopyZonos = declaration.declarationLocked && isValid && shippingConditionsValid;
 
   return {
     isValid,
     canLock,
+    canCopyZonos,
     errors,
     warnings,
     totalDeclaredValueCents: totalCents,
@@ -176,7 +213,13 @@ export function validateDeclaration(declaration: ZonosCustomsDeclaration): Custo
     quantityInvalid,
     originMissing,
     valueInvalid,
-    currencyMismatch
+    currencyMismatch,
+    isDomesticShipment,
+    carrierInvalid,
+    originInvalid,
+    destinationMissing,
+    shippingMethodMissing,
+    shippingConditionsValid
   };
 }
 

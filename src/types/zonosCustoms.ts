@@ -15,6 +15,10 @@ export interface ZonosCustomsDeclaration {
   ebayTransactionValueCents: number;  // eBay取引金額 (セント単位)
   ebayTransactionValue: number;       // eBay取引金額 ($表記)
   currency: string;                   // 通貨 (e.g., "USD")
+  carrier: 'JAPAN_POST';              // 配送会社 (Ver.1.1は "JAPAN_POST" で固定)
+  originCountry: 'JP';                // 発送元国 ("JP" で固定)
+  destinationCountry: string;         // 発送先国 (e.g., "United States (US)")
+  shippingMethod: string;             // 配送方法 (e.g., "国際小包 船便")
   items: ZonosCustomsItem[];
   declarationLocked: boolean;         // 確定状態 (true=確定済み/ロック, false=未確定)
   confirmedAt?: string;               // 確定日時
@@ -36,6 +40,10 @@ export interface ShippingSnapshot {
   orderId: string;
   ebayTransactionValue: number;
   currency: string;
+  carrier: string;            // 配送会社
+  shippingMethod: string;     // 配送方法
+  originCountry: string;      // 発送元国
+  destinationCountry: string; // 発送先国
   items: ShippingSnapshotItem[];
   totalDeclaredValue: number;
   trackingNumber: string;
@@ -55,6 +63,7 @@ export interface AuditLogEntry {
 export interface CustomsValidationStatus {
   isValid: boolean;
   canLock: boolean;
+  canCopyZonos: boolean;
   errors: string[];
   warnings: string[];
   totalDeclaredValueCents: number;
@@ -67,4 +76,11 @@ export interface CustomsValidationStatus {
   originMissing: boolean;
   valueInvalid: boolean;
   currencyMismatch: boolean;
+  // Ver.1.1 Shipping Condition fields
+  isDomesticShipment: boolean;
+  carrierInvalid: boolean;
+  originInvalid: boolean;
+  destinationMissing: boolean;
+  shippingMethodMissing: boolean;
+  shippingConditionsValid: boolean;
 }

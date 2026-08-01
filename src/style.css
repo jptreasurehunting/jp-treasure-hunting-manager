@@ -2083,6 +2083,107 @@ body {
   }
 }
 
+/* ==========================================================================
+   Zonos Customs Ver 1.1 スタイル (日本郵便・海外発送専用)
+   ========================================================================== */
+.japan-post-banner {
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  background: linear-gradient(135deg, rgba(30, 58, 138, 0.4) 0%, rgba(15, 23, 42, 0.95) 100%);
+  padding: 1.25rem 1.5rem;
+}
+
+.banner-tag-badge {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  padding: 0.2rem 0.7rem;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  display: inline-block;
+  margin-bottom: 0.4rem;
+}
+
+.banner-title-ja {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #ffffff;
+  margin-bottom: 0.3rem;
+}
+
+.banner-desc-ja {
+  font-size: 0.92rem;
+  color: var(--text-primary);
+  margin-bottom: 0.25rem;
+}
+
+.domestic-warning-banner {
+  border: 2px solid #ef4444;
+  background: rgba(239, 68, 68, 0.15);
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.2);
+}
+
+.warning-banner-body {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 1rem;
+}
+
+.warning-icon-lg {
+  font-size: 2.2rem;
+  flex-shrink: 0;
+}
+
+.warning-title-text {
+  color: #f87171;
+  font-size: 1.1rem;
+  margin-bottom: 0.25rem;
+}
+
+.warning-desc-text {
+  color: var(--text-primary);
+  font-size: 0.92rem;
+}
+
+.shipping-info-card {
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  background: rgba(15, 23, 42, 0.85);
+}
+
+.quick-select-pills {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+
+.btn-pill-sm {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--text-secondary);
+  padding: 0.2rem 0.55rem;
+  border-radius: 20px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.btn-pill-sm:hover {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.btn-pill-sm.active {
+  background: rgba(59, 130, 246, 0.3);
+  color: #ffffff;
+  border-color: #3b82f6;
+  font-weight: 700;
+}
+
+
 
 
 

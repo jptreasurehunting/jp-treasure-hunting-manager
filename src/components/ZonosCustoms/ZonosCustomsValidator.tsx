@@ -6,13 +6,12 @@ import {
   AuditLogEntry
 } from '../../types/zonosCustoms';
 import {
-  dollarsToCents,
-  centsToDollars,
   reallocateDeclaredValues,
   validateDeclaration,
   formatZonosCustomsDescription
 } from '../../utils/zonosCustomsValidation';
 import { ZonosItemEditor } from './ZonosItemEditor';
+import { ShippingInfoCard } from './ShippingInfoCard';
 import { IncludedItemNoticeModal } from './IncludedItemNoticeModal';
 import { RulesModal } from './RulesModal';
 import { UnlockConfirmModal } from './UnlockConfirmModal';
@@ -21,12 +20,16 @@ import { ShippingRecordView } from './ShippingRecordView';
 import { AuditLogView } from './AuditLogView';
 
 export const ZonosCustomsValidator: React.FC = () => {
-  // Initial eBay Order Declaration State
+  // Initial eBay Order Declaration State for Ver.1.1
   const [declaration, setDeclaration] = useState<ZonosCustomsDeclaration>({
     orderId: '14-12345-67890',
     ebayTransactionValueCents: 10000, // $100.00 USD
     ebayTransactionValue: 100.0,
     currency: 'USD',
+    carrier: 'JAPAN_POST',
+    originCountry: 'JP',
+    destinationCountry: 'United States (US)',
+    shippingMethod: '国際小包 船便',
     declarationLocked: false,
     items: [
       {
@@ -50,7 +53,7 @@ export const ZonosCustomsValidator: React.FC = () => {
       id: 'log-1',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       action: 'eBay注文を読み込み',
-      afterState: '注文番号 14-12345-67890 / 100.00 USD'
+      afterState: '注文番号 14-12345-67890 / 100.00 USD / US配送'
     }
   ]);
 
@@ -76,9 +79,37 @@ export const ZonosCustomsValidator: React.FC = () => {
     setAuditLogs((prev) => [newEntry, ...prev]);
   };
 
+  // Destination Country Change Handler
+  const handleDestinationCountryChange = (val: string) => {
+    if (declaration.declarationLocked) return;
+    const oldVal = declaration.destinationCountry;
+    setDeclaration({
+      ...declaration,
+      destinationCountry: val
+    });
+
+    const isDom = val.toLowerCase() === 'japan' || val.toLowerCase() === 'jp' || val.includes('日本');
+    if (isDom) {
+      addAuditLog('国内発送のため処理を停止', oldVal, val);
+    } else {
+      addAuditLog('発送先国を設定', oldVal, val);
+    }
+  };
+
+  // Shipping Method Change Handler
+  const handleShippingMethodChange = (val: string) => {
+    if (declaration.declarationLocked) return;
+    const oldVal = declaration.shippingMethod;
+    setDeclaration({
+      ...declaration,
+      shippingMethod: val
+    });
+    addAuditLog('配送方法を選択', oldVal, val);
+  };
+
   // Trigger notice modal before adding included item
   const handleOpenAddNotice = () => {
-    if (declaration.declarationLocked) return;
+    if (declaration.declarationLocked || validationStatus.isDomesticShipment) return;
     setIsNoticeOpen(true);
   };
 
@@ -141,7 +172,11 @@ export const ZonosCustomsValidator: React.FC = () => {
   // Lock declaration (申告価格を確定)
   const handleLockDeclaration = () => {
     if (!validationStatus.canLock) {
-      alert('申告内容に不備があるため、確定できません。');
+      if (validationStatus.isDomesticShipment) {
+        alert('国内発送にはZonos Prepayを使用できません。発送先国を確認してください。');
+      } else {
+        alert('申告内容または配送条件に不備があるため、確定できません。');
+      }
       return;
     }
 
@@ -153,6 +188,7 @@ export const ZonosCustomsValidator: React.FC = () => {
     });
 
     addAuditLog('申告価格を確定', '未確定', `確定完了 (${confirmedAtStr})`);
+    addAuditLog('配送条件チェック完了', undefined, `${declaration.shippingMethod} / ${declaration.destinationCountry}`);
     showToast('✓ 申告価格を確定しました。編集が保護されます。');
   };
 
@@ -174,8 +210,14 @@ export const ZonosCustomsValidator: React.FC = () => {
 
   // Copy Zonos payload
   const handleCopyZonosData = () => {
-    if (!declaration.declarationLocked || !validationStatus.isValid) {
-      alert('申告価格を確定してからZonosへコピーしてください。');
+    if (!validationStatus.canCopyZonos) {
+      if (validationStatus.isDomesticShipment) {
+        alert('国内発送にはZonos Prepayを使用できません。');
+      } else if (!declaration.declarationLocked) {
+        alert('申告価格を確定してからZonosへコピーしてください。');
+      } else {
+        alert('配送条件または申告内容を再確認してください。');
+      }
       return;
     }
 
@@ -190,7 +232,7 @@ export const ZonosCustomsValidator: React.FC = () => {
 
     const nowStr = new Date().toLocaleString('ja-JP');
 
-    // Create shippingSnapshot (Spec #15)
+    // Create shippingSnapshot (Spec #9)
     const newSnapshot: ShippingSnapshot = {
       id: `snap-${Date.now()}`,
       version: shippingSnapshots.length + 1,
@@ -198,6 +240,10 @@ export const ZonosCustomsValidator: React.FC = () => {
       orderId: declaration.orderId,
       ebayTransactionValue: declaration.ebayTransactionValue,
       currency: declaration.currency,
+      carrier: 'JAPAN_POST',
+      shippingMethod: declaration.shippingMethod,
+      originCountry: 'JP',
+      destinationCountry: declaration.destinationCountry,
       items: declaration.items.map((i) => ({
         material: i.material,
         productType: i.productType,
@@ -214,6 +260,7 @@ export const ZonosCustomsValidator: React.FC = () => {
     };
 
     setShippingSnapshots([newSnapshot, ...shippingSnapshots]);
+    addAuditLog('Zonosコピー条件を満たした', undefined, 'コピー実行');
     addAuditLog('Zonosコピー用データを作成 & 発送記録作成', undefined, `発送記録 Ver.${newSnapshot.version}`);
     setIsCopySuccessOpen(true);
   };
@@ -234,17 +281,18 @@ export const ZonosCustomsValidator: React.FC = () => {
 
   return (
     <div className="zonos-customs-validator-container">
-      {/* Top Header Card */}
-      <div className="card zonos-header-card">
-        <div className="card-header space-between">
-          <div className="title-with-badge">
-            <h2 className="card-title text-xl font-bold">
-              <svg className="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-              </svg>
-              Zonos Customs (税関申告・品目管理)
-            </h2>
-            <span className="feature-status-badge">Ver 1.0 確定仕様</span>
+      {/* Spec #2: Top Announcement Banner */}
+      <div className="japan-post-banner card">
+        <div className="banner-content-row space-between">
+          <div className="banner-text-group">
+            <div className="banner-tag-badge">🇯🇵 日本郵便・海外発送専用</div>
+            <h2 className="banner-title-ja">Zonos Prepay 申告準備・品目バリデーション (Ver.1.1)</h2>
+            <p className="banner-desc-ja">
+              この画面は、日本から日本郵便で海外へ発送する荷物の Zonos Prepay 申告準備に使用します。
+            </p>
+            <p className="banner-desc-en text-muted text-xs">
+              For International Shipments via Japan Post — This screen prepares Zonos Prepay declaration data for international shipments sent from Japan via Japan Post.
+            </p>
           </div>
 
           <button
@@ -260,6 +308,21 @@ export const ZonosCustomsValidator: React.FC = () => {
       {toastMessage && (
         <div className="toast-notification">
           <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Spec #7: Prominent Domestic Shipping Warning Banner */}
+      {validationStatus.isDomesticShipment && (
+        <div className="domestic-warning-banner card">
+          <div className="warning-banner-body">
+            <span className="warning-icon-lg">🚫</span>
+            <div>
+              <h3 className="warning-title-text font-bold">国内発送にはZonos Prepayを使用できません</h3>
+              <p className="warning-desc-text">
+                発送先国が「日本（Japan）」に設定されています。国内発送の場合、関税申告・Zonos Prepayは不要です。発送先国を確認してください。
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
@@ -301,13 +364,22 @@ export const ZonosCustomsValidator: React.FC = () => {
         </div>
       </div>
 
+      {/* Spec #3 & #4: Shipping Information Card (発送情報) */}
+      <ShippingInfoCard
+        destinationCountry={declaration.destinationCountry}
+        shippingMethod={declaration.shippingMethod}
+        isLocked={declaration.declarationLocked}
+        onDestinationCountryChange={handleDestinationCountryChange}
+        onShippingMethodChange={handleShippingMethodChange}
+      />
+
       {/* Customs Line Items Editor Section */}
       <div className="card items-section-card">
         <div className="card-header space-between">
           <h3 className="card-title text-lg font-bold">
             申告品目一覧
           </h3>
-          {!declaration.declarationLocked && (
+          {!declaration.declarationLocked && !validationStatus.isDomesticShipment && (
             <button
               type="button"
               className="btn-secondary"
@@ -325,7 +397,7 @@ export const ZonosCustomsValidator: React.FC = () => {
                 key={item.id}
                 item={item}
                 itemNumber={index + 1}
-                isLocked={declaration.declarationLocked}
+                isLocked={declaration.declarationLocked || validationStatus.isDomesticShipment}
                 onUpdate={handleUpdateItem}
                 onDelete={handleDeleteItem}
               />
@@ -334,7 +406,7 @@ export const ZonosCustomsValidator: React.FC = () => {
         </div>
       </div>
 
-      {/* Declaration Status Check Area (Spec #12) */}
+      {/* Spec #5 & #6: Declaration Status Check Area (申告内容を確認) */}
       <div className="card declaration-status-card">
         <div className="card-header space-between">
           <h3 className="card-title text-lg font-bold">
@@ -349,6 +421,13 @@ export const ZonosCustomsValidator: React.FC = () => {
 
         <div className="card-body">
           <div className="status-check-grid">
+            <div className="status-check-cell">
+              <span className="check-label">配送条件判定:</span>
+              <span className={validationStatus.shippingConditionsValid ? 'text-success font-semibold' : 'text-danger font-semibold'}>
+                {validationStatus.shippingConditionsValid ? '✅ Zonos対象' : '❌ 対象外 / 不備あり'}
+              </span>
+            </div>
+
             <div className="status-check-cell">
               <span className="check-label">eBay取引金額:</span>
               <strong className="check-val">${declaration.ebayTransactionValue.toFixed(2)} USD</strong>
@@ -387,19 +466,14 @@ export const ZonosCustomsValidator: React.FC = () => {
               <span className="check-label">原産国入力状況:</span>
               <span>{validationStatus.originMissing ? '❌ 未入力あり' : '✅ 正常 (Japan)'}</span>
             </div>
-
-            <div className="status-check-cell">
-              <span className="check-label">確定状態:</span>
-              <span>{declaration.declarationLocked ? '✅ 確定完了' : '⚠️ 未確定'}</span>
-            </div>
           </div>
 
           <div className="divider"></div>
 
           {/* Validation Messages Feedback */}
-          {validationStatus.isValid ? (
+          {validationStatus.isValid && validationStatus.shippingConditionsValid ? (
             <div className="validation-success-banner">
-              ✅ 申告価格合計がeBay取引金額と一致しています。
+              ✅ 配送条件はZonos Prepayの利用対象に一致しており、申告価格合計がeBay取引金額と一致しています。
             </div>
           ) : (
             <div className="validation-error-list">
@@ -436,7 +510,7 @@ export const ZonosCustomsValidator: React.FC = () => {
               type="button"
               className="btn-primary btn-lg btn-copy-zonos"
               onClick={handleCopyZonosData}
-              disabled={!declaration.declarationLocked || !validationStatus.isValid}
+              disabled={!validationStatus.canCopyZonos}
             >
               📋 Zonosへコピー
             </button>
@@ -444,7 +518,7 @@ export const ZonosCustomsValidator: React.FC = () => {
         </div>
       </div>
 
-      {/* Shipping Records Section (Spec #15) */}
+      {/* Shipping Records Section (Spec #9) */}
       {shippingSnapshots.length > 0 && (
         <div className="shipping-snapshots-section">
           {shippingSnapshots.map((snapshot) => (
@@ -459,7 +533,7 @@ export const ZonosCustomsValidator: React.FC = () => {
         </div>
       )}
 
-      {/* Audit Log Section (Spec #18) */}
+      {/* Audit Log Section (Spec #10) */}
       <AuditLogView logs={auditLogs} />
 
       {/* Modals */}

@@ -58,6 +58,26 @@ export const ShippingRecordView: React.FC<ShippingRecordViewProps> = ({
           </div>
 
           <div className="meta-cell">
+            <span className="cell-label">配送会社 / Carrier</span>
+            <strong className="cell-value">{snapshot.carrier || '日本郵便 (JAPAN_POST)'}</strong>
+          </div>
+
+          <div className="meta-cell">
+            <span className="cell-label">配送方法 / Shipping Method</span>
+            <strong className="cell-value">{snapshot.shippingMethod || '未指定'}</strong>
+          </div>
+
+          <div className="meta-cell">
+            <span className="cell-label">発送元国 / Origin Country</span>
+            <strong className="cell-value">日本 ({snapshot.originCountry || 'JP'})</strong>
+          </div>
+
+          <div className="meta-cell">
+            <span className="cell-label">発送先国 / Destination Country</span>
+            <strong className="cell-value text-highlight">{snapshot.destinationCountry || '未指定'}</strong>
+          </div>
+
+          <div className="meta-cell">
             <span className="cell-label">作成日時 / Created At</span>
             <span className="cell-value text-muted">{snapshot.createdAt}</span>
           </div>
