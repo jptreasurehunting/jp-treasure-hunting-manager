@@ -53,6 +53,32 @@ export const ZonosItemEditor: React.FC<ZonosItemEditorProps> = ({
     });
   };
 
+  const handleWeightChange = (valStr: string, unitStr: string) => {
+    if (isLocked) return;
+    const rawVal = parseFloat(valStr) || 0;
+    const unit = (unitStr || item.weightUnit || 'g') as any;
+    
+    // Convert to grams
+    let grams = rawVal;
+    if (unit === 'kg') grams = Math.round(rawVal * 1000);
+    else if (unit === 'oz') grams = Math.round(rawVal * 28.3495);
+    else if (unit === 'lb') grams = Math.round(rawVal * 453.592);
+    else grams = Math.round(rawVal);
+
+    const subtotalG = grams * item.quantity;
+    const kg = parseFloat((grams / 1000).toFixed(3));
+
+    onUpdate({
+      ...item,
+      unitWeightGrams: grams,
+      subtotalWeightGrams: subtotalG,
+      weightKg: kg,
+      weightUnit: unit,
+      weightSource: '手入力',
+      isEditedByUser: true
+    });
+  };
+
   // AI helper strictly for Material & Product Type (Spec #6)
   const handleAiSuggestMaterialAndType = () => {
     if (isLocked) return;
@@ -90,6 +116,32 @@ export const ZonosItemEditor: React.FC<ZonosItemEditorProps> = ({
       </div>
 
       <div className="card-body grid-editor-layout">
+        {/* eBay Product Preview (If imported) */}
+        {(item.title || item.imageUrl || item.itemId) && (
+          <div className="grid-span-full ebay-item-banner card-sub-box">
+            {item.imageUrl && (
+              <div className="item-thumb-box">
+                <img
+                  src={item.imageUrl}
+                  alt={item.title || 'Product Image'}
+                  className="item-thumb"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src =
+                      'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=150&auto=format&fit=crop&q=80';
+                  }}
+                />
+              </div>
+            )}
+            <div className="item-details-body">
+              <div className="item-meta-row text-xs">
+                {item.itemId && <span className="text-highlight">Item ID: {item.itemId}</span>}
+                {item.weightKg && <span className="badge-weight font-mono">重量: {item.weightKg} kg</span>}
+              </div>
+              {item.title && <h5 className="item-full-title font-semibold text-sm">{item.title}</h5>}
+            </div>
+          </div>
+        )}
+
         {/* 材質 */}
         <div className="form-group">
           <label className="form-label font-bold">材質</label>
@@ -144,17 +196,65 @@ export const ZonosItemEditor: React.FC<ZonosItemEditorProps> = ({
           />
         </div>
 
-        {/* 原産国 (初期値: Japan / 日本) */}
-        <div className="form-group">
-          <label className="form-label font-bold">原産国</label>
-          <input
-            type="text"
-            className="form-control readonly-input"
-            value={item.countryOfOrigin || 'Japan'}
-            disabled
-            readOnly
-          />
-          <p className="field-hint">※ Zonosコピー値: Japan (固定)</p>
+        {/* 商品単体重量 & 重量小計 (Spec #2) */}
+        <div className="form-group grid-span-full card-sub-box">
+          <div className="label-with-hint">
+            <label className="form-label font-bold text-xs">商品単体重量 & 重量小計</label>
+            <span className="badge-weight-source font-mono text-xs">
+              取得元: <strong>{item.weightSource || '未取得'}</strong>
+              {item.isWeightEstimated && <span className="tag-estimated"> (※推定)</span>}
+            </span>
+          </div>
+
+          <div className="weight-inputs-row grid-2col margin-top-xs">
+            <div>
+              <span className="text-xs text-muted block">単体重量 ({item.weightUnit || 'g'})</span>
+              <div className="input-with-unit">
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  className="form-control font-mono"
+                  placeholder="重量を入力"
+                  value={
+                    item.weightUnit === 'kg'
+                      ? (item.unitWeightGrams / 1000) || ''
+                      : item.unitWeightGrams || ''
+                  }
+                  onChange={(e) => handleWeightChange(e.target.value, item.weightUnit || 'g')}
+                  disabled={isLocked}
+                  readOnly={isLocked}
+                />
+                <select
+                  className="unit-select"
+                  value={item.weightUnit || 'g'}
+                  onChange={(e) => handleWeightChange(
+                    item.weightUnit === 'kg' ? (item.unitWeightGrams / 1000).toString() : item.unitWeightGrams.toString(),
+                    e.target.value
+                  )}
+                  disabled={isLocked}
+                >
+                  <option value="g">g</option>
+                  <option value="kg">kg</option>
+                  <option value="oz">oz</option>
+                  <option value="lb">lb</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <span className="text-xs text-muted block">重量小計 (単体重量 &times; {item.quantity})</span>
+              <div className="form-control readonly-input font-mono font-bold text-highlight">
+                {(item.unitWeightGrams * item.quantity)} g ({( (item.unitWeightGrams * item.quantity) / 1000 ).toFixed(2)} kg)
+              </div>
+            </div>
+          </div>
+
+          {(!item.unitWeightGrams || item.unitWeightGrams <= 0) && (
+            <p className="weight-warning-text text-xs margin-top-xs text-danger font-semibold">
+              ⚠️ 重量を自動取得できませんでした。実測値を入力してください。
+            </p>
+          )}
         </div>
 
         {/* 申告価格 */}

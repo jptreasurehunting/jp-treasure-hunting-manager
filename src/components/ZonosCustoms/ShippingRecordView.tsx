@@ -78,6 +78,36 @@ export const ShippingRecordView: React.FC<ShippingRecordViewProps> = ({
           </div>
 
           <div className="meta-cell">
+            <span className="cell-label">eBay Item ID / Item ID</span>
+            <strong className="cell-value font-mono">{snapshot.ebayItemId || '-'}</strong>
+          </div>
+
+          <div className="meta-cell">
+            <span className="cell-label">商品タイトル / Item Title</span>
+            <span className="cell-value text-xs font-semibold" title={snapshot.itemTitle}>{snapshot.itemTitle || '-'}</span>
+          </div>
+
+          <div className="meta-cell">
+            <span className="cell-label">商品重量合計 / Total Items Weight</span>
+            <strong className="cell-value font-mono">{snapshot.totalItemsWeightGrams || 0} g ({( (snapshot.totalItemsWeightGrams || 0) / 1000 ).toFixed(2)} kg)</strong>
+          </div>
+
+          <div className="meta-cell">
+            <span className="cell-label">梱包材重量 / Packaging Weight</span>
+            <strong className="cell-value font-mono">{snapshot.packagingWeightGrams || 0} g</strong>
+          </div>
+
+          <div className="meta-cell">
+            <span className="cell-label">梱包後総重量 / Total Packaged Weight</span>
+            <strong className="cell-value font-mono text-highlight-gold">{snapshot.totalPackagedWeightGrams || 0} g ({( (snapshot.totalPackagedWeightGrams || 0) / 1000 ).toFixed(2)} kg)</strong>
+          </div>
+
+          <div className="meta-cell">
+            <span className="cell-label">重量取得元 / Weight Source</span>
+            <span className="cell-value font-mono">{snapshot.weightSource || '未設定'}</span>
+          </div>
+
+          <div className="meta-cell">
             <span className="cell-label">作成日時 / Created At</span>
             <span className="cell-value text-muted">{snapshot.createdAt}</span>
           </div>
@@ -90,6 +120,11 @@ export const ShippingRecordView: React.FC<ShippingRecordViewProps> = ({
           <div className="meta-cell">
             <span className="cell-label">Zonosコピー日時 / Copied At</span>
             <span className="cell-value text-muted">{snapshot.copiedAt || '-'}</span>
+          </div>
+
+          <div className="meta-cell">
+            <span className="cell-label">eBayデータ取込元 / Import Source</span>
+            <span className="cell-value text-muted">{snapshot.importSource === 'live_api' ? '📡 Live API' : '⚡ モックデータ'} ({snapshot.importedAt || '-'})</span>
           </div>
         </div>
 

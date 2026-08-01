@@ -219,7 +219,8 @@ export function validateDeclaration(declaration: ZonosCustomsDeclaration): Custo
     originInvalid,
     destinationMissing,
     shippingMethodMissing,
-    shippingConditionsValid
+    shippingConditionsValid,
+    weightMissing: items.some(i => !i.unitWeightGrams || i.unitWeightGrams <= 0)
   };
 }
 
