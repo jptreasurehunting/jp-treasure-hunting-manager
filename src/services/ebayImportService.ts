@@ -1,7 +1,7 @@
 import { EbayOrderPayload, EbayOrderItemPayload } from '../types/zonosCustoms';
 import { suggestMaterialAndProductType } from '../utils/zonosCustomsValidation';
 
-// Mock Database of eBay Orders & Listings for Ver.1.3
+// Mock Database of eBay Orders & Listings for explicit development/testing mode ONLY
 const MOCK_EBAY_ORDERS: Record<string, EbayOrderPayload> = {
   '14-12345-67890': {
     orderId: '14-12345-67890',
@@ -106,11 +106,11 @@ const MOCK_EBAY_ORDERS: Record<string, EbayOrderPayload> = {
     items: [
       {
         itemId: '256111222333',
-        title: 'Nikon F3 HP SLR 35mm Film Camera Body (12 oz)',
+        title: 'Nikon F3 HP SLR 35mm Film Camera Body',
         quantity: 1,
         actualPrice: 100.0,
         weightKg: 0.34,
-        unitWeightGrams: 340, // 12 oz converted to ~340g
+        unitWeightGrams: 340,
         weightUnit: 'oz',
         weightSource: 'Item Specifics',
         imageUrl: 'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=400&auto=format&fit=crop&q=80',
@@ -132,7 +132,7 @@ const MOCK_EBAY_ORDERS: Record<string, EbayOrderPayload> = {
     items: [
       {
         itemId: '256777888999',
-        title: 'Leica M6 Rangefinder Camera (No Weight Specified)',
+        title: 'Leica M6 Rangefinder Camera',
         quantity: 1,
         actualPrice: 150.0,
         weightKg: 0,
@@ -147,7 +147,6 @@ const MOCK_EBAY_ORDERS: Record<string, EbayOrderPayload> = {
   }
 };
 
-// Item ID to Order ID lookup
 const MOCK_ITEM_TO_ORDER_MAP: Record<string, string> = {
   '256123456789': '14-12345-67890',
   '256987654321': '14-99999-88888',
@@ -158,13 +157,14 @@ const MOCK_ITEM_TO_ORDER_MAP: Record<string, string> = {
 
 /**
  * Fetches eBay Order Data by Order ID or Item ID
- * Switches between Mock data and Live API based on VITE_EBAY_API_MODE
+ * Strictly requires real eBay API in normal production mode.
+ * Mock data is restricted strictly to explicit development/testing mode (VITE_EBAY_API_MODE=mock).
  */
 export async function fetchEbayOrderData(
   orderIdInput?: string,
   itemIdInput?: string
 ): Promise<EbayOrderPayload> {
-  const apiMode = import.meta.env.VITE_EBAY_API_MODE || 'mock';
+  const apiMode = import.meta.env.VITE_EBAY_API_MODE;
 
   const cleanOrderId = (orderIdInput || '').trim();
   const cleanItemId = (itemIdInput || '').trim();
@@ -178,66 +178,85 @@ export async function fetchEbayOrderData(
     targetOrderId = MOCK_ITEM_TO_ORDER_MAP[cleanItemId] || '';
   }
 
-  if (apiMode === 'live_api') {
-    return fetchLiveEbayApi(targetOrderId, cleanItemId);
-  } else {
-    // Simulate async network delay for mock
-    await new Promise((resolve) => setTimeout(resolve, 500));
-
-    let order = MOCK_EBAY_ORDERS[targetOrderId];
-
-    if (!order && cleanItemId) {
-      const matchedOrderId = MOCK_ITEM_TO_ORDER_MAP[cleanItemId];
-      if (matchedOrderId) {
-        order = MOCK_EBAY_ORDERS[matchedOrderId];
-      }
-    }
-
-    if (!order) {
-      if (cleanOrderId && cleanItemId) {
-        throw new Error(`指定されたeBay注文番号 (${cleanOrderId}) または Item ID (${cleanItemId}) が見つかりませんでした。`);
-      } else if (cleanOrderId) {
-        throw new Error(`指定されたeBay注文番号 (${cleanOrderId}) が見つかりませんでした。`);
-      } else {
-        throw new Error(`指定されたItem ID (${cleanItemId}) に対応する注文情報が見つかりませんでした。`);
-      }
-    }
-
-    const enrichedItems: EbayOrderItemPayload[] = order.items.map((item) => {
-      const derived = suggestMaterialAndProductType(item.title);
-      return {
-        ...item,
-        derivedMaterial: item.derivedMaterial || derived.material,
-        derivedProductType: item.derivedProductType || derived.productType
-      };
-    });
-
-    return {
-      ...order,
-      items: enrichedItems,
-      importSource: 'mock'
-    };
+  // Explicit dev mode check ONLY
+  if (apiMode === 'mock') {
+    return fetchMockEbayData(targetOrderId, cleanItemId, cleanOrderId);
   }
+
+  // Normal Production Flow - Strictly Real API (NO silent fallback)
+  return fetchLiveEbayApi(targetOrderId, cleanItemId, cleanOrderId);
 }
 
 /**
- * Live eBay API Fetcher Placeholder
+ * Explicit Mock Data Fetcher for Development Testing ONLY
  */
-async function fetchLiveEbayApi(orderId: string, itemId: string): Promise<EbayOrderPayload> {
+async function fetchMockEbayData(
+  targetOrderId: string,
+  cleanItemId: string,
+  cleanOrderId: string
+): Promise<EbayOrderPayload> {
+  await new Promise((resolve) => setTimeout(resolve, 500));
+
+  let order = MOCK_EBAY_ORDERS[targetOrderId];
+
+  if (!order && cleanItemId) {
+    const matchedOrderId = MOCK_ITEM_TO_ORDER_MAP[cleanItemId];
+    if (matchedOrderId) {
+      order = MOCK_EBAY_ORDERS[matchedOrderId];
+    }
+  }
+
+  if (!order) {
+    if (cleanOrderId && cleanItemId) {
+      throw new Error(`(開発用モック) 指定されたeBay注文番号 (${cleanOrderId}) または Item ID (${cleanItemId}) が見つかりませんでした。`);
+    } else if (cleanOrderId) {
+      throw new Error(`(開発用モック) 指定されたeBay注文番号 (${cleanOrderId}) が見つかりませんでした。`);
+    } else {
+      throw new Error(`(開発用モック) 指定されたItem ID (${cleanItemId}) に対応する注文情報が見つかりませんでした。`);
+    }
+  }
+
+  const enrichedItems: EbayOrderItemPayload[] = order.items.map((item) => {
+    const derived = suggestMaterialAndProductType(item.title);
+    return {
+      ...item,
+      derivedMaterial: item.derivedMaterial || derived.material,
+      derivedProductType: item.derivedProductType || derived.productType
+    };
+  });
+
+  return {
+    ...order,
+    items: enrichedItems,
+    importSource: 'mock'
+  };
+}
+
+/**
+ * Live eBay API Fetcher for Production Flow
+ * Strictly throws explicit error if API is unconfigured or fails. NEVER silently falls back to mock.
+ */
+async function fetchLiveEbayApi(
+  orderId: string,
+  itemId: string,
+  rawOrderId: string
+): Promise<EbayOrderPayload> {
   const baseUrl = import.meta.env.VITE_EBAY_API_BASE_URL;
+
   if (!baseUrl) {
-    throw new Error('eBay APIの接続先URL (VITE_EBAY_API_BASE_URL) が設定されていません。');
+    throw new Error('実際のeBay注文データを読み込めません。eBay API設定を確認してください。');
   }
 
   try {
-    const response = await fetch(`${baseUrl}/orders/${orderId || itemId}`, {
+    const searchTarget = orderId || itemId || rawOrderId;
+    const response = await fetch(`${baseUrl}/orders/${searchTarget}`, {
       headers: {
         'Content-Type': 'application/json'
       }
     });
 
     if (!response.ok) {
-      throw new Error(`eBay API 通信エラー (HTTP ${response.status})`);
+      throw new Error('実際のeBay注文データを読み込めません。eBay API設定を確認してください。');
     }
 
     const data = await response.json();
@@ -250,21 +269,25 @@ async function fetchLiveEbayApi(orderId: string, itemId: string): Promise<EbayOr
       paymentStatus: data.paymentStatus,
       fulfillmentStatus: data.fulfillmentStatus,
       importSource: 'live_api',
-      items: data.items.map((i: any) => ({
-        itemId: i.itemId,
-        title: i.title,
-        quantity: i.quantity,
-        actualPrice: i.price,
-        weightKg: i.weightKg || 0.5,
-        unitWeightGrams: i.unitWeightGrams || 500,
-        weightUnit: i.weightUnit || 'g',
-        weightSource: i.weightSource || 'eBay API',
-        imageUrl: i.imageUrl,
-        derivedMaterial: 'PVC',
-        derivedProductType: 'Figure'
-      }))
+      items: data.items.map((i: any) => {
+        const derived = suggestMaterialAndProductType(i.title || '');
+        return {
+          itemId: i.itemId,
+          title: i.title,
+          quantity: i.quantity,
+          actualPrice: i.price,
+          weightKg: i.weightKg || 0.5,
+          unitWeightGrams: i.unitWeightGrams || 500,
+          weightUnit: i.weightUnit || 'g',
+          weightSource: i.weightSource || 'eBay API',
+          imageUrl: i.imageUrl,
+          derivedMaterial: derived.material,
+          derivedProductType: derived.productType
+        };
+      })
     };
   } catch (err: any) {
-    throw new Error(`eBay API 接続エラー: ${err.message || 'データ取得に失敗しました。'}`);
+    // Explicit error requirement: NEVER silently fall back to mock data
+    throw new Error('実際のeBay注文データを読み込めません。eBay API設定を確認してください。');
   }
 }

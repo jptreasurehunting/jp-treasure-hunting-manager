@@ -31,12 +31,12 @@ export const SellSimilarLauncher: React.FC = () => {
   // Load history on mount
   useEffect(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const saved = sessionStorage.getItem(STORAGE_KEY);
       if (saved) {
         setHistory(JSON.parse(saved));
       }
     } catch (e) {
-      console.error('Failed to load search history from localStorage:', e);
+      console.error('Failed to load search history from sessionStorage:', e);
     }
   }, []);
 
@@ -63,9 +63,9 @@ export const SellSimilarLauncher: React.FC = () => {
       const filtered = prevHistory.filter((item) => item.rawInput.trim() !== rawInput.trim());
       const updated = [newItem, ...filtered].slice(0, 10);
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
       } catch (e) {
-        console.error('Failed to save search history to localStorage:', e);
+        console.error('Failed to save search history to sessionStorage:', e);
       }
       return updated;
     });
@@ -74,7 +74,7 @@ export const SellSimilarLauncher: React.FC = () => {
   const handleClearHistory = () => {
     setHistory([]);
     try {
-      localStorage.removeItem(STORAGE_KEY);
+      sessionStorage.removeItem(STORAGE_KEY);
     } catch (e) {
       console.error('Failed to clear search history:', e);
     }
