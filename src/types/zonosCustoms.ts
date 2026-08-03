@@ -199,3 +199,57 @@ export interface EbaySellerAccount {
   isSelectedForFetch: boolean;   // 注文取得対象フラグ
   safeRefId: string;             // トークンを含まない安全な参照ID (e.g., "ref_acc_01")
 }
+
+// Ver.1.6 Listing Transfer Types (UI Only)
+export interface EbayListingTransferItem {
+  itemId: string;
+  sku: string;
+  title: string;
+  price: number;
+  currency: string;
+  quantity: number;
+  category: string;
+  imageUrl: string;
+  isSelected: boolean;
+}
+
+export interface ListingTransferSettings {
+  sourceAccountId: string;
+  destinationAccountId: string;
+  transferMode: 'move';
+  listingVisibility: 'draft' | 'active';
+}
+
+// Ver.1.7 Country Sales & Compliance Types (Spec #2 & #10)
+export type ComplianceStatus =
+  | 'Available'
+  | 'Compliance review required'
+  | 'Information incomplete'
+  | 'Confirmed by user'
+  | 'Expired'
+  | 'Disabled';
+
+export interface CountryComplianceRecord {
+  countryCode: string;           // ISO Alpha-2 (e.g. "US", "CA", "AU", "DE", "FR", "ES")
+  countryName: string;           // 国名 (e.g. "United States", "Germany")
+  isSalesEnabled: boolean;       // 販売許可フラグ
+  status: ComplianceStatus;      // コンプライアンスステータス
+  requiredRegistrations: string[]; // 必要な登録・認証項目 (e.g. ["LUCID Packaging Register"])
+  registrationNumber?: string;   // 登録番号 / LUCID番号
+  packagingProvider?: string;    // 包装システム事業者名
+  contractRefNumber?: string;    // 契約/参照番号
+  validFromDate?: string;        // 契約開始日
+  validUntilDate?: string;       // 契約終了/更新日
+  evidenceConfirmedAt?: string;  // 証拠確認日時
+  evidenceConfirmedByUser: boolean; // 証拠確認チェックボックス
+  notes?: string;                // ユーザーメモ
+}
+
+export interface DestinationShippingCost {
+  countryCode: string;
+  countryName: string;
+  shippingService: string;
+  shippingCost: number;
+  currency: string;
+  handlingTimeDays: number;
+}

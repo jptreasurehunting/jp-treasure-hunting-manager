@@ -2694,6 +2694,145 @@ body {
   border-color: rgba(100, 116, 139, 0.4) !important;
 }
 
+/* ==========================================================================
+   Zonos Customs Ver 1.6 スタイル (eBay リスティング転記・移行 UI)
+   ========================================================================== */
+.main-tab-nav-bar {
+  padding: 0.25rem 0.5rem;
+  background: rgba(15, 23, 42, 0.9);
+  border-radius: var(--radius-md);
+}
+
+.tab-nav-btn {
+  background: rgba(30, 41, 59, 0.6);
+  color: var(--text-muted);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.55rem 1.1rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.tab-nav-btn:hover {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.tab-nav-btn.active {
+  background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+  color: #ffffff;
+  border-color: #3b82f6;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+.segment-toggle-group {
+  display: flex;
+  background: rgba(15, 23, 42, 0.8);
+  padding: 0.25rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  gap: 0.25rem;
+  margin-top: 0.35rem;
+}
+
+.segment-btn {
+  flex: 1;
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  padding: 0.45rem 0.75rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.segment-btn:hover {
+  color: #ffffff;
+}
+
+.segment-btn.active {
+  background: rgba(59, 130, 246, 0.25);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.4);
+}
+
+.transfer-confirm-modal-card {
+  max-width: 680px !important;
+}
+
+.transfer-items-mini-list {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  padding: 0.5rem;
+}
+
+/* ==========================================================================
+   Zonos Customs Ver 1.7 スタイル (国別販売・法規制コンプライアンス管理)
+   ========================================================================== */
+.compliance-modal-card {
+  max-width: 720px !important;
+}
+
+.duplicate-warning-modal-card {
+  max-width: 640px !important;
+}
+
+.legal-disclaimer-banner {
+  border-left: 4px solid #f59e0b;
+  padding: 0.75rem 1rem;
+}
+
+.country-select-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  padding: 0.5rem 0.85rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  text-align: left;
+}
+
+.country-select-pill:hover {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.country-select-pill.active {
+  background: rgba(59, 130, 246, 0.25);
+  border-color: #3b82f6;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.2);
+}
+
+.country-select-pill.locked {
+  background: rgba(15, 23, 42, 0.9);
+  border-color: rgba(239, 68, 68, 0.3);
+  opacity: 0.85;
+}
+
+.lock-reason-tag {
+  font-size: 0.72rem;
+  color: #f87171;
+  margin-top: 0.2rem;
+}
+
+.available-tag {
+  font-size: 0.72rem;
+  color: #34d399;
+  margin-top: 0.2rem;
+}
+
+
+
 
 
 
