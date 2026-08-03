@@ -44,6 +44,9 @@ export interface ZonosCustomsDeclaration {
   fulfillmentStatus?: string;         // 発送状態
   importedAt?: string;                // eBayデータ取込日時
   importSource?: 'mock' | 'live_api'; // 取込元
+  // Ver.1.5 Account reference metadata
+  selectedAccountId?: string;
+  selectedAccountDisplayName?: string;
 }
 
 export interface ShippingSnapshotItem {
@@ -91,6 +94,19 @@ export interface ShippingSnapshot {
   copiedAt: string;
   importedAt?: string;
   importSource?: string;
+  // Ver.1.4 Transfer attributes
+  transferStatus?: '未転記' | '転記中' | '転記完了' | '中断';
+  transferStartedAt?: string;
+  transferCompletedAt?: string;
+  transferMode?: 'clipboard' | 'browser_assist';
+  transferredItemsCount?: number;
+  zonosConfirmationNumber?: string;
+  interruptionHistory?: string[];
+  // Ver.1.5 eBay Account Reference attributes
+  ebayAccountId?: string;
+  ebayAccountDisplayName?: string;
+  ebayUsername?: string;
+  fetchSourceAccount?: string;
 }
 
 export interface AuditLogEntry {
@@ -117,14 +133,12 @@ export interface CustomsValidationStatus {
   originMissing: boolean;
   valueInvalid: boolean;
   currencyMismatch: boolean;
-  // Ver.1.1 Shipping Condition fields
   isDomesticShipment: boolean;
   carrierInvalid: boolean;
   originInvalid: boolean;
   destinationMissing: boolean;
   shippingMethodMissing: boolean;
   shippingConditionsValid: boolean;
-  // Ver.1.3 Weight warnings
   weightMissing: boolean;
 }
 
@@ -154,4 +168,34 @@ export interface EbayOrderPayload {
   fulfillmentStatus: string;
   items: EbayOrderItemPayload[];
   importSource: 'mock' | 'live_api';
+}
+
+// Ver.1.4 Transfer Session & Check Types
+export interface TransferSession {
+  sessionId: string;
+  orderId: string;
+  status: 'in_progress' | 'interrupted' | 'completed';
+  startedAt: string;
+  completedAt?: string;
+  interruptedAt?: string;
+  interruptedReason?: string;
+  completedItemsCount: number;
+  totalItemsCount: number;
+  currentItemIndex: number;
+  transferMode: 'clipboard' | 'browser_assist';
+  zonosConfirmationNumber?: string;
+  completedFieldKeys: string[];
+}
+
+// Ver.1.5 Multi-eBay Seller Account Types (Zero secrets stored)
+export interface EbaySellerAccount {
+  id: string;                    // 内部アカウントID (e.g., "acc_01")
+  displayName: string;           // 表示名 (e.g., "メインアカウント", "Account 1")
+  ebayUsername: string;          // eBayユーザー名 (仮表示 "Account 1" ... "Account 10")
+  connectionStatus: 'unconnected' | 'prep_mode' | 'connected'; // 接続状態
+  lastAuthDate?: string;         // 最終認証日時
+  lastOrderFetchDate?: string;   // 最終注文取得日時
+  environment: 'Production';     // 本番環境 (固定)
+  isSelectedForFetch: boolean;   // 注文取得対象フラグ
+  safeRefId: string;             // トークンを含まない安全な参照ID (e.g., "ref_acc_01")
 }

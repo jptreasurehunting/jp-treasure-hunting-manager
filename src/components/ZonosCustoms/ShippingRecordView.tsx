@@ -123,6 +123,27 @@ export const ShippingRecordView: React.FC<ShippingRecordViewProps> = ({
           </div>
 
           <div className="meta-cell">
+            <span className="cell-label">Zonos転記状態 / Transfer Status</span>
+            <strong className="cell-value text-highlight">
+              {snapshot.transferStatus || '未転記'} ({snapshot.transferredItemsCount || 0} 品目完了)
+            </strong>
+          </div>
+
+          <div className="meta-cell">
+            <span className="cell-label">Zonos確認番号 / Zonos Confirm No.</span>
+            <strong className="cell-value font-mono text-highlight-gold">
+              {snapshot.zonosConfirmationNumber || '未登録'}
+            </strong>
+          </div>
+
+          <div className="meta-cell">
+            <span className="cell-label">注文取得元アカウント / Fetch Source Account</span>
+            <strong className="cell-value text-highlight">
+              {snapshot.ebayAccountDisplayName || snapshot.fetchSourceAccount || 'Account 1'} ({snapshot.ebayAccountId || 'acc_01'})
+            </strong>
+          </div>
+
+          <div className="meta-cell">
             <span className="cell-label">eBayデータ取込元 / Import Source</span>
             <span className="cell-value text-muted">{snapshot.importSource === 'live_api' ? '📡 Live API' : '⚡ モックデータ'} ({snapshot.importedAt || '-'})</span>
           </div>
