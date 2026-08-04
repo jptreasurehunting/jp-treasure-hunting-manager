@@ -21,8 +21,24 @@ import { evaluateSafetyGate, ACTION_NAME_MAP } from '../../services/safetyGateSe
 import { loadComplianceRecords } from '../../services/countryComplianceService';
 import { loadEbayAccounts } from '../../services/ebayAccountService';
 import { ComplianceBlockingModal } from './ComplianceBlockingModal';
+import { PrePurchaseReviewCard } from './PrePurchaseReviewCard';
+import { SalesPerformanceDashboard } from './SalesPerformanceDashboard';
+import { RuleIntelligenceDashboard } from './RuleIntelligenceDashboard';
+import { EbayDraftEditorCard } from './EbayDraftEditorCard';
+import { EbayPolicyManagerCard } from './EbayPolicyManagerCard';
+import { OrderFulfillmentManagerCard } from './OrderFulfillmentManagerCard';
+import { GoogleDriveManagerCard } from './GoogleDriveManagerCard';
+import { BrandAssetManagerCard } from '../BrandAsset/BrandAssetManagerCard';
+import { ProfitImpactSimulatorCard } from './ProfitImpactSimulatorCard';
+import { DecisionReplayViewerModal } from './DecisionReplayViewerModal';
+import { DecisionReplaySnapshot } from '../../types/safetyGate';
+import { loadDecisionReplaySnapshots } from '../../services/decisionReplayService';
 
-export const SafetyGateDashboard: React.FC = () => {
+interface SafetyGateDashboardProps {
+  onAddAuditLog?: (action: string, beforeState?: string, afterState?: string) => void;
+}
+
+export const SafetyGateDashboard: React.FC<SafetyGateDashboardProps> = ({ onAddAuditLog }) => {
   const accounts = loadEbayAccounts();
   const [inventoryItems, setInventoryItems] = useState<InventoryItemRecord[]>(loadInventoryItems());
   const [inventoryLogs, setInventoryLogs] = useState<InventoryAdjustmentLog[]>(loadInventoryLogs());
@@ -41,6 +57,11 @@ export const SafetyGateDashboard: React.FC = () => {
   // Modal State
   const [activeGateResult, setActiveGateResult] = useState<SafetyGateResult | null>(null);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+
+  // Decision Replay Modal State
+  const [replaySnapshots] = useState<DecisionReplaySnapshot[]>(loadDecisionReplaySnapshots());
+  const [activeReplaySnapshot, setActiveReplaySnapshot] = useState<DecisionReplaySnapshot | null>(null);
+  const [isReplayModalOpen, setIsReplayModalOpen] = useState<boolean>(false);
 
   // Stock Adjustment Form State
   const [adjustModalItem, setAdjustModalItem] = useState<InventoryItemRecord | null>(null);
@@ -115,6 +136,51 @@ export const SafetyGateDashboard: React.FC = () => {
       <div className="legal-disclaimer-banner card-sub-box border-amber-500/30 bg-amber-500/10 text-xs">
         ⚖️ <strong>案内告知 (Advisory Disclaimer):</strong> 「この機能は法令・販売・発送条件の確認を補助するものです。法令適合やeBayアカウント停止の完全な防止を保証するものではありません。」
       </div>
+
+      {/* SECTION 0: Phase 1 Pre-Purchase Compliance & Economics Review Card */}
+      <PrePurchaseReviewCard onAddAuditLog={onAddAuditLog} />
+
+      {/* SECTION 0.5: Phase 2 Sales Performance Collection & Store Learning Dashboard */}
+      <SalesPerformanceDashboard onAddAuditLog={onAddAuditLog} />
+
+      {/* SECTION 0.8: Phase 2.5 Rule Change Intelligence & Remediation Dashboard */}
+      <RuleIntelligenceDashboard onAddAuditLog={onAddAuditLog} />
+
+      {/* SECTION 0.85: Phase 2.5 Profit Impact Simulator */}
+      <ProfitImpactSimulatorCard />
+
+      {/* SECTION 0.88: Phase 4.2 Decision Replay Viewer */}
+      <div className="card-sub-box bg-slate-900 border-slate-700 flex justify-between items-center text-xs p-3 rounded">
+        <div>
+          <strong className="text-highlight">🔄 判定リプレイ &amp; 過去ルール比較 (Decision Replay Snapshots)</strong>
+          <p className="text-muted text-xs">過去の仕入れ時点の判定と現行ルールの差分を検証・リプレイ表示します。</p>
+        </div>
+        <button
+          type="button"
+          className="btn-secondary btn-sm"
+          onClick={() => {
+            if (replaySnapshots.length > 0) {
+              setActiveReplaySnapshot(replaySnapshots[0]);
+              setIsReplayModalOpen(true);
+            }
+          }}
+        >
+          🔍 最新スナップショットを表示 (ID: {replaySnapshots[0]?.id || 'N/A'})
+        </button>
+      </div>
+
+      {/* SECTION 0.9: Phase 3 Assisted Automated eBay Listing & Policy Manager */}
+      <EbayDraftEditorCard onAddAuditLog={onAddAuditLog} />
+      <EbayPolicyManagerCard />
+
+      {/* SECTION 1.5: Phase 4 Order Fulfillment & Shipping Gate */}
+      <OrderFulfillmentManagerCard onAddAuditLog={onAddAuditLog} />
+
+      {/* SECTION 1.8: Phase 4 Google Drive Photo Storage & OAuth 2.0 Integration */}
+      <GoogleDriveManagerCard onAddAuditLog={onAddAuditLog} />
+
+      {/* SECTION 1.9: Phase 4.1 Brand Asset Management & Safe SNS Commerce Preparation */}
+      <BrandAssetManagerCard onAddAuditLog={onAddAuditLog} />
 
       {/* SECTION 1: 11 Protected Actions Simulator & Safety Gate Checker */}
       <div className="card ebay-baseline-card">
@@ -430,6 +496,13 @@ export const SafetyGateDashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Decision Replay Modal */}
+      <DecisionReplayViewerModal
+        isOpen={isReplayModalOpen}
+        snapshot={activeReplaySnapshot}
+        onClose={() => setIsReplayModalOpen(false)}
+      />
     </div>
   );
 };

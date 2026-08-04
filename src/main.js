@@ -646,16 +646,18 @@ function initEventListeners() {
   const tabProfitCalculator = document.getElementById('tabProfitCalculator');
   const tabSellSimilar = document.getElementById('tabSellSimilar');
   const tabZonosCustoms = document.getElementById('tabZonosCustoms');
+  const tabBrandAsset = document.getElementById('tabBrandAsset');
 
   const pageProfitCalculator = document.getElementById('pageProfitCalculator');
   const pageSellSimilar = document.getElementById('pageSellSimilar');
   const pageZonosCustoms = document.getElementById('pageZonosCustoms');
+  const pageBrandAsset = document.getElementById('pageBrandAsset');
 
   const switchTab = (activeTab, activePage) => {
-    [tabProfitCalculator, tabSellSimilar, tabZonosCustoms].forEach(tab => {
+    [tabProfitCalculator, tabSellSimilar, tabZonosCustoms, tabBrandAsset].forEach(tab => {
       if (tab) tab.classList.remove('active');
     });
-    [pageProfitCalculator, pageSellSimilar, pageZonosCustoms].forEach(page => {
+    [pageProfitCalculator, pageSellSimilar, pageZonosCustoms, pageBrandAsset].forEach(page => {
       if (page) page.classList.add('hidden');
     });
 
@@ -671,6 +673,9 @@ function initEventListeners() {
   }
   if (tabZonosCustoms) {
     tabZonosCustoms.addEventListener('click', () => switchTab(tabZonosCustoms, pageZonosCustoms));
+  }
+  if (tabBrandAsset) {
+    tabBrandAsset.addEventListener('click', () => switchTab(tabBrandAsset, pageBrandAsset));
   }
 }
 

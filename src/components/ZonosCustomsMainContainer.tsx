@@ -4,6 +4,7 @@ import { AccountListingTransferView } from './ListingTransfer/AccountListingTran
 import { CountryComplianceManager } from './Compliance/CountryComplianceManager';
 import { DestinationShippingManagerCard } from './Compliance/DestinationShippingManagerCard';
 import { SafetyGateDashboard } from './SafetyGate/SafetyGateDashboard';
+import { BrandAssetManagerCard } from './BrandAsset/BrandAssetManagerCard';
 import { loadEbayAccounts } from '../services/ebayAccountService';
 import {
   loadComplianceRecords,
@@ -12,9 +13,10 @@ import {
   saveDestinationShippingRates
 } from '../services/countryComplianceService';
 import { CountryComplianceRecord, DestinationShippingCost, AuditLogEntry } from '../types/zonosCustoms';
+import { exportUnifiedAuditReportJSON } from '../services/unifiedExportService';
 
 export const ZonosCustomsMainContainer: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'validator' | 'transfer' | 'compliance' | 'safety_gate'>('safety_gate');
+  const [activeTab, setActiveTab] = useState<'validator' | 'transfer' | 'compliance' | 'safety_gate' | 'brand_assets'>('safety_gate');
   const [complianceRecords, setComplianceRecords] = useState<CountryComplianceRecord[]>(loadComplianceRecords());
   const [shippingRates, setShippingRates] = useState<DestinationShippingCost[]>(loadDestinationShippingRates());
 
@@ -64,7 +66,16 @@ export const ZonosCustomsMainContainer: React.FC = () => {
             <p className="text-xs text-slate-400">統合管理・出品転記・実在庫棚卸し・国別法規制コンプライアンス</p>
           </div>
         </div>
-        <span className="text-xs font-mono text-emerald-400 bg-slate-800 px-2 py-1 rounded border border-slate-700">Ver.1.8 Active</span>
+        <div className="flex items-center space-x-2">
+          <button
+            type="button"
+            className="btn-secondary btn-sm text-xs font-bold flex items-center gap-1"
+            onClick={() => exportUnifiedAuditReportJSON()}
+          >
+            📥 監査レポート出力 (.json)
+          </button>
+          <span className="text-xs font-mono text-emerald-400 bg-slate-800 px-2 py-1 rounded border border-slate-700 font-bold">Phase 5 Active</span>
+        </div>
       </div>
 
       {/* Top Application Navigation Tabs */}
@@ -76,6 +87,13 @@ export const ZonosCustomsMainContainer: React.FC = () => {
             onClick={() => setActiveTab('safety_gate')}
           >
             🛡️ 安全販売・法令・実在庫チェック (Ver.1.8)
+          </button>
+          <button
+            type="button"
+            className={`tab-nav-btn ${activeTab === 'brand_assets' ? 'active' : ''}`}
+            onClick={() => setActiveTab('brand_assets')}
+          >
+            🎨 ブランドアセット &amp; SNSコマース準備 (Phase 4.1)
           </button>
           <button
             type="button"
@@ -103,7 +121,9 @@ export const ZonosCustomsMainContainer: React.FC = () => {
 
       {/* Main Tab Content */}
       {activeTab === 'safety_gate' ? (
-        <SafetyGateDashboard />
+        <SafetyGateDashboard onAddAuditLog={handleAddAuditLog} />
+      ) : activeTab === 'brand_assets' ? (
+        <BrandAssetManagerCard onAddAuditLog={handleAddAuditLog} />
       ) : activeTab === 'validator' ? (
         <ZonosCustomsValidator />
       ) : activeTab === 'transfer' ? (
