@@ -2831,6 +2831,26 @@ body {
   margin-top: 0.2rem;
 }
 
+/* ==========================================================================
+   Zonos Customs Ver 1.8 スタイル (安全販売・法令・実在庫チェック)
+   ========================================================================== */
+.compliance-blocking-modal-card {
+  max-width: 740px !important;
+}
+
+.text-danger {
+  color: #f87171 !important;
+}
+
+.border-red-500\/30 {
+  border-color: rgba(239, 68, 68, 0.3) !important;
+}
+
+.bg-slate-950 {
+  background-color: #020617 !important;
+}
+
+
 
 
 
