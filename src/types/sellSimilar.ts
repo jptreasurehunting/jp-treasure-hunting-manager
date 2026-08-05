@@ -28,8 +28,9 @@ export interface SearchHistoryItem {
 export interface SearchResultState {
   query: string;
   detectedType: SearchInputType;
-  status: 'idle' | 'searching' | 'single_match' | 'multi_match' | 'no_match' | 'direct_item';
+  status: 'idle' | 'searching' | 'single_match' | 'multi_match' | 'no_match' | 'direct_item' | 'invalid_input';
   matchedListings: ActiveListing[];
   launchedItemId: string | null;
   message?: string;
+  validationError?: string;
 }
