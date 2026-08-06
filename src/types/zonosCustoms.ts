@@ -1,3 +1,5 @@
+export type MaterialSourceType = 'ebay' | 'inferred_listing' | 'inferred_photo' | 'manual';
+
 export interface ZonosCustomsItem {
   id: string;
   itemId?: string;           // eBay Item ID
@@ -15,8 +17,16 @@ export interface ZonosCustomsItem {
   countryOfOrigin: string;   // 原産国 (default "Japan")
   declaredValueCents: number; // 申告価格 (セント単位)
   declaredValue: number;      // 申告価格 ($表記)
-  isIncludedItem: boolean;    // 同梱品フラグ
+  
+  // Ver 2.0 Zonos Prepay Extensions
+  unitValueJpy?: number;      // JPY 単価
+  totalValueJpy?: number;     // JPY 小計
+  customsDescription?: string; // 英語税関用品名 (e.g., "PVC figure", "Paper sticky note")
+  materialSource?: MaterialSourceType; // 材質取得元
+  isIncludedItem: boolean;    // 同梱品 / おまけフラグ
   isSoldItem: boolean;        // 販売商品フラグ
+  isFreeGift?: boolean;       // おまけ商品フラグ
+  originWarning?: boolean;    // 原産国警告フラグ
   isEditedByUser?: boolean;   // 上書き防止用ユーザー編集フラグ
 }
 
@@ -32,8 +42,19 @@ export interface ZonosCustomsDeclaration {
   ebayTransactionValueCents: number;  // eBay取引金額 (セント単位)
   ebayTransactionValue: number;       // eBay取引金額 ($表記)
   currency: string;                   // 通貨 (e.g., "USD")
-  carrier: 'JAPAN_POST';              // 配送会社 (Ver.1.1は "JAPAN_POST" で固定)
-  originCountry: 'JP';                // 発送元国 ("JP" で固定)
+  
+  // Ver 2.0 Currency & JPY Declaration Total
+  exchangeRate?: number;              // JPY 為替レート (e.g. 155.20)
+  exchangeRateSource?: string;        // 為替レート取得元
+  exchangeRateTimestamp?: string;     // 為替レート取得日時
+  ebayTransactionValueJpy?: number;   // JPY 換算取引総額
+  regularItemsJpySubtotal?: number;   // 販売商品 JPY 小計
+  freeGiftsJpySubtotal?: number;      // おまけ JPY 小計
+  totalDeclaredJpyValue?: number;     // 最終申告 JPY 総額
+  jpyDifference?: number;             // JPY 差額 (必須: 0 JPY)
+
+  carrier: 'JAPAN_POST';              // 配送会社 ("JAPAN_POST" 固定)
+  originCountry: 'JP';                // 発送元国 ("JP" 固定)
   destinationCountry: string;         // 発送先国 (e.g., "United States (US)")
   shippingMethod: string;             // 配送方法 (e.g., "国際小包 船便")
   items: ZonosCustomsItem[];
@@ -44,7 +65,6 @@ export interface ZonosCustomsDeclaration {
   fulfillmentStatus?: string;         // 発送状態
   importedAt?: string;                // eBayデータ取込日時
   importSource?: 'mock' | 'live_api'; // 取込元
-  // Ver.1.5 Account reference metadata
   selectedAccountId?: string;
   selectedAccountDisplayName?: string;
 }
@@ -57,6 +77,10 @@ export interface ShippingSnapshotItem {
   quantity: number;
   countryOfOrigin: string;
   declaredValue: number;
+  unitValueJpy?: number;
+  totalValueJpy?: number;
+  customsDescription?: string;
+  materialSource?: MaterialSourceType;
   isIncludedItem: boolean;
   weightKg?: number;
   unitWeightGrams?: number;
@@ -73,28 +97,28 @@ export interface ShippingSnapshot {
   itemTitle?: string;
   ebayTransactionValue: number;
   currency: string;
-  carrier: string;            // 配送会社
-  shippingMethod: string;     // 配送方法 (最終選択)
-  recommendedShippingMethods?: string[]; // 配送方法候補一覧
-  originCountry: string;      // 発送元国
-  destinationCountry: string; // 発送先国
-  weightKg?: number;          // 重量 (kg)
-  totalItemsWeightGrams: number;     // 商品重量合計 (g)
-  packagingWeightGrams: number;      // 梱包材重量 (g)
-  totalPackagedWeightGrams: number;  // 梱包後総重量 (g)
-  weightUnit: string;                // 重量単位
-  weightSource: string;              // 重量取得元
-  imageUrl?: string;                 // 代表画像URL
-  customsDescription?: string;       // 代表 Customs Description
+  carrier: string;
+  shippingMethod: string;
+  recommendedShippingMethods?: string[];
+  originCountry: string;
+  destinationCountry: string;
+  weightKg?: number;
+  totalItemsWeightGrams: number;
+  packagingWeightGrams: number;
+  totalPackagedWeightGrams: number;
+  weightUnit: string;
+  weightSource: string;
+  imageUrl?: string;
+  customsDescription?: string;
   items: ShippingSnapshotItem[];
   totalDeclaredValue: number;
+  totalDeclaredJpyValue?: number;
   trackingNumber: string;
   shippingDate: string;
   confirmedAt: string;
   copiedAt: string;
   importedAt?: string;
   importSource?: string;
-  // Ver.1.4 Transfer attributes
   transferStatus?: '未転記' | '転記中' | '転記完了' | '中断';
   transferStartedAt?: string;
   transferCompletedAt?: string;
@@ -102,7 +126,6 @@ export interface ShippingSnapshot {
   transferredItemsCount?: number;
   zonosConfirmationNumber?: string;
   interruptionHistory?: string[];
-  // Ver.1.5 eBay Account Reference attributes
   ebayAccountId?: string;
   ebayAccountDisplayName?: string;
   ebayUsername?: string;
@@ -112,9 +135,9 @@ export interface ShippingSnapshot {
 export interface AuditLogEntry {
   id: string;
   timestamp: string;
-  action: string;      // 操作内容
-  beforeState?: string; // 変更前
-  afterState?: string;  // 変更後
+  action: string;
+  beforeState?: string;
+  afterState?: string;
 }
 
 export interface CustomsValidationStatus {
@@ -127,6 +150,14 @@ export interface CustomsValidationStatus {
   totalDeclaredValue: number;
   differenceCents: number;
   difference: number;
+  
+  // Ver 2.0 JPY Validation Flags
+  totalDeclaredJpyValue?: number;
+  jpyDifference?: number;
+  isJpyTotalMatched?: boolean;
+  isFreeGiftValueInvalid?: boolean;
+  hasZeroValueItem?: boolean;
+
   materialMissing: boolean;
   productTypeMissing: boolean;
   quantityInvalid: boolean;
@@ -142,7 +173,6 @@ export interface CustomsValidationStatus {
   weightMissing: boolean;
 }
 
-// Ver.1.2 & Ver.1.3 eBay Import Payload Types
 export interface EbayOrderItemPayload {
   itemId: string;
   title: string;
@@ -156,6 +186,8 @@ export interface EbayOrderItemPayload {
   imageUrl: string;
   derivedMaterial: string;
   derivedProductType: string;
+  materialSource?: MaterialSourceType;
+  knownFreeGifts?: Array<{ title: string; material: string; productType: string }>;
 }
 
 export interface EbayOrderPayload {
@@ -170,7 +202,6 @@ export interface EbayOrderPayload {
   importSource: 'mock' | 'live_api';
 }
 
-// Ver.1.4 Transfer Session & Check Types
 export interface TransferSession {
   sessionId: string;
   orderId: string;
@@ -187,20 +218,18 @@ export interface TransferSession {
   completedFieldKeys: string[];
 }
 
-// Ver.1.5 Multi-eBay Seller Account Types (Zero secrets stored)
 export interface EbaySellerAccount {
-  id: string;                    // 内部アカウントID (e.g., "acc_01")
-  displayName: string;           // 表示名 (e.g., "メインアカウント", "Account 1")
-  ebayUsername: string;          // eBayユーザー名 (仮表示 "Account 1" ... "Account 10")
-  connectionStatus: 'unconnected' | 'prep_mode' | 'connected'; // 接続状態
-  lastAuthDate?: string;         // 最終認証日時
-  lastOrderFetchDate?: string;   // 最終注文取得日時
-  environment: 'Production';     // 本番環境 (固定)
-  isSelectedForFetch: boolean;   // 注文取得対象フラグ
-  safeRefId: string;             // トークンを含まない安全な参照ID (e.g., "ref_acc_01")
+  id: string;
+  displayName: string;
+  ebayUsername: string;
+  connectionStatus: 'unconnected' | 'prep_mode' | 'connected';
+  lastAuthDate?: string;
+  lastOrderFetchDate?: string;
+  environment: 'Production';
+  isSelectedForFetch: boolean;
+  safeRefId: string;
 }
 
-// Ver.1.6 Listing Transfer Types (UI Only)
 export interface EbayListingTransferItem {
   itemId: string;
   sku: string;
@@ -220,7 +249,6 @@ export interface ListingTransferSettings {
   listingVisibility: 'draft' | 'active';
 }
 
-// Ver.1.7 Country Sales & Compliance Types (Spec #2 & #10)
 export type ComplianceStatus =
   | 'Available'
   | 'Compliance review required'
@@ -230,19 +258,19 @@ export type ComplianceStatus =
   | 'Disabled';
 
 export interface CountryComplianceRecord {
-  countryCode: string;           // ISO Alpha-2 (e.g. "US", "CA", "AU", "DE", "FR", "ES")
-  countryName: string;           // 国名 (e.g. "United States", "Germany")
-  isSalesEnabled: boolean;       // 販売許可フラグ
-  status: ComplianceStatus;      // コンプライアンスステータス
-  requiredRegistrations: string[]; // 必要な登録・認証項目 (e.g. ["LUCID Packaging Register"])
-  registrationNumber?: string;   // 登録番号 / LUCID番号
-  packagingProvider?: string;    // 包装システム事業者名
-  contractRefNumber?: string;    // 契約/参照番号
-  validFromDate?: string;        // 契約開始日
-  validUntilDate?: string;       // 契約終了/更新日
-  evidenceConfirmedAt?: string;  // 証拠確認日時
-  evidenceConfirmedByUser: boolean; // 証拠確認チェックボックス
-  notes?: string;                // ユーザーメモ
+  countryCode: string;
+  countryName: string;
+  isSalesEnabled: boolean;
+  status: ComplianceStatus;
+  requiredRegistrations: string[];
+  registrationNumber?: string;
+  packagingProvider?: string;
+  contractRefNumber?: string;
+  validFromDate?: string;
+  validUntilDate?: string;
+  evidenceConfirmedAt?: string;
+  evidenceConfirmedByUser: boolean;
+  notes?: string;
 }
 
 export interface DestinationShippingCost {

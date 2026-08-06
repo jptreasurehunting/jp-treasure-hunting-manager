@@ -15,8 +15,14 @@ import {
 import { CountryComplianceRecord, DestinationShippingCost, AuditLogEntry } from '../types/zonosCustoms';
 import { exportUnifiedAuditReportJSON } from '../services/unifiedExportService';
 
-export const ZonosCustomsMainContainer: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'validator' | 'transfer' | 'compliance' | 'safety_gate' | 'brand_assets'>('safety_gate');
+interface ZonosCustomsMainContainerProps {
+  initialSubTab?: 'validator' | 'transfer' | 'compliance' | 'safety_gate' | 'brand_assets';
+}
+
+export const ZonosCustomsMainContainer: React.FC<ZonosCustomsMainContainerProps> = ({
+  initialSubTab = 'validator'
+}) => {
+  const [activeTab, setActiveTab] = useState<'validator' | 'transfer' | 'compliance' | 'safety_gate' | 'brand_assets'>(initialSubTab);
   const [complianceRecords, setComplianceRecords] = useState<CountryComplianceRecord[]>(loadComplianceRecords());
   const [shippingRates, setShippingRates] = useState<DestinationShippingCost[]>(loadDestinationShippingRates());
 
@@ -60,10 +66,10 @@ export const ZonosCustomsMainContainer: React.FC = () => {
       {/* Top Main App Title Header */}
       <div className="main-app-header-bar flex items-center justify-between p-3 mb-3 bg-slate-900 border border-slate-700 rounded-md">
         <div className="flex items-center space-x-3">
-          <span className="text-xl">🏆</span>
+          <span className="text-xl">🛃</span>
           <div>
-            <h2 className="text-base font-bold text-white">JP Treasure Hunting Manager</h2>
-            <p className="text-xs text-slate-400">統合管理・出品転記・実在庫棚卸し・国別法規制コンプライアンス</p>
+            <h2 className="text-base font-bold text-white">Zonos Customs Manager (Ver.2.0)</h2>
+            <p className="text-xs text-slate-400">eBay注文情報・材質推定・為替換算から Zonos Prepay 用の正確な税関申告データを自動作成</p>
           </div>
         </div>
         <div className="flex items-center space-x-2">
@@ -74,13 +80,20 @@ export const ZonosCustomsMainContainer: React.FC = () => {
           >
             📥 監査レポート出力 (.json)
           </button>
-          <span className="text-xs font-mono text-emerald-400 bg-slate-800 px-2 py-1 rounded border border-slate-700 font-bold">Phase 5 Active</span>
+          <span className="text-xs font-mono text-emerald-400 bg-slate-800 px-2 py-1 rounded border border-slate-700 font-bold">Zonos Active</span>
         </div>
       </div>
 
       {/* Top Application Navigation Tabs */}
       <div className="main-tab-nav-bar card margin-bottom-md">
         <div className="flex items-center space-x-3 p-2 bg-slate-900 border-b border-slate-700 overflow-x-auto">
+          <button
+            type="button"
+            className={`tab-nav-btn ${activeTab === 'validator' ? 'active' : ''}`}
+            onClick={() => setActiveTab('validator')}
+          >
+            🛃 Zonos Prepay カスタム申告 (Ver.2.0)
+          </button>
           <button
             type="button"
             className={`tab-nav-btn ${activeTab === 'safety_gate' ? 'active' : ''}`}
@@ -94,13 +107,6 @@ export const ZonosCustomsMainContainer: React.FC = () => {
             onClick={() => setActiveTab('brand_assets')}
           >
             🎨 ブランドアセット &amp; SNSコマース準備 (Phase 4.1)
-          </button>
-          <button
-            type="button"
-            className={`tab-nav-btn ${activeTab === 'validator' ? 'active' : ''}`}
-            onClick={() => setActiveTab('validator')}
-          >
-            🛃 Zonos Prepay カスタム申告 (Ver.1.5)
           </button>
           <button
             type="button"
@@ -120,12 +126,12 @@ export const ZonosCustomsMainContainer: React.FC = () => {
       </div>
 
       {/* Main Tab Content */}
-      {activeTab === 'safety_gate' ? (
+      {activeTab === 'validator' ? (
+        <ZonosCustomsValidator />
+      ) : activeTab === 'safety_gate' ? (
         <SafetyGateDashboard onAddAuditLog={handleAddAuditLog} />
       ) : activeTab === 'brand_assets' ? (
         <BrandAssetManagerCard onAddAuditLog={handleAddAuditLog} />
-      ) : activeTab === 'validator' ? (
-        <ZonosCustomsValidator />
       ) : activeTab === 'transfer' ? (
         <AccountListingTransferView
           accounts={accounts}

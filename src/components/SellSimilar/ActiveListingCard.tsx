@@ -50,14 +50,14 @@ export const ActiveListingCard: React.FC<ActiveListingCardProps> = ({
       <div className="listing-action">
         <button
           type="button"
-          className="btn-sell-similar-launch"
+          className="btn-sell-similar-launch font-bold"
           onClick={() => onLaunch(listing.itemId, listing.title)}
-          title="この商品の類似出品画面を開きます"
+          title="Seller Hubの自社出品管理画面から安全に Sell Similar を起動します"
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
           </svg>
-          <span>Sell Similar</span>
+          <span>📦 Seller Hub で Sell Similar 起動</span>
         </button>
       </div>
     </div>

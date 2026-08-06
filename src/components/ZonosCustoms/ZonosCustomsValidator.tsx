@@ -1,108 +1,285 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   ZonosCustomsDeclaration,
   ZonosCustomsItem,
-  ShippingSnapshot,
-  AuditLogEntry,
   EbayOrderPayload,
-  TransferSession,
   CustomsValidationStatus,
   EbaySellerAccount
 } from '../../types/zonosCustoms';
 import {
   dollarsToCents,
-  reallocateDeclaredValues,
-  validateDeclaration,
-  formatZonosCustomsDescription
+  getExchangeRateInfo,
+  generateZonosCustomsDescription,
+  inferMaterialAndSource,
+  reallocateJpyDeclaredValues,
+  validateZonosPrepayDeclaration
 } from '../../utils/zonosCustomsValidation';
-import { getJapanPostRecommendations } from '../../services/japanPostRecommendationService';
 import { fetchEbayOrderData } from '../../services/ebayImportService';
-import {
-  runPreTransferCheck,
-  loadTransferSession,
-  saveTransferSession,
-  clearTransferSession
-} from '../../services/zonosTransferService';
 import {
   loadEbayAccounts,
   saveEbayAccounts
 } from '../../services/ebayAccountService';
+import {
+  exportPortableProjectJSON,
+  parseAndValidatePortableProjectJSON,
+  projectFileToDeclaration,
+  saveAutosaveDeclaration,
+  loadAutosaveDeclaration,
+  ZonosPortableProjectFile
+} from '../../services/zonosPortableProjectService';
 
 import { EbayAccountManager } from './EbayAccountManager';
 import { EbayOAuthPrepModal } from './EbayOAuthPrepModal';
-import { EbayImportBar } from './EbayImportBar';
-import { ImportPreviewModal } from './ImportPreviewModal';
-import { OverwriteConfirmModal, OverwriteMode } from './OverwriteConfirmModal';
-import { PackagingWeightCard } from './PackagingWeightCard';
-import { TransferCheckModal } from './TransferCheckModal';
-import { TransferWizardModal } from './TransferWizardModal';
-import { ResumeTransferModal } from './ResumeTransferModal';
 import { ZonosItemEditor } from './ZonosItemEditor';
-import { ShippingInfoCard } from './ShippingInfoCard';
-import { IncludedItemNoticeModal } from './IncludedItemNoticeModal';
-import { RulesModal } from './RulesModal';
-import { UnlockConfirmModal } from './UnlockConfirmModal';
 import { CopySuccessModal } from './CopySuccessModal';
-import { ShippingRecordView } from './ShippingRecordView';
-import { AuditLogView } from './AuditLogView';
+import { OverwriteConfirmModal } from './OverwriteConfirmModal';
+import { SecondComputerSetupGuide } from './SecondComputerSetupGuide';
+import { SystemDiagnosticsChecklist } from './SystemDiagnosticsChecklist';
+import { RefetchComparisonModal } from './RefetchComparisonModal';
 
 export const ZonosCustomsValidator: React.FC = () => {
-  // Ver.1.5 Multi-eBay Account State (10 slots)
+  // Multi-eBay Account State
   const [ebayAccounts, setEbayAccounts] = useState<EbaySellerAccount[]>(loadEbayAccounts());
   const [selectedAccountId, setSelectedAccountId] = useState<string>('acc_01');
   const [prepModalAccount, setPrepModalAccount] = useState<EbaySellerAccount | null>(null);
   const [isOAuthPrepOpen, setIsOAuthPrepOpen] = useState<boolean>(false);
 
-  // Declaration state starts empty (null) until an actual eBay order is fetched
+  // Search & Portable File States
+  const [searchInput, setSearchInput] = useState<string>('ORDER-2026-8801');
+  const [isImportLoading, setIsImportLoading] = useState<boolean>(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [plannedShipmentDate, setPlannedShipmentDate] = useState<string>('2026-08-13');
+  const [declarationNotes, setDeclarationNotes] = useState<string>('2026年8月13日 発送予定 Zonos Prepay 申告プロジェクト');
+  const [autosaveTime, setAutosaveTime] = useState<string | null>(null);
+
+  // Declaration state
   const [declaration, setDeclaration] = useState<ZonosCustomsDeclaration | null>(null);
 
-  // Active target eBay Account object
+  // Modal & Guide states
+  const [isCopyModalOpen, setIsCopyModalOpen] = useState<boolean>(false);
+  const [copySummary, setCopySummary] = useState<string>('');
+  const [isSetupGuideOpen, setIsSetupGuideOpen] = useState<boolean>(false);
+  const [isOverwriteModalOpen, setIsOverwriteModalOpen] = useState<boolean>(false);
+  const [pendingImportProject, setPendingImportProject] = useState<ZonosPortableProjectFile | null>(null);
+  const [isComparisonModalOpen, setIsComparisonModalOpen] = useState<boolean>(false);
+  const [latestFetchedOrder, setLatestFetchedOrder] = useState<EbayOrderPayload | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const activeAccount = useMemo(() => {
     return ebayAccounts.find((a) => a.id === selectedAccountId) || ebayAccounts[0];
   }, [ebayAccounts, selectedAccountId]);
 
-  // Calculate Total Items Weight & Total Packaged Weight safely
-  const totalItemsWeightGrams = useMemo(() => {
-    if (!declaration) return 0;
-    return declaration.items.reduce((acc, i) => acc + (i.subtotalWeightGrams || (i.unitWeightGrams * i.quantity) || 0), 0);
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 4500);
+  };
+
+  // Initial Autosave Recovery & Initial Order Load
+  useEffect(() => {
+    const { declaration: savedDecl, timestamp } = loadAutosaveDeclaration();
+    if (savedDecl) {
+      setDeclaration(savedDecl);
+      setAutosaveTime(timestamp);
+    } else {
+      handleFetchEbayOrder('ORDER-2026-8801');
+    }
+  }, []);
+
+  // Autosave to localStorage on Declaration Update
+  useEffect(() => {
+    if (declaration) {
+      saveAutosaveDeclaration(declaration);
+      setAutosaveTime(new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }));
+    }
   }, [declaration]);
 
-  const totalPackagedWeightGrams = useMemo(() => {
-    if (!declaration) return 0;
-    return totalItemsWeightGrams + (declaration.packagingWeightGrams || 0);
-  }, [declaration, totalItemsWeightGrams]);
+  // Handle Account Name Update
+  const handleUpdateDisplayName = (accountId: string, newDisplayName: string) => {
+    const updated = ebayAccounts.map((a) => (a.id === accountId ? { ...a, displayName: newDisplayName } : a));
+    setEbayAccounts(updated);
+    saveEbayAccounts(updated);
+    showToast(`アカウント名を「${newDisplayName}」に更新しました`);
+  };
 
-  // Snapshot & Audit Log States
-  const [shippingSnapshots, setShippingSnapshots] = useState<ShippingSnapshot[]>([]);
-  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([
-    {
-      id: 'log-1',
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      action: '画面初期表示',
-      afterState: 'eBay注文データ未読み込み (待機中 / 10アカウント枠ロード完了)'
+  const handleDisconnectAccount = (accountId: string) => {
+    const updated = ebayAccounts.map((a) =>
+      a.id === accountId ? { ...a, connectionStatus: 'unconnected' as const, lastAuthDate: undefined } : a
+    );
+    setEbayAccounts(updated);
+    saveEbayAccounts(updated);
+    showToast('アカウント接続を解除しました');
+  };
+
+  // Handle Fetching eBay Order Data with Account Verification
+  const handleFetchEbayOrder = async (queryStr?: string) => {
+    const query = (queryStr || searchInput).trim();
+    if (!query) {
+      showToast('⚠️ eBay注文番号、Item ID、またはURLを入力してください。');
+      return;
     }
-  ]);
 
-  // eBay Import States
-  const [isImportLoading, setIsImportLoading] = useState<boolean>(false);
-  const [pendingPayload, setPendingPayload] = useState<EbayOrderPayload | null>(null);
-  const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(false);
-  const [isOverwriteOpen, setIsOverwriteOpen] = useState<boolean>(false);
+    setIsImportLoading(true);
+    try {
+      const payload = await fetchEbayOrderData(query, selectedAccountId);
+      if (payload) {
+        if (declaration) {
+          // If declaration already exists from portable import, open side-by-side comparison modal!
+          setLatestFetchedOrder(payload);
+          setIsComparisonModalOpen(true);
+        } else {
+          applyOrderPayloadToDeclaration(payload);
+          showToast(`✅ eBay注文データ (${payload.orderId}) を取得しました！`);
+        }
+      } else {
+        showToast('⚠️ 該当するeBay注文データを検出できませんでした。');
+      }
+    } catch (e) {
+      console.error('Failed to fetch eBay order:', e);
+      showToast('❌ eBayデータの取得中にエラーが発生しました。');
+    } finally {
+      setIsImportLoading(false);
+    }
+  };
 
-  // Ver.1.4 Transfer States
-  const [activeTransferSession, setActiveTransferSession] = useState<TransferSession | null>(null);
-  const [isTransferCheckOpen, setIsTransferCheckOpen] = useState<boolean>(false);
-  const [isTransferWizardOpen, setIsTransferWizardOpen] = useState<boolean>(false);
-  const [isResumeModalOpen, setIsResumeModalOpen] = useState<boolean>(false);
+  // Transform Order Payload into Ver 2.0 Zonos Prepay Declaration
+  const applyOrderPayloadToDeclaration = (payload: EbayOrderPayload) => {
+    const currency = payload.currency || 'USD';
+    const { rate, source, timestamp } = getExchangeRateInfo(currency);
+    const targetJpyTotal = Math.round(payload.ebayTransactionValue * rate);
 
-  // Modal States
-  const [isNoticeOpen, setIsNoticeOpen] = useState<boolean>(false);
-  const [isRulesOpen, setIsRulesOpen] = useState<boolean>(false);
-  const [isUnlockOpen, setIsUnlockOpen] = useState<boolean>(false);
-  const [isCopySuccessOpen, setIsCopySuccessOpen] = useState<boolean>(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+    const items: ZonosCustomsItem[] = [];
 
-  // Real-time Validation Result
+    payload.items.forEach((pItem, pIdx) => {
+      const { material, productType, materialSource } = inferMaterialAndSource(pItem.title, pItem.derivedMaterial);
+      const desc = generateZonosCustomsDescription(pItem.title, material, productType);
+
+      items.push({
+        id: `item-${Date.now()}-${pIdx}`,
+        itemId: pItem.itemId,
+        title: pItem.title,
+        imageUrl: pItem.imageUrl,
+        unitWeightGrams: pItem.unitWeightGrams || 250,
+        subtotalWeightGrams: (pItem.unitWeightGrams || 250) * Math.max(1, pItem.quantity),
+        weightKg: ((pItem.unitWeightGrams || 250) / 1000),
+        weightUnit: 'g',
+        weightSource: pItem.weightSource || '推定',
+        isWeightEstimated: true,
+        material,
+        productType,
+        customsDescription: desc,
+        materialSource,
+        quantity: Math.max(1, pItem.quantity),
+        countryOfOrigin: 'Japan',
+        declaredValueCents: dollarsToCents(pItem.actualPrice),
+        declaredValue: pItem.actualPrice,
+        unitValueJpy: Math.round((pItem.actualPrice * rate) / Math.max(1, pItem.quantity)),
+        totalValueJpy: Math.round(pItem.actualPrice * rate),
+        isIncludedItem: false,
+        isSoldItem: true,
+        isFreeGift: false,
+        originWarning: false
+      });
+
+      if (pItem.knownFreeGifts && pItem.knownFreeGifts.length > 0) {
+        pItem.knownFreeGifts.forEach((gift, gIdx) => {
+          const giftDesc = generateZonosCustomsDescription(gift.title, gift.material, gift.productType);
+          items.push({
+            id: `gift-${Date.now()}-${pIdx}-${gIdx}`,
+            itemId: pItem.itemId,
+            title: `[おまけ] ${gift.title}`,
+            imageUrl: pItem.imageUrl,
+            unitWeightGrams: 50,
+            subtotalWeightGrams: 50,
+            weightKg: 0.05,
+            weightUnit: 'g',
+            weightSource: '推定',
+            material: gift.material,
+            productType: gift.productType,
+            customsDescription: giftDesc,
+            materialSource: 'inferred_listing',
+            quantity: 1,
+            countryOfOrigin: 'Japan',
+            declaredValueCents: 100,
+            declaredValue: 1.0,
+            unitValueJpy: 200,
+            totalValueJpy: 200,
+            isIncludedItem: true,
+            isSoldItem: false,
+            isFreeGift: true,
+            originWarning: false
+          });
+        });
+      }
+    });
+
+    const rawDecl: ZonosCustomsDeclaration = {
+      orderId: payload.orderId,
+      itemId: payload.items[0]?.itemId,
+      title: payload.items[0]?.title,
+      imageUrl: payload.items[0]?.imageUrl,
+      weightKg: 0.35,
+      totalItemsWeightGrams: 300,
+      packagingWeightGrams: 150,
+      totalPackagedWeightGrams: 450,
+      ebayTransactionValueCents: dollarsToCents(payload.ebayTransactionValue),
+      ebayTransactionValue: payload.ebayTransactionValue,
+      currency: payload.currency,
+      exchangeRate: rate,
+      exchangeRateSource: source,
+      exchangeRateTimestamp: timestamp,
+      ebayTransactionValueJpy: targetJpyTotal,
+      carrier: 'JAPAN_POST',
+      originCountry: 'JP',
+      destinationCountry: payload.destinationCountry || 'United States (US)',
+      shippingMethod: '国際小包 船便',
+      items,
+      declarationLocked: false,
+      confirmedAt: new Date().toISOString(),
+      orderDate: payload.orderDate,
+      paymentStatus: payload.paymentStatus,
+      fulfillmentStatus: payload.fulfillmentStatus,
+      importedAt: new Date().toLocaleTimeString(),
+      importSource: payload.importSource,
+      selectedAccountId,
+      selectedAccountDisplayName: activeAccount.displayName
+    };
+
+    const reallocated = reallocateJpyDeclaredValues(rawDecl);
+    setDeclaration(reallocated);
+  };
+
+  // Re-calculate & Auto-Generate Customs Declarations
+  const handleAutoGenerateCustoms = () => {
+    if (!declaration) return;
+    const updatedItems = declaration.items.map((item) => {
+      const { material, productType, materialSource } = inferMaterialAndSource(item.title || '', item.material);
+      const desc = generateZonosCustomsDescription(item.title || '', material, productType);
+      return {
+        ...item,
+        material,
+        productType,
+        customsDescription: desc,
+        materialSource: item.materialSource === 'manual' ? 'manual' : materialSource
+      };
+    });
+
+    const updated = reallocateJpyDeclaredValues({
+      ...declaration,
+      items: updatedItems
+    });
+    setDeclaration(updated);
+    showToast('✨ 申告内容（英文品名・材質・価格配分）を自動作成しました！');
+  };
+
+  const handleRecalculate = () => {
+    if (!declaration) return;
+    const updated = reallocateJpyDeclaredValues(declaration);
+    setDeclaration(updated);
+    showToast('🔄 申告価格の再計算を完了しました！');
+  };
+
+  // Validation Status
   const validationStatus: CustomsValidationStatus = useMemo(() => {
     if (!declaration) {
       return {
@@ -115,6 +292,11 @@ export const ZonosCustomsValidator: React.FC = () => {
         totalDeclaredValue: 0,
         differenceCents: 0,
         difference: 0,
+        totalDeclaredJpyValue: 0,
+        jpyDifference: 0,
+        isJpyTotalMatched: false,
+        isFreeGiftValueInvalid: false,
+        hasZeroValueItem: false,
         materialMissing: false,
         productTypeMissing: false,
         quantityInvalid: false,
@@ -124,1033 +306,556 @@ export const ZonosCustomsValidator: React.FC = () => {
         isDomesticShipment: false,
         carrierInvalid: false,
         originInvalid: false,
-        destinationMissing: true,
-        shippingMethodMissing: true,
+        destinationMissing: false,
+        shippingMethodMissing: false,
         shippingConditionsValid: false,
         weightMissing: false
       };
     }
-    return validateDeclaration(declaration);
+    return validateZonosPrepayDeclaration(declaration);
   }, [declaration]);
 
-  // Helper for adding Audit Log
-  const addAuditLog = (action: string, beforeState?: string, afterState?: string) => {
-    const newEntry: AuditLogEntry = {
-      id: `log-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      action,
-      beforeState,
-      afterState
-    };
-    setAuditLogs((prev) => [newEntry, ...prev]);
-  };
-
-  // Ver.1.5 Account Handlers
-  const handleSelectAccount = (accountId: string) => {
-    const target = ebayAccounts.find((a) => a.id === accountId);
-    if (!target) return;
-    const oldTarget = activeAccount;
-    setSelectedAccountId(accountId);
-
-    const updatedAccounts = ebayAccounts.map((a) => ({
-      ...a,
-      isSelectedForFetch: a.id === accountId
-    }));
-    setEbayAccounts(updatedAccounts);
-    saveEbayAccounts(updatedAccounts);
-
-    addAuditLog('注文取得対象を変更', oldTarget.displayName, target.displayName);
-    showToast(`注文取得対象を [${target.displayName}] に変更しました`);
-  };
-
-  const handleUpdateDisplayName = (accountId: string, newDisplayName: string) => {
-    const target = ebayAccounts.find((a) => a.id === accountId);
-    const oldName = target ? target.displayName : '';
-
-    const updated = ebayAccounts.map((a) =>
-      a.id === accountId ? { ...a, displayName: newDisplayName } : a
-    );
-    setEbayAccounts(updated);
-    saveEbayAccounts(updated);
-    addAuditLog('表示名を変更', oldName, newDisplayName);
-    showToast(`アカウント表示名を [${newDisplayName}] に変更しました`);
-  };
-
-  const handleOpenConnectPrep = (account: EbaySellerAccount) => {
-    setPrepModalAccount(account);
-    setIsOAuthPrepOpen(true);
-    addAuditLog('接続準備を開始', undefined, `対象: ${account.displayName} (${account.id})`);
-  };
-
-  const handleCancelOAuthPrep = () => {
-    if (prepModalAccount) {
-      addAuditLog('接続をキャンセル', undefined, `対象: ${prepModalAccount.displayName}`);
-    }
-    setIsOAuthPrepOpen(false);
-    setPrepModalAccount(null);
-  };
-
-  const handleDisconnectAccount = (accountId: string) => {
-    const target = ebayAccounts.find((a) => a.id === accountId);
-    const updated = ebayAccounts.map((a) =>
-      a.id === accountId ? { ...a, connectionStatus: 'unconnected' as const } : a
-    );
-    setEbayAccounts(updated);
-    saveEbayAccounts(updated);
-    addAuditLog('接続解除', target?.displayName, '未接続');
-    showToast(`[${target?.displayName || accountId}] の接続を解除しました`);
-  };
-
-  // Check for interrupted session on mount / order change (Spec #15)
-  useEffect(() => {
+  // Handle Item Updates
+  const handleUpdateItem = (updatedItem: ZonosCustomsItem) => {
     if (!declaration) return;
-    const saved = loadTransferSession();
-    if (saved && saved.orderId === declaration.orderId && saved.status === 'interrupted') {
-      setActiveTransferSession(saved);
-      setIsResumeModalOpen(true);
-    }
-  }, [declaration?.orderId]);
-
-  // Packaging Weight Change Handler
-  const handlePackagingWeightChange = (grams: number) => {
-    if (!declaration || declaration.declarationLocked) return;
-    const oldPack = declaration.packagingWeightGrams;
-    const newPack = Math.max(0, grams);
-    const newTotalPackaged = totalItemsWeightGrams + newPack;
-
-    setDeclaration({
-      ...declaration,
-      packagingWeightGrams: newPack,
-      totalPackagedWeightGrams: newTotalPackaged
-    });
-
-    addAuditLog('梱包材重量を入力', `${oldPack}g`, `${newPack}g`);
-    addAuditLog('梱包後総重量を計算', undefined, `総重量: ${newTotalPackaged}g (${(newTotalPackaged / 1000).toFixed(2)}kg)`);
-  };
-
-  // eBay Data Ingestion Trigger
-  const handleFetchEbayData = async (orderIdInput: string, itemIdInput: string) => {
-    // Unconnected account safeguard check (Spec #3 & Spec #10 Test 2)
-    if (activeAccount.connectionStatus === 'unconnected') {
-      addAuditLog('未接続アカウントで注文取得を停止', activeAccount.displayName, '未接続のため処理中断');
-      alert('⚠️ このeBayアカウントはまだ接続されていません。アカウント管理画面で接続手続きを行ってください。');
-      return;
-    }
-
-    if (declaration && declaration.declarationLocked) {
-      alert('申告価格が確定中（ロック済み）です。解除してから再読み込みしてください。');
-      return;
-    }
-
-    setIsImportLoading(true);
-    if (orderIdInput.trim()) {
-      addAuditLog('eBay注文番号で検索', `アカウント: ${activeAccount.displayName}`, orderIdInput.trim());
-    } else if (itemIdInput.trim()) {
-      addAuditLog('Item IDで検索', `アカウント: ${activeAccount.displayName}`, itemIdInput.trim());
-    }
-
-    try {
-      const payload = await fetchEbayOrderData(orderIdInput, itemIdInput);
-      setPendingPayload(payload);
-      setIsImportLoading(false);
-
-      // Update account last fetch date
-      const nowStr = new Date().toLocaleString('ja-JP');
-      const updatedAccounts = ebayAccounts.map((a) =>
-        a.id === activeAccount.id ? { ...a, lastOrderFetchDate: nowStr } : a
-      );
-      setEbayAccounts(updatedAccounts);
-      saveEbayAccounts(updatedAccounts);
-
-      addAuditLog('eBayデータ読込成功', `取得元: ${activeAccount.displayName}`, `注文番号 ${payload.orderId} (${payload.items.length}件の品目)`);
-
-      const hasWeights = payload.items.some((i) => i.unitWeightGrams > 0);
-      if (hasWeights) {
-        addAuditLog('重量自動取得成功', undefined, `商品重量取得完了`);
-      } else {
-        addAuditLog('重量自動取得失敗', undefined, `実測値入力要請`);
-      }
-
-      addAuditLog('商品情報候補を生成', undefined, '材質・商品種類候補作成');
-
-      if (payload.items.some((i) => i.imageUrl)) {
-        addAuditLog('画像URL取得成功', undefined, '画像表示可能');
-      }
-
-      const hasUserEdits = declaration ? declaration.items.some((i) => i.isEditedByUser) : false;
-      if (hasUserEdits) {
-        setIsOverwriteOpen(true);
-      } else {
-        setIsPreviewOpen(true);
-      }
-    } catch (err: any) {
-      setIsImportLoading(false);
-      addAuditLog('eBayデータ読込失敗', `対象: ${activeAccount.displayName}`, err.message || 'データ取得エラー');
-      alert(`⚠️ ${err.message || '実際のeBay注文データを読み込めません。eBay API設定を確認してください。'}`);
-    }
-  };
-
-  // Overwrite Mode Chosen
-  const handleConfirmOverwriteChoice = (mode: OverwriteMode) => {
-    setIsOverwriteOpen(false);
-    if (mode === 'unedited_only') {
-      addAuditLog('未編集項目のみ更新', '編集保護適用', '未編集項目を更新');
-    } else if (mode === 'reload_all') {
-      addAuditLog('すべて再取得', '全リセット', 'eBay最新データで上書き');
-    }
-    setIsPreviewOpen(true);
-  };
-
-  // Apply Pending eBay Payload to Declaration
-  const handleApplyImportPayload = (mode: OverwriteMode = 'reload_all') => {
-    if (!pendingPayload) return;
-
-    setIsPreviewOpen(false);
-
-    const nowStr = new Date().toLocaleString('ja-JP');
-    const ebayCents = dollarsToCents(pendingPayload.ebayTransactionValue);
-
-    const newItems: ZonosCustomsItem[] = pendingPayload.items.map((item, idx) => {
-      const itemCents = dollarsToCents(item.actualPrice);
-      const isFirst = idx === 0;
-      const uGrams = item.unitWeightGrams || 0;
-      const subGrams = uGrams * item.quantity;
-      const kg = parseFloat((uGrams / 1000).toFixed(3));
-
-      return {
-        id: `sold-${item.itemId}-${idx}-${Date.now()}`,
-        itemId: item.itemId,
-        title: item.title,
-        imageUrl: item.imageUrl,
-        weightKg: item.weightKg || kg,
-        unitWeightGrams: uGrams,
-        subtotalWeightGrams: subGrams,
-        weightUnit: item.weightUnit || 'g',
-        weightSource: item.weightSource || (uGrams > 0 ? 'eBay API' : '未取得'),
-        isWeightEstimated: item.isWeightEstimated,
-        material: item.derivedMaterial,
-        productType: item.derivedProductType,
-        quantity: item.quantity,
-        countryOfOrigin: 'Japan',
-        declaredValueCents: itemCents,
-        declaredValue: item.actualPrice,
-        isIncludedItem: false,
-        isSoldItem: isFirst,
-        isEditedByUser: false
-      };
-    });
-
-    const sumItemsGrams = newItems.reduce((acc, i) => acc + i.subtotalWeightGrams, 0);
-    const defaultPackGrams = declaration ? (declaration.packagingWeightGrams || 200) : 200;
-    const totalPackGrams = sumItemsGrams + defaultPackGrams;
-
-    if (pendingPayload.items.length > 1) {
-      addAuditLog('複数商品を個別品目として追加', undefined, `${pendingPayload.items.length}件の品目を生成`);
-    }
-
-    const recs = getJapanPostRecommendations(pendingPayload.destinationCountry, totalPackGrams);
-    if (recs.length > 0) {
-      addAuditLog('配送方法候補を表示', undefined, `${recs.length}件の候補を提示`);
-    }
-
-    const firstItem = pendingPayload.items[0];
-
-    const updatedDecl: ZonosCustomsDeclaration = {
-      orderId: pendingPayload.orderId,
-      itemId: firstItem?.itemId,
-      title: firstItem?.title,
-      imageUrl: firstItem?.imageUrl,
-      weightKg: firstItem?.weightKg,
-      totalItemsWeightGrams: sumItemsGrams,
-      packagingWeightGrams: defaultPackGrams,
-      totalPackagedWeightGrams: totalPackGrams,
-      ebayTransactionValueCents: ebayCents,
-      ebayTransactionValue: pendingPayload.ebayTransactionValue,
-      currency: pendingPayload.currency,
-      carrier: 'JAPAN_POST',
-      originCountry: 'JP',
-      destinationCountry: pendingPayload.destinationCountry,
-      shippingMethod: declaration ? declaration.shippingMethod : '国際小包 船便',
-      orderDate: pendingPayload.orderDate,
-      paymentStatus: pendingPayload.paymentStatus,
-      fulfillmentStatus: pendingPayload.fulfillmentStatus,
-      importedAt: nowStr,
-      importSource: pendingPayload.importSource,
-      declarationLocked: false,
-      selectedAccountId: activeAccount.id,
-      selectedAccountDisplayName: activeAccount.displayName,
-      items: newItems
-    };
-
-    const reallocatedDecl = reallocateDeclaredValues(updatedDecl);
-    setDeclaration(reallocatedDecl);
-    setPendingPayload(null);
-    showToast('✓ eBay注文データを画面に読み込みました！');
-  };
-
-  // Destination Country Change Handler
-  const handleDestinationCountryChange = (val: string) => {
-    if (!declaration || declaration.declarationLocked) return;
-    const oldVal = declaration.destinationCountry;
-    setDeclaration({
-      ...declaration,
-      destinationCountry: val
-    });
-
-    const isDom = val.toLowerCase() === 'japan' || val.toLowerCase() === 'jp' || val.includes('日本');
-    if (isDom) {
-      addAuditLog('国内発送のため処理を停止', oldVal, val);
-    } else {
-      addAuditLog('発送先国を設定', oldVal, val);
-    }
-  };
-
-  // Shipping Method Change Handler
-  const handleShippingMethodChange = (val: string) => {
-    if (!declaration || declaration.declarationLocked) return;
-    const oldVal = declaration.shippingMethod;
-    setDeclaration({
-      ...declaration,
-      shippingMethod: val
-    });
-    addAuditLog('配送方法を選択', oldVal, val);
-  };
-
-  // Trigger notice modal before adding included item
-  const handleOpenAddNotice = () => {
-    if (!declaration || declaration.declarationLocked || validationStatus.isDomesticShipment) return;
-    setIsNoticeOpen(true);
-  };
-
-  // Confirm adding included item from notice modal
-  const handleConfirmAddIncludedItem = () => {
-    if (!declaration) return;
-    setIsNoticeOpen(false);
-
-    const newIncludedItem: ZonosCustomsItem = {
-      id: `inc-${Date.now()}`,
-      material: 'Paper',
-      productType: 'Card',
-      quantity: 1,
-      countryOfOrigin: 'Japan',
-      unitWeightGrams: 20,
-      subtotalWeightGrams: 20,
-      weightUnit: 'g',
-      weightSource: '手入力',
-      declaredValueCents: 100, // Default $1.00
-      declaredValue: 1.0,
-      isIncludedItem: true,
-      isSoldItem: false,
-      isEditedByUser: true
-    };
-
-    const updatedItems = [...declaration.items, newIncludedItem];
-
-    const updatedDecl = reallocateDeclaredValues({
+    const updatedItems = declaration.items.map((i) => (i.id === updatedItem.id ? updatedItem : i));
+    const reallocated = reallocateJpyDeclaredValues({
       ...declaration,
       items: updatedItems
     });
-
-    setDeclaration(updatedDecl);
-    addAuditLog('同梱品を追加', undefined, '同梱品 (Paper Card / 1.00 USD / 20g)');
+    setDeclaration(reallocated);
   };
 
-  // Item field update handler
-  const handleUpdateItem = (updatedItem: ZonosCustomsItem) => {
-    if (!declaration || declaration.declarationLocked) return;
-
-    const itemWithFlag = { ...updatedItem, isEditedByUser: true };
-    const items = declaration.items.map((i) => (i.id === itemWithFlag.id ? itemWithFlag : i));
-    const updatedDecl = reallocateDeclaredValues({
-      ...declaration,
-      items
-    });
-
-    setDeclaration(updatedDecl);
-    addAuditLog('商品情報を手動修正', undefined, `${updatedItem.material} ${updatedItem.productType} (${updatedItem.unitWeightGrams}g / $${updatedItem.declaredValue})`);
-  };
-
-  // Delete included item
   const handleDeleteItem = (id: string) => {
-    if (!declaration || declaration.declarationLocked) return;
-
-    const items = declaration.items.filter((i) => i.id !== id);
-    const updatedDecl = reallocateDeclaredValues({
-      ...declaration,
-      items
-    });
-
-    setDeclaration(updatedDecl);
-    addAuditLog('同梱品を削除');
-  };
-
-  // Lock declaration (申告価格を確定)
-  const handleLockDeclaration = () => {
     if (!declaration) return;
-    if (!validationStatus.canLock) {
-      if (validationStatus.isDomesticShipment) {
-        alert('国内発送にはZonos Prepayを使用できません。発送先国を確認してください。');
-      } else {
-        alert('申告内容または配送条件に不備があるため、確定できません。');
-      }
+    if (declaration.items.length <= 1) {
+      showToast('⚠️ 最低1つの申告項目が必要です。');
       return;
     }
-
-    const confirmedAtStr = new Date().toLocaleString('ja-JP');
-    setDeclaration({
+    const filtered = declaration.items.filter((i) => i.id !== id);
+    const reallocated = reallocateJpyDeclaredValues({
       ...declaration,
-      declarationLocked: true,
-      confirmedAt: confirmedAtStr
+      items: filtered
     });
-
-    addAuditLog('申告価格を確定', '未確定', `確定完了 (${confirmedAtStr})`);
-    addAuditLog('配送条件チェック完了', undefined, `${declaration.shippingMethod} / ${declaration.destinationCountry}`);
-    showToast('✓ 申告価格を確定しました。編集が保護されます。');
+    setDeclaration(reallocated);
+    showToast('申告項目を削除しました');
   };
 
-  // Unlock declaration confirmation trigger (確定を解除)
-  const handleUnlockDeclaration = () => {
-    setIsUnlockOpen(true);
-  };
-
-  const handleConfirmUnlock = () => {
+  const handleAddSplitProduct = () => {
     if (!declaration) return;
-    setIsUnlockOpen(false);
-    setDeclaration({
-      ...declaration,
-      declarationLocked: false
-    });
-
-    addAuditLog('確定を解除', '確定済み', '未確定');
-    showToast('確定を解除しました。編集が可能です。');
-  };
-
-  // Copy Zonos payload
-  const handleCopyZonosData = () => {
-    if (!declaration) return;
-    if (!validationStatus.canCopyZonos) {
-      if (validationStatus.isDomesticShipment) {
-        alert('国内発送にはZonos Prepayを使用できません。');
-      } else if (!declaration.declarationLocked) {
-        alert('申告価格を確定してからZonosへコピーしてください。');
-      } else {
-        alert('配送条件または申告内容を再確認してください。');
-      }
-      return;
-    }
-
-    const hasZeroWeight = totalPackagedWeightGrams <= 0;
-    if (hasZeroWeight) {
-      alert('⚠️ 梱包後総重量が0gです。正確な配送手続きのために実測値を入力してください。');
-    }
-
-    // Build Zonos Copy Text
-    const lines = declaration.items.map((item) => {
-      const desc = formatZonosCustomsDescription(item.material, item.productType);
-      return `${desc} | Qty: ${item.quantity} | Value: $${item.declaredValue.toFixed(2)} | Origin: Japan`;
-    });
-
-    const fullCopyPayload = lines.join('\n');
-    navigator.clipboard.writeText(fullCopyPayload);
-
-    const nowStr = new Date().toLocaleString('ja-JP');
-    const mainItem = declaration.items[0];
-    const recs = getJapanPostRecommendations(declaration.destinationCountry, totalPackagedWeightGrams);
-
-    // Create shippingSnapshot including Ver.1.5 eBay account metadata
-    const newSnapshot: ShippingSnapshot = {
-      id: `snap-${Date.now()}`,
-      version: shippingSnapshots.length + 1,
-      createdAt: nowStr,
-      orderId: declaration.orderId,
-      ebayOrderId: declaration.orderId,
-      ebayItemId: mainItem?.itemId || declaration.itemId,
-      itemTitle: mainItem?.title || declaration.title,
-      weightKg: (totalPackagedWeightGrams / 1000),
-      totalItemsWeightGrams: totalItemsWeightGrams,
-      packagingWeightGrams: declaration.packagingWeightGrams || 0,
-      totalPackagedWeightGrams: totalPackagedWeightGrams,
+    const newItem: ZonosCustomsItem = {
+      id: `item-${Date.now()}`,
+      title: '追加品目 / 分割商品 (例: Paper Sticky Note)',
+      material: 'Paper',
+      productType: 'Sticky Note',
+      customsDescription: 'Paper sticky note',
+      materialSource: 'manual',
+      quantity: 1,
+      countryOfOrigin: 'Japan',
+      declaredValueCents: 100,
+      declaredValue: 1.0,
+      unitValueJpy: 200,
+      totalValueJpy: 200,
+      unitWeightGrams: 50,
+      subtotalWeightGrams: 50,
       weightUnit: 'g',
-      weightSource: mainItem?.weightSource || '手入力',
-      ebayTransactionValue: declaration.ebayTransactionValue,
-      currency: declaration.currency,
-      carrier: 'JAPAN_POST',
-      shippingMethod: declaration.shippingMethod,
-      recommendedShippingMethods: recs.map((r) => `${r.method} (${r.reason})`),
-      originCountry: 'JP',
-      destinationCountry: declaration.destinationCountry,
-      imageUrl: mainItem?.imageUrl || declaration.imageUrl,
-      customsDescription: formatZonosCustomsDescription(mainItem?.material, mainItem?.productType),
-      items: declaration.items.map((i) => ({
-        itemId: i.itemId,
-        title: i.title,
-        material: i.material,
-        productType: i.productType,
-        quantity: i.quantity,
-        countryOfOrigin: 'Japan',
-        declaredValue: i.declaredValue,
-        isIncludedItem: i.isIncludedItem,
-        weightKg: i.weightKg,
-        unitWeightGrams: i.unitWeightGrams,
-        subtotalWeightGrams: i.subtotalWeightGrams
-      })),
-      totalDeclaredValue: validationStatus.totalDeclaredValue,
-      trackingNumber: '',
-      shippingDate: '',
-      confirmedAt: declaration.confirmedAt || nowStr,
-      copiedAt: nowStr,
-      importedAt: declaration.importedAt,
-      importSource: declaration.importSource,
-      transferStatus: '未転記',
-      transferredItemsCount: 0,
-      ebayAccountId: activeAccount.id,
-      ebayAccountDisplayName: activeAccount.displayName,
-      ebayUsername: activeAccount.ebayUsername,
-      fetchSourceAccount: activeAccount.displayName
+      weightSource: '手入力',
+      isIncludedItem: true,
+      isSoldItem: false,
+      isFreeGift: true
     };
-
-    setShippingSnapshots([newSnapshot, ...shippingSnapshots]);
-    addAuditLog('Zonosコピー条件を満たした', undefined, 'コピー実行');
-    addAuditLog('発送記録を作成', undefined, `発送記録 Ver.${newSnapshot.version} (取得元: ${activeAccount.displayName})`);
-    setIsCopySuccessOpen(true);
+    const reallocated = reallocateJpyDeclaredValues({
+      ...declaration,
+      items: [...declaration.items, newItem]
+    });
+    setDeclaration(reallocated);
+    showToast('➕ 新規品目を追加・分割しました');
   };
 
-  // Trigger Transfer Check (Zonos転記を開始)
-  const handleStartTransferTrigger = () => {
-    if (!declaration) return;
-    const completedSnapshot = shippingSnapshots.find(s => s.orderId === declaration.orderId && s.transferStatus === '転記完了');
-    if (completedSnapshot) {
-      addAuditLog('二重転記警告', undefined, `注文番号 ${declaration.orderId} は転記完了済み`);
-      const proceed = window.confirm(`⚠️ 警告: 注文番号 ${declaration.orderId} は既にZonos転記が完了しています。再転記を行いますか？`);
-      if (!proceed) return;
+  // PORTABLE PROJECT EXPORT & BACKUP
+  const handleExportPortableProject = () => {
+    if (!declaration) {
+      showToast('⚠️ エクスポートする申告データがありません。');
+      return;
+    }
+    exportPortableProjectJSON(declaration, validationStatus, plannedShipmentDate, declarationNotes);
+    showToast('💻 別PC用ポータブル申告プロジェクト (.json) をエクスポートしました！');
+  };
+
+  // PORTABLE PROJECT IMPORT HANDLER
+  const handleTriggerFileImport = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const file = files[0];
+    const reader = new FileReader();
+
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      const result = parseAndValidatePortableProjectJSON(content);
+
+      if (!result.success || !result.project) {
+        showToast(`❌ インポート失敗: ${result.error}`);
+        return;
+      }
+
+      setPendingImportProject(result.project);
+      setIsOverwriteModalOpen(true);
+    };
+
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleConfirmImport = () => {
+    if (!pendingImportProject) return;
+    const importedDecl = projectFileToDeclaration(pendingImportProject);
+    setDeclaration(importedDecl);
+    setPlannedShipmentDate(pendingImportProject.plannedShipmentDate || '2026-08-13');
+    setDeclarationNotes(pendingImportProject.notes || '');
+
+    // Account Mismatch Check
+    if (pendingImportProject.ebayAccountId !== selectedAccountId) {
+      showToast(`⚠️ 注意: インポートされたアカウント (${pendingImportProject.ebayAccountDisplayName}) と現在選択中のアカウント (${activeAccount.displayName}) が異なります。`);
+    } else {
+      showToast(`✅ ポータブル申告プロジェクト (${pendingImportProject.shipmentId}) を読み込みました！`);
     }
 
-    const checkResult = runPreTransferCheck(declaration, validationStatus);
+    setIsOverwriteModalOpen(false);
+    setPendingImportProject(null);
+  };
 
-    if (!checkResult.canStart) {
-      addAuditLog('転記前チェック失敗', undefined, `${checkResult.errors.length}件の不備あり`);
-      const missingDetails = checkResult.missingItems.map(m => `・${m.fieldName}: ${m.reason}`).join('\n');
-      alert(`❌ Zonos転記前チェックエラー:\n\n転記を開始できません。以下の不足項目を修正してください:\n\n${missingDetails}`);
+  // Copy Zonos Prepay Payload
+  const handleCopyZonosPayload = () => {
+    if (!declaration || !validationStatus.isValid) {
+      showToast('❌ 入力エラーまたは合計不一致があるためコピーできません。');
       return;
     }
 
-    addAuditLog('転記前チェック成功', undefined, '全12項目チェッククリア');
-    setIsTransferCheckOpen(true);
+    const rows = declaration.items.map((i) => {
+      const desc = i.customsDescription || generateZonosCustomsDescription(i.title || '', i.material, i.productType);
+      return `${desc}\t${i.quantity}\t${i.unitValueJpy || 0}\t${i.countryOfOrigin || 'Japan'}`;
+    }).join('\n');
+
+    const summaryStr = `--- Zonos Prepay Customs Copy ---\nOrder: ${declaration.orderId}\nShipment Date: ${plannedShipmentDate}\nTotal JPY: ${declaration.ebayTransactionValueJpy?.toLocaleString()} JPY\nRate: ${declaration.exchangeRate} JPY/${declaration.currency}\n\n[Customs Items]\nDescription\tQty\tUnit JPY\tOrigin\n${rows}`;
+
+    navigator.clipboard.writeText(summaryStr);
+    setCopySummary(summaryStr);
+    setIsCopyModalOpen(true);
+    showToast('📋 Zonos Prepay 用の申告データをクリップボードにコピーしました！');
   };
 
-  const handleConfirmStartTransfer = () => {
+  // Export CSV
+  const handleExportCSV = () => {
     if (!declaration) return;
-    setIsTransferCheckOpen(false);
 
-    const nowStr = new Date().toLocaleString('ja-JP');
-    const newSession: TransferSession = {
-      sessionId: `sess-${Date.now()}`,
-      orderId: declaration.orderId,
-      status: 'in_progress',
-      startedAt: nowStr,
-      completedItemsCount: 0,
-      totalItemsCount: declaration.items.length,
-      currentItemIndex: 0,
-      transferMode: 'clipboard',
-      completedFieldKeys: []
-    };
+    const headers = ['Shipment ID', 'Planned Date', 'Order ID', 'Item ID', 'Customs Description', 'Material', 'Product Type', 'Material Source', 'Qty', 'Unit Value JPY', 'Total Value JPY', 'Origin', 'Type'];
+    const rows = declaration.items.map((i) => [
+      `SHIP-${plannedShipmentDate.replace(/-/g, '')}`,
+      plannedShipmentDate,
+      declaration.orderId,
+      i.itemId || '',
+      `"${i.customsDescription || ''}"`,
+      `"${i.material || ''}"`,
+      `"${i.productType || ''}"`,
+      i.materialSource || 'manual',
+      i.quantity,
+      i.unitValueJpy || 0,
+      i.totalValueJpy || 0,
+      i.countryOfOrigin || 'Japan',
+      i.isFreeGift ? 'Free Gift' : 'Regular Item'
+    ]);
 
-    setActiveTransferSession(newSession);
-    saveTransferSession(newSession);
-    addAuditLog('Zonos転記を開始', undefined, `クリップボード方式 (全${declaration.items.length}品目)`);
-    setIsTransferWizardOpen(true);
+    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `Zonos_Customs_Declaration_${declaration.orderId}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    showToast('📊 申告CSVファイルをダウンロードしました！');
   };
 
-  const handleCompleteItemInWizard = (itemIndex: number) => {
-    if (!activeTransferSession || !declaration) return;
-    const updatedSession: TransferSession = {
-      ...activeTransferSession,
-      completedItemsCount: itemIndex + 1,
-      currentItemIndex: Math.min(itemIndex + 1, declaration.items.length - 1)
-    };
-    setActiveTransferSession(updatedSession);
-    saveTransferSession(updatedSession);
-    addAuditLog('品目転記完了', undefined, `品目 #${itemIndex + 1} 転記完了`);
-  };
-
-  const handleFinishAllWizard = (zonosConfirmationNo?: string) => {
-    if (!declaration) return;
-    setIsTransferWizardOpen(false);
-    clearTransferSession();
-
-    const nowStr = new Date().toLocaleString('ja-JP');
-    setActiveTransferSession(null);
-
-    if (shippingSnapshots.length > 0) {
-      const updatedSnapshots = shippingSnapshots.map((snap, idx) => {
-        if (idx === 0) {
-          return {
-            ...snap,
-            transferStatus: '転記完了' as const,
-            transferCompletedAt: nowStr,
-            transferredItemsCount: declaration.items.length,
-            zonosConfirmationNumber: zonosConfirmationNo || snap.zonosConfirmationNumber
-          };
-        }
-        return snap;
-      });
-      setShippingSnapshots(updatedSnapshots);
-    }
-
-    addAuditLog('全品目転記完了', undefined, `全${declaration.items.length}品目の転記完了`);
-    if (zonosConfirmationNo) {
-      addAuditLog('Zonos確認番号を保存', undefined, zonosConfirmationNo);
-    }
-
-    showToast('🎉 全品目のZonos Prepay転記が完了しました！');
-  };
-
-  const handleInterruptWizard = () => {
-    if (!activeTransferSession) {
-      setIsTransferWizardOpen(false);
-      return;
-    }
-
-    const nowStr = new Date().toLocaleString('ja-JP');
-    const interruptedSession: TransferSession = {
-      ...activeTransferSession,
-      status: 'interrupted',
-      interruptedAt: nowStr,
-      interruptedReason: 'ユーザーによる中断ボタンクリック'
-    };
-
-    setActiveTransferSession(interruptedSession);
-    saveTransferSession(interruptedSession);
-    addAuditLog('転記中断', undefined, `品目 #${interruptedSession.currentItemIndex + 1} で中断`);
-    setIsTransferWizardOpen(false);
-    showToast('⏸️ 転記作業を中断し進捗を保存しました。');
-  };
-
-  const handleResumeSession = () => {
-    setIsResumeModalOpen(false);
-    if (!activeTransferSession) return;
-    const resumedSession: TransferSession = {
-      ...activeTransferSession,
-      status: 'in_progress'
-    };
-    setActiveTransferSession(resumedSession);
-    saveTransferSession(resumedSession);
-    addAuditLog('転記再開', undefined, `品目 #${resumedSession.currentItemIndex + 1} から再開`);
-    setIsTransferWizardOpen(true);
-  };
-
-  const handleRestartSession = () => {
-    setIsResumeModalOpen(false);
-    clearTransferSession();
-    setActiveTransferSession(null);
-    addAuditLog('転記やり直し', undefined, 'セッションリセット');
-    handleStartTransferTrigger();
-  };
-
-  const handleUpdateSnapshotTracking = (snapshotId: string, trackingNumber: string, shippingDate: string) => {
-    setShippingSnapshots(
-      shippingSnapshots.map((snap) =>
-        snap.id === snapshotId ? { ...snap, trackingNumber, shippingDate } : snap
-      )
-    );
-    addAuditLog('発送記録の追跡情報を更新', undefined, `追跡番号: ${trackingNumber}`);
-  };
-
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
-  };
+  // Days remaining calculation
+  const daysRemaining = useMemo(() => {
+    if (!plannedShipmentDate) return 0;
+    const target = new Date(plannedShipmentDate).getTime();
+    const today = new Date('2026-08-06').getTime();
+    const diffTime = target - today;
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  }, [plannedShipmentDate]);
 
   return (
-    <div className="zonos-customs-validator-container">
-      {/* Top Announcement Banner */}
-      <div className="japan-post-banner card">
-        <div className="banner-content-row space-between">
-          <div className="banner-text-group">
-            <div className="banner-tag-badge">🇯🇵 日本郵便・海外発送専用</div>
-            <h2 className="banner-title-ja">Zonos Prepay 申告準備・品目バリデーション (Ver.1.5)</h2>
-            <p className="banner-desc-ja">
-              この画面は、日本から日本郵便で海外へ発送する荷物の Zonos Prepay 申告準備および複数eBayアカウント切替管理に使用します。
-            </p>
-            <p className="banner-desc-en text-muted text-xs">
-              For International Shipments via Japan Post — Multi-eBay account connection manager, packaging calculator, and safe Zonos Prepay transfer assistance.
-            </p>
-          </div>
+    <div className="zonos-customs-validator-container space-y-4 text-xs">
+      {/* Hidden File Input for JSON Project Import */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        accept=".json"
+        className="hidden"
+        onChange={handleFileChange}
+      />
 
-          <button
-            type="button"
-            className="btn-secondary btn-rule-modal"
-            onClick={() => setIsRulesOpen(true)}
-          >
-            📜 ルール
-          </button>
-        </div>
-      </div>
-
+      {/* Toast Notification */}
       {toastMessage && (
         <div className="toast-notification">
           <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* Ver.1.5 Multi-eBay Seller Account Management Screen (Spec #2) */}
-      <EbayAccountManager
-        accounts={ebayAccounts}
-        selectedAccountId={selectedAccountId}
-        onSelectAccount={handleSelectAccount}
-        onUpdateDisplayName={handleUpdateDisplayName}
-        onOpenConnectPrep={handleOpenConnectPrep}
-        onDisconnectAccount={handleDisconnectAccount}
-      />
-
-      {/* Domestic Shipping Warning Banner */}
-      {validationStatus.isDomesticShipment && (
-        <div className="domestic-warning-banner card">
-          <div className="warning-banner-body">
-            <span className="warning-icon-lg">🚫</span>
-            <div>
-              <h3 className="warning-title-text font-bold">国内発送にはZonos Prepayを使用できません</h3>
-              <p className="warning-desc-text">
-                発送先国が「日本（Japan）」に設定されています。国内発送の場合、関税申告・Zonos Prepayは不要です。発送先国を確認してください。
-              </p>
-            </div>
+      {/* Account Switcher Header */}
+      <div className="card p-3 bg-slate-900 border border-slate-700 rounded-lg flex justify-between items-center flex-wrap gap-2">
+        <div className="flex items-center space-x-3">
+          <span className="text-xl">🛃</span>
+          <div>
+            <h3 className="font-bold text-sm text-slate-100">Zonos Prepay カスタム申告モジュール (2台目PC移送 Ver.2.4)</h3>
+            <p className="text-[11px] text-slate-400">8月13日 本番発送対応 — 2台のPC間で申告プロジェクト (.json) を安全移送・点検します。</p>
           </div>
         </div>
-      )}
 
-      {/* Order & Transaction Basic Info Card with Account Selector */}
-      <div className="card ebay-baseline-card">
-        <div className="card-header space-between">
-          <h3 className="card-title text-base font-semibold">
-            注文・取引基本情報
-          </h3>
-          <span className="baseline-badge">対象: {activeAccount.displayName} ({activeAccount.ebayUsername})</span>
-        </div>
+        <div className="flex items-center space-x-2">
+          <button
+            type="button"
+            className="btn-secondary text-xs font-bold px-2.5 py-1 flex items-center gap-1 bg-slate-800 hover:bg-slate-700"
+            onClick={() => setIsSetupGuideOpen(true)}
+          >
+            ⚙️ 2台目PCセットアップ手順
+          </button>
 
-        <div className="card-body">
-          <EbayImportBar
-            initialOrderId={declaration?.orderId || ''}
-            initialItemId={declaration?.itemId || ''}
-            isLoading={isImportLoading}
+          <EbayAccountManager
             accounts={ebayAccounts}
             selectedAccountId={selectedAccountId}
-            onSelectAccount={handleSelectAccount}
-            onImport={handleFetchEbayData}
+            onSelectAccount={(id) => {
+              setSelectedAccountId(id);
+              showToast(`アカウント切替: ${ebayAccounts.find(a => a.id === id)?.displayName}`);
+            }}
+            onUpdateDisplayName={handleUpdateDisplayName}
+            onOpenConnectPrep={(acc) => {
+              setPrepModalAccount(acc);
+              setIsOAuthPrepOpen(true);
+            }}
+            onDisconnectAccount={handleDisconnectAccount}
           />
-
-          {declaration && (
-            <div className="grid-2col margin-top-md">
-              <div className="form-group">
-                <label className="form-label font-bold">注文番号 (Order ID)</label>
-                <input
-                  type="text"
-                  className="form-control readonly-input font-mono"
-                  value={declaration.orderId}
-                  disabled
-                  readOnly
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label font-bold">eBay取引金額</label>
-                <div className="input-currency-wrapper">
-                  <span className="currency-symbol">$</span>
-                  <input
-                    type="text"
-                    className="form-control currency-input readonly-input font-bold text-highlight-gold"
-                    value={`${declaration.ebayTransactionValue.toFixed(2)} ${declaration.currency}`}
-                    disabled
-                    readOnly
-                  />
-                </div>
-                <p className="field-hint">※ 割引後の実際の取引金額（申告価格合計の基準額）</p>
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
-      {/* Conditional Rendering: Empty State Card when no order is loaded */}
-      {!declaration ? (
-        <div className="card empty-declaration-card text-center padding-xl">
-          <div className="empty-state-icon text-3xl margin-bottom-xs">📥</div>
-          <h3 className="text-lg font-bold margin-bottom-xs">eBay注文データが読み込まれていません</h3>
-          <p className="text-muted text-sm margin-bottom-md">
-            対象アカウント [<strong>{activeAccount.displayName}</strong>] を確認し、上の「eBay注文データの自動読み込み」入力欄に注文番号またはItem IDを入力して「eBayから読み込む」ボタンを押してください。
-          </p>
-        </div>
-      ) : (
-        <>
-          {/* Shipping Information Card (発送情報) */}
-          <ShippingInfoCard
-            destinationCountry={declaration.destinationCountry}
-            shippingMethod={declaration.shippingMethod}
-            isLocked={declaration.declarationLocked}
-            onDestinationCountryChange={handleDestinationCountryChange}
-            onShippingMethodChange={handleShippingMethodChange}
-          />
-
-          {/* Packaging Weight Calculator & Recommendations Card */}
-          <PackagingWeightCard
-            totalItemsWeightGrams={totalItemsWeightGrams}
-            packagingWeightGrams={declaration.packagingWeightGrams || 0}
-            totalPackagedWeightGrams={totalPackagedWeightGrams}
-            destinationCountry={declaration.destinationCountry}
-            selectedShippingMethod={declaration.shippingMethod}
-            isLocked={declaration.declarationLocked}
-            onPackagingWeightChange={handlePackagingWeightChange}
-            onSelectShippingMethod={handleShippingMethodChange}
-          />
-
-          {/* Customs Line Items Editor Section */}
-          <div className="card items-section-card">
-            <div className="card-header space-between">
-              <h3 className="card-title text-lg font-bold">
-                申告品目一覧 ({declaration.items.length}件)
-              </h3>
-              {!declaration.declarationLocked && !validationStatus.isDomesticShipment && (
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={handleOpenAddNotice}
-                >
-                  + 同梱品を追加
-                </button>
-              )}
-            </div>
-
-            <div className="card-body">
-              <div className="items-editor-list">
-                {declaration.items.map((item, index) => (
-                  <ZonosItemEditor
-                    key={item.id}
-                    item={item}
-                    itemNumber={index + 1}
-                    isLocked={declaration.declarationLocked || validationStatus.isDomesticShipment}
-                    onUpdate={handleUpdateItem}
-                    onDelete={handleDeleteItem}
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Declaration Status Check Area (申告内容を確認) */}
-          <div className="card declaration-status-card">
-            <div className="card-header space-between">
-              <h3 className="card-title text-lg font-bold">
-                申告内容を確認
-              </h3>
-              {declaration.declarationLocked ? (
-                <span className="status-pill status-paid">確定済み (Locked)</span>
-              ) : (
-                <span className="status-pill status-unlocked">未確定 (Unlocked)</span>
-              )}
-            </div>
-
-            <div className="card-body">
-              <div className="status-check-grid">
-                <div className="status-check-cell">
-                  <span className="check-label">取得元アカウント:</span>
-                  <strong className="check-val text-highlight">{activeAccount.displayName} ({activeAccount.ebayUsername})</strong>
-                </div>
-
-                <div className="status-check-cell">
-                  <span className="check-label">配送条件判定:</span>
-                  <span className={validationStatus.shippingConditionsValid ? 'text-success font-semibold' : 'text-danger font-semibold'}>
-                    {validationStatus.shippingConditionsValid ? '✅ Zonos対象' : '❌ 対象外 / 不備あり'}
-                  </span>
-                </div>
-
-                <div className="status-check-cell">
-                  <span className="check-label">eBay取引金額:</span>
-                  <strong className="check-val">${declaration.ebayTransactionValue.toFixed(2)} USD</strong>
-                </div>
-
-                <div className="status-check-cell">
-                  <span className="check-label">申告価格合計:</span>
-                  <strong className={`check-val ${validationStatus.differenceCents === 0 ? 'text-success' : 'text-danger'}`}>
-                    ${validationStatus.totalDeclaredValue.toFixed(2)} USD
-                  </strong>
-                </div>
-
-                <div className="status-check-cell">
-                  <span className="check-label">差額:</span>
-                  <strong className={`check-val ${validationStatus.differenceCents === 0 ? 'text-success' : 'text-danger'}`}>
-                    ${validationStatus.difference.toFixed(2)} USD
-                  </strong>
-                </div>
-
-                <div className="status-check-cell">
-                  <span className="check-label">梱包後総重量:</span>
-                  <strong className="check-val text-highlight font-mono">{totalPackagedWeightGrams} g</strong>
-                </div>
-
-                <div className="status-check-cell">
-                  <span className="check-label">材質入力状況:</span>
-                  <span>{validationStatus.materialMissing ? '❌ 未入力あり' : '✅ 正常'}</span>
-                </div>
-
-                <div className="status-check-cell">
-                  <span className="check-label">商品種類入力状況:</span>
-                  <span>{validationStatus.productTypeMissing ? '❌ 未入力あり' : '✅ 正常'}</span>
-                </div>
-              </div>
-
-              <div className="divider"></div>
-
-              {/* Validation Messages Feedback */}
-              {validationStatus.isValid && validationStatus.shippingConditionsValid ? (
-                <div className="validation-success-banner">
-                  ✅ 配送条件はZonos Prepayの利用対象に一致しており、申告価格合計がeBay取引金額と一致しています。
-                </div>
-              ) : (
-                <div className="validation-error-list">
-                  {validationStatus.errors.map((err, i) => (
-                    <div key={i} className="validation-error-item">
-                      <span>❌ {err}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Declaration Action Buttons */}
-              <div className="validator-footer-actions margin-top-md">
-                {declaration.declarationLocked ? (
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    onClick={handleUnlockDeclaration}
-                  >
-                    確定を解除
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn-primary btn-lg"
-                    onClick={handleLockDeclaration}
-                    disabled={!validationStatus.canLock}
-                  >
-                    🔒 申告価格を確定
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  className="btn-primary btn-lg btn-copy-zonos"
-                  onClick={handleCopyZonosData}
-                  disabled={!validationStatus.canCopyZonos}
-                >
-                  📋 Zonosへコピー
-                </button>
-
-                <button
-                  type="button"
-                  className="btn-primary btn-lg btn-transfer-zonos"
-                  onClick={handleStartTransferTrigger}
-                  disabled={!declaration.declarationLocked || !validationStatus.shippingConditionsValid}
-                >
-                  🚀 Zonos転記を開始 (入力支援)
-                </button>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* Shipping Records Section */}
-      {shippingSnapshots.length > 0 && (
-        <div className="shipping-snapshots-section">
-          {shippingSnapshots.map((snapshot) => (
-            <ShippingRecordView
-              key={snapshot.id}
-              snapshot={snapshot}
-              onUpdateTracking={(tracking, date) =>
-                handleUpdateSnapshotTracking(snapshot.id, tracking, date)
-              }
+      {/* Planned Shipment Date & Portable Export Bar */}
+      <div className="card p-3 bg-slate-900 border border-blue-500/40 rounded-lg flex flex-wrap gap-3 items-center justify-between">
+        <div className="flex items-center space-x-3 flex-wrap gap-y-1">
+          <div className="flex items-center space-x-1.5">
+            <span className="font-bold text-blue-300">📅 発送予定日:</span>
+            <input
+              type="date"
+              className="form-control text-xs font-mono bg-slate-950 border-slate-700 text-amber-300 font-bold px-2 py-1 rounded"
+              value={plannedShipmentDate}
+              onChange={(e) => setPlannedShipmentDate(e.target.value)}
             />
-          ))}
+          </div>
+
+          <span className="bg-slate-800 text-slate-300 font-mono text-[11px] px-2 py-1 rounded border border-slate-700 font-semibold">
+            発送まで残り: <strong className="text-emerald-400">{daysRemaining} 日</strong> (目標: 2026-08-13)
+          </span>
+
+          {autosaveTime && (
+            <span className="text-[10px] text-slate-400 font-mono">
+              PCローカル自動保存: <strong>{autosaveTime}</strong>
+            </span>
+          )}
+        </div>
+
+        {/* Portable Export / Import Actions */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            className="btn-secondary text-xs font-bold px-2.5 py-1.5 flex items-center gap-1 bg-blue-950 border-blue-600/60 text-blue-300 hover:bg-blue-900"
+            onClick={handleExportPortableProject}
+            disabled={!declaration}
+          >
+            💾 申告データを保存
+          </button>
+          <button
+            type="button"
+            className="btn-secondary text-xs font-bold px-2.5 py-1.5 flex items-center gap-1 bg-amber-950 border-amber-600/60 text-amber-300 hover:bg-amber-900"
+            onClick={handleTriggerFileImport}
+          >
+            📂 申告データを読み込む
+          </button>
+          <button
+            type="button"
+            className="btn-secondary text-xs font-bold px-2.5 py-1.5 flex items-center gap-1"
+            onClick={handleExportPortableProject}
+            disabled={!declaration}
+          >
+            💻 別PC用にエクスポート
+          </button>
+        </div>
+      </div>
+
+      {/* System Diagnostics Checklist */}
+      <SystemDiagnosticsChecklist
+        declaration={declaration}
+        validation={validationStatus}
+        activeAccount={activeAccount}
+        plannedShipmentDate={plannedShipmentDate}
+      />
+
+      {/* Search & Fetch Input Bar */}
+      <div className="card p-3 bg-slate-900 border border-slate-700 rounded-lg flex flex-wrap gap-2 items-center justify-between">
+        <div className="flex items-center space-x-2 flex-1 min-w-[300px]">
+          <span className="font-bold text-slate-300">📥 検索入力:</span>
+          <input
+            type="text"
+            className="form-control text-xs font-mono bg-slate-950 border-slate-700 text-amber-300 font-bold flex-1"
+            placeholder="eBay Order Number (例: ORDER-2026-8801) / Item ID / URL"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleFetchEbayOrder();
+            }}
+          />
+          <button
+            type="button"
+            className="btn-primary text-xs font-bold px-3 py-1.5 flex items-center gap-1"
+            onClick={() => handleFetchEbayOrder()}
+            disabled={isImportLoading}
+          >
+            {isImportLoading ? <span className="spinner-sm"></span> : '📥 eBay情報を取得'}
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            className="btn-secondary text-xs font-bold px-3 py-1.5 flex items-center gap-1 bg-emerald-950 border-emerald-600/60 text-emerald-300 hover:bg-emerald-900"
+            onClick={handleAutoGenerateCustoms}
+            disabled={!declaration}
+          >
+            ✨ 申告内容を自動作成
+          </button>
+          <button
+            type="button"
+            className="btn-secondary text-xs font-bold px-3 py-1.5 flex items-center gap-1"
+            onClick={handleRecalculate}
+            disabled={!declaration}
+          >
+            🔄 再計算
+          </button>
+          <button
+            type="button"
+            className="btn-primary text-xs font-bold px-3 py-1.5 flex items-center gap-1 bg-blue-600 hover:bg-blue-500"
+            onClick={handleCopyZonosPayload}
+            disabled={!declaration || !validationStatus.isValid}
+          >
+            📋 Zonos用にコピー
+          </button>
+          <button
+            type="button"
+            className="btn-secondary text-xs font-bold px-3 py-1.5 flex items-center gap-1"
+            onClick={handleExportCSV}
+            disabled={!declaration}
+          >
+            📊 CSV出力
+          </button>
+        </div>
+      </div>
+
+      {/* Account Safety Warning Banner */}
+      {declaration && declaration.selectedAccountId && declaration.selectedAccountId !== selectedAccountId && (
+        <div className="p-3 bg-amber-950/80 border border-amber-500/80 rounded-lg text-amber-200 text-xs font-semibold flex items-center space-x-2">
+          <span>⚠️</span>
+          <span>
+            【アカウント不一致警告】この申告データはアカウント (ID: {declaration.selectedAccountId}) で作成されています。現在選択中のアカウント ({activeAccount.displayName}) と一致しているか確認してください。
+          </span>
         </div>
       )}
 
-      {/* Audit Log Section */}
-      <AuditLogView logs={auditLogs} />
-
-      {/* Ver.1.5 OAuth Connection Prep Modal */}
-      <EbayOAuthPrepModal
-        account={prepModalAccount}
-        isOpen={isOAuthPrepOpen}
-        onCancel={handleCancelOAuthPrep}
-      />
-
-      {/* Ver.1.4 Transfer Modals */}
+      {/* Validation Status & Status Badges Bar */}
       {declaration && (
-        <>
-          <TransferCheckModal
-            declaration={declaration}
-            status={validationStatus}
-            isOpen={isTransferCheckOpen}
-            onStartTransfer={handleConfirmStartTransfer}
-            onEditDeclaration={() => setIsTransferCheckOpen(false)}
-            onCancel={() => setIsTransferCheckOpen(false)}
-          />
+        <div className="card p-3 bg-slate-900 border border-slate-700 rounded-lg space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-slate-800">
+            <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+              <strong className="text-slate-200 font-bold">ステータスバッジ:</strong>
+              
+              <span className="bg-blue-900/80 text-blue-300 border border-blue-600/50 text-xs px-2 py-0.5 rounded font-bold">
+                eBay情報
+              </span>
 
-          <TransferWizardModal
-            declaration={declaration}
-            isOpen={isTransferWizardOpen}
-            onCompleteItem={handleCompleteItemInWizard}
-            onFinishAll={handleFinishAllWizard}
-            onInterrupt={handleInterruptWizard}
-          />
+              {declaration.items.some(i => i.materialSource === 'inferred_listing' || i.materialSource === 'inferred_photo') && (
+                <span className="bg-emerald-900/80 text-emerald-300 border border-emerald-600/50 text-xs px-2 py-0.5 rounded font-bold">
+                  素材推定
+                </span>
+              )}
 
-          <ResumeTransferModal
-            session={activeTransferSession}
-            isOpen={isResumeModalOpen}
-            onResume={handleResumeSession}
-            onRestart={handleRestartSession}
-            onDismiss={() => setIsResumeModalOpen(false)}
-          />
-        </>
+              {declaration.items.some(i => i.originWarning || !i.material || !i.productType) && (
+                <span className="bg-amber-950 text-amber-300 border border-amber-500/80 text-xs px-2 py-0.5 rounded font-bold">
+                  要確認
+                </span>
+              )}
+
+              {validationStatus.isJpyTotalMatched ? (
+                <span className="bg-emerald-950 text-emerald-400 border border-emerald-500/80 text-xs px-2 py-0.5 rounded font-bold flex items-center gap-1">
+                  ✓ 合計一致 (0 JPY 差額)
+                </span>
+              ) : (
+                <span className="bg-red-950 text-red-300 border border-red-500/80 text-xs px-2 py-0.5 rounded font-bold flex items-center gap-1">
+                  ❌ 合計不一致 ({validationStatus.jpyDifference?.toLocaleString()}円 差額)
+                </span>
+              )}
+
+              {validationStatus.isFreeGiftValueInvalid && (
+                <span className="bg-red-950 text-red-300 border border-red-500/80 text-xs px-2 py-0.5 rounded font-bold">
+                  おまけ金額エラー (0円以下)
+                </span>
+              )}
+            </div>
+
+            <div className="font-mono text-xs text-slate-300">
+              為替レート: <strong className="text-amber-300">{declaration.exchangeRate} JPY/{declaration.currency}</strong> ({declaration.exchangeRateSource})
+            </div>
+          </div>
+
+          {/* JPY Value Allocation Breakdown Box */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 bg-slate-950 p-3 rounded-lg border border-slate-800 font-mono">
+            <div>
+              <span className="text-slate-400 block text-[11px]">原通貨取引額 ({declaration.currency}):</span>
+              <strong className="text-slate-200 text-sm">{declaration.ebayTransactionValue?.toFixed(2)} {declaration.currency}</strong>
+            </div>
+
+            <div>
+              <span className="text-slate-400 block text-[11px]">目標 JPY 換算合計:</span>
+              <strong className="text-amber-300 text-sm">{declaration.ebayTransactionValueJpy?.toLocaleString()} 円</strong>
+            </div>
+
+            <div>
+              <span className="text-slate-400 block text-[11px]">販売商品 JPY 小計:</span>
+              <strong className="text-emerald-400 text-sm">{declaration.regularItemsJpySubtotal?.toLocaleString()} 円</strong>
+            </div>
+
+            <div>
+              <span className="text-slate-400 block text-[11px]">おまけ JPY 小計:</span>
+              <strong className={declaration.freeGiftsJpySubtotal! > 0 ? 'text-amber-400 text-sm' : 'text-red-400 text-sm'}>
+                {declaration.freeGiftsJpySubtotal?.toLocaleString()} 円
+              </strong>
+            </div>
+          </div>
+
+          {/* Validation Warnings & Error Alerts */}
+          {validationStatus.errors.length > 0 && (
+            <div className="p-3 bg-red-950/70 border border-red-500/80 rounded-lg space-y-1 text-red-200 font-semibold">
+              {validationStatus.errors.map((err, idx) => (
+                <div key={idx} className="flex items-center space-x-2">
+                  <span>❌</span>
+                  <span>{err}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
-      {/* Ver.1.2 Modals */}
-      <ImportPreviewModal
-        payload={pendingPayload}
-        isOpen={isPreviewOpen}
-        onConfirm={() => handleApplyImportPayload('reload_all')}
-        onEditAndConfirm={() => handleApplyImportPayload('unedited_only')}
-        onCancel={() => setIsPreviewOpen(false)}
-      />
+      {/* Review Table Header & Split Controls */}
+      {declaration && (
+        <div className="card p-3 bg-slate-900 border border-slate-700 rounded-lg space-y-3">
+          <div className="flex justify-between items-center flex-wrap gap-2">
+            <h4 className="font-bold text-sm text-slate-100 flex items-center gap-2">
+              <span>📋</span>
+              <span>Zonos Prepay 申告明細テーブル ({declaration.items.length}件)</span>
+            </h4>
 
-      <OverwriteConfirmModal
-        isOpen={isOverwriteOpen}
-        onConfirm={handleConfirmOverwriteChoice}
-        onCancel={() => setIsOverwriteOpen(false)}
-      />
+            <button
+              type="button"
+              className="btn-secondary text-xs font-bold px-3 py-1.5 flex items-center gap-1 bg-slate-800 hover:bg-slate-700 border-slate-700"
+              onClick={handleAddSplitProduct}
+            >
+              ➕ 別商品を分割・追加
+            </button>
+          </div>
 
-      {/* Ver.1.0/1.1 Modals */}
-      <IncludedItemNoticeModal
-        isOpen={isNoticeOpen}
-        onConfirm={handleConfirmAddIncludedItem}
-        onCancel={() => setIsNoticeOpen(false)}
-      />
+          {/* Declaration Items List */}
+          <div className="space-y-3">
+            {declaration.items.map((item, idx) => (
+              <ZonosItemEditor
+                key={item.id}
+                item={item}
+                itemNumber={idx + 1}
+                isLocked={declaration.declarationLocked}
+                onUpdate={handleUpdateItem}
+                onDelete={handleDeleteItem}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
-      <RulesModal
-        isOpen={isRulesOpen}
-        onClose={() => setIsRulesOpen(false)}
-      />
+      {/* Copy Success Modal */}
+      {isCopyModalOpen && (
+        <CopySuccessModal
+          isOpen={isCopyModalOpen}
+          onConfirm={() => setIsCopyModalOpen(false)}
+          onRecheck={() => setIsCopyModalOpen(false)}
+        />
+      )}
 
-      <UnlockConfirmModal
-        isOpen={isUnlockOpen}
-        onConfirmUnlock={handleConfirmUnlock}
-        onCancel={() => setIsUnlockOpen(false)}
-      />
+      {/* OAuth Prep Modal */}
+      {isOAuthPrepOpen && prepModalAccount && (
+        <EbayOAuthPrepModal
+          account={prepModalAccount}
+          isOpen={isOAuthPrepOpen}
+          onCancel={() => setIsOAuthPrepOpen(false)}
+        />
+      )}
 
-      <CopySuccessModal
-        isOpen={isCopySuccessOpen}
-        onConfirm={() => setIsCopySuccessOpen(false)}
-        onRecheck={() => setIsCopySuccessOpen(false)}
-      />
+      {/* Second Computer Setup Guide Modal */}
+      {isSetupGuideOpen && (
+        <SecondComputerSetupGuide
+          isOpen={isSetupGuideOpen}
+          onClose={() => setIsSetupGuideOpen(false)}
+        />
+      )}
+
+      {/* Overwrite Confirmation Modal on File Import */}
+      {isOverwriteModalOpen && pendingImportProject && (
+        <OverwriteConfirmModal
+          isOpen={isOverwriteModalOpen}
+          onConfirm={(_mode) => handleConfirmImport()}
+          onCancel={() => {
+            setIsOverwriteModalOpen(false);
+            setPendingImportProject(null);
+          }}
+        />
+      )}
+
+      {/* Side-by-Side Refetch Comparison Modal */}
+      {isComparisonModalOpen && latestFetchedOrder && declaration && (
+        <RefetchComparisonModal
+          isOpen={isComparisonModalOpen}
+          importedDeclaration={declaration}
+          latestEbayOrder={latestFetchedOrder}
+          onKeepImported={() => {
+            setIsComparisonModalOpen(false);
+            setLatestFetchedOrder(null);
+            showToast('インポートされた申告内容を維持しました。');
+          }}
+          onAdoptLatestEbay={() => {
+            applyOrderPayloadToDeclaration(latestFetchedOrder);
+            setIsComparisonModalOpen(false);
+            setLatestFetchedOrder(null);
+            showToast('eBay最新注文情報を採用し申告内容を自動更新しました。');
+          }}
+          onClose={() => {
+            setIsComparisonModalOpen(false);
+            setLatestFetchedOrder(null);
+          }}
+        />
+      )}
     </div>
   );
 };

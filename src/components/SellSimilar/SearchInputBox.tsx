@@ -4,16 +4,20 @@ import { SearchInputType } from '../../types/sellSimilar';
 interface SearchInputBoxProps {
   value: string;
   onChange: (val: string) => void;
+  titleValue?: string;
+  onTitleChange?: (val: string) => void;
   onSubmit: () => void;
   onClear: () => void;
   detectedType: SearchInputType;
   isSearching: boolean;
-  onSampleClick?: (sampleVal: string) => void;
+  onSampleClick?: (sampleVal: string, sampleTitle?: string) => void;
 }
 
 export const SearchInputBox: React.FC<SearchInputBoxProps> = ({
   value,
   onChange,
+  titleValue = '',
+  onTitleChange,
   onSubmit,
   onClear,
   detectedType,
@@ -41,7 +45,7 @@ export const SearchInputBox: React.FC<SearchInputBoxProps> = ({
   };
 
   return (
-    <div className="search-input-container">
+    <div className="search-input-container space-y-3">
       <div className="search-input-header">
         <label htmlFor="sellSimilarInput" className="form-label font-bold text-base">
           入力: eBay Item ID / URL / 商品タイトル
@@ -81,6 +85,23 @@ export const SearchInputBox: React.FC<SearchInputBoxProps> = ({
         )}
       </div>
 
+      {/* Optional Title Field for Seller Hub Title Search */}
+      {detectedType === 'item_id' && onTitleChange && (
+        <div className="p-2 bg-slate-900 border border-blue-500/30 rounded text-xs space-y-1">
+          <label className="text-blue-300 font-semibold block">
+            📝 検索用 商品タイトル (Seller Hub 検索で使用):
+          </label>
+          <input
+            type="text"
+            className="form-control text-xs"
+            placeholder="例: Canon AE-1 Program Vintage Camera (省略時はIDまたはキーワードで検索)"
+            value={titleValue}
+            onChange={(e) => onTitleChange(e.target.value)}
+            onKeyDown={handleKeyDown}
+          />
+        </div>
+      )}
+
       {/* Sample 1-Click Chips for Beginners */}
       {onSampleClick && (
         <div className="flex items-center gap-2 text-xs flex-wrap pt-1">
@@ -88,7 +109,7 @@ export const SearchInputBox: React.FC<SearchInputBoxProps> = ({
           <button
             type="button"
             className="btn-secondary btn-xs font-mono"
-            onClick={() => onSampleClick('256123456789')}
+            onClick={() => onSampleClick('256123456789', 'Canon AE-1 Program Vintage Camera')}
           >
             ⚡ Item Number (256123456789)
           </button>
@@ -102,7 +123,7 @@ export const SearchInputBox: React.FC<SearchInputBoxProps> = ({
           <button
             type="button"
             className="btn-secondary btn-xs font-mono"
-            onClick={() => onSampleClick('https://www.ebay.com/itm/256123456789')}
+            onClick={() => onSampleClick('https://www.ebay.com/itm/256123456789', 'Canon AE-1 Program Vintage Camera')}
           >
             🔗 eBay URL
           </button>
@@ -111,7 +132,7 @@ export const SearchInputBox: React.FC<SearchInputBoxProps> = ({
 
       <div className="search-action-bar flex justify-between items-center pt-2">
         <p className="field-hint text-xs">
-          💡 <strong>Item ID (10〜14桁)</strong> を入力すると最速で Sell Similar 画面を起動します。
+          💡 <strong>Seller Hub のアクティブ出品検索</strong> に商品タイトルを直接渡します。
         </p>
 
         <button

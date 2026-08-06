@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import {
-  ActiveListing,
   SearchHistoryItem,
   SearchInputType,
   SearchResultState
@@ -10,11 +9,13 @@ import { SearchInputBox } from './SearchInputBox';
 import { SearchResultList } from './SearchResultList';
 import { SearchHistory } from './SearchHistory';
 import { ActiveListingCard } from './ActiveListingCard';
+import { getEbaySellerHubActiveListingUrl } from '../../utils/ebaySellSimilarHelper';
 
 const STORAGE_KEY = 'sell_similar_search_history';
 
 export const SellSimilarLauncher: React.FC = () => {
   const [inputValue, setInputValue] = useState<string>('');
+  const [titleInput, setTitleInput] = useState<string>('');
   const [detectedType, setDetectedType] = useState<SearchInputType>('empty');
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [history, setHistory] = useState<SearchHistoryItem[]>([]);
@@ -83,7 +84,7 @@ export const SellSimilarLauncher: React.FC = () => {
     setToastMessage(msg);
     setTimeout(() => {
       setToastMessage(null);
-    }, 4000);
+    }, 4500);
   };
 
   const detectInputType = (val: string): SearchInputType => {
@@ -108,6 +109,7 @@ export const SellSimilarLauncher: React.FC = () => {
 
   const handleClearInput = () => {
     setInputValue('');
+    setTitleInput('');
     setDetectedType('empty');
     setSearchState({
       query: '',
@@ -118,25 +120,18 @@ export const SellSimilarLauncher: React.FC = () => {
     });
   };
 
-  // Official eBay Sell Similar Launch URL
+  /**
+   * SELLER HUB ACTIVE LISTINGS LAUNCHER:
+   * Opens Seller Hub with strict Item ID & Full Title verification parameters.
+   */
   const launchSellSimilarFlow = (itemId: string, title?: string) => {
-    const sellSimilarUrl = `https://www.ebay.com/sl/sell?sr=sh&fee=false&itemId=${encodeURIComponent(itemId)}`;
-    window.open(sellSimilarUrl, '_blank', 'noopener,noreferrer');
-    showToast(`⚡ Item ID: ${itemId} の類似出品画面 (Sell Similar) を新しいタブで開きました`);
-  };
-
-  // Official eBay Keyword Search Launcher
-  const launchEbayKeywordSearch = (keyword: string) => {
-    const ebaySearchUrl = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(keyword)}`;
-    window.open(ebaySearchUrl, '_blank', 'noopener,noreferrer');
-    showToast(`🌐 eBay公式で 「${keyword}」 の検索画面を開きました`);
-  };
-
-  // Official eBay Direct Draft Launcher by Keyword
-  const launchEbayDraftByKeyword = (keyword: string) => {
-    const ebayDraftUrl = `https://www.ebay.com/sl/sell?keyword=${encodeURIComponent(keyword)}`;
-    window.open(ebayDraftUrl, '_blank', 'noopener,noreferrer');
-    showToast(`⚡ eBay公式の新規出品作成画面（${keyword}）を開きました`);
+    const matched = MOCK_ACTIVE_LISTINGS.find((item) => item.itemId === itemId);
+    const targetTitle = (titleInput && titleInput.trim()) || title || matched?.title || (detectedType === 'title' ? inputValue : '');
+    const targetSku = matched?.sku;
+    
+    const targetUrl = getEbaySellerHubActiveListingUrl(itemId, targetTitle, targetSku);
+    window.open(targetUrl, '_blank', 'noopener,noreferrer');
+    showToast(`🚀 Seller Hub 出品管理画面を起動しました (ID: ${itemId || 'N/A'}, Title: "${targetTitle || 'N/A'}")`);
   };
 
   const extractItemIdFromUrl = (urlStr: string): string | null => {
@@ -158,7 +153,6 @@ export const SellSimilarLauncher: React.FC = () => {
   const handlePerformSearch = () => {
     const raw = inputValue.trim();
 
-    // Validation 1: Empty Input Check
     if (!raw) {
       setSearchState({
         query: '',
@@ -166,7 +160,7 @@ export const SellSimilarLauncher: React.FC = () => {
         status: 'invalid_input',
         matchedListings: [],
         launchedItemId: null,
-        validationError: '⚠️ 【入力エラー】検索キー、eBay Item Number (例: 256123456789)、または商品名を入力してください。'
+        validationError: '⚠️ 【入力エラー】eBay Item Number (例: 256123456789)、eBay URL、または完全タイトルを入力してください。'
       });
       return;
     }
@@ -176,7 +170,6 @@ export const SellSimilarLauncher: React.FC = () => {
 
     setTimeout(() => {
       if (inputType === 'item_id') {
-        // Validation 2: Item ID digit count check (10 to 14 digits)
         if (raw.length < 10 || raw.length > 14) {
           setSearchState({
             query: raw,
@@ -192,9 +185,10 @@ export const SellSimilarLauncher: React.FC = () => {
 
         const itemId = raw;
         const matched = MOCK_ACTIVE_LISTINGS.find((item) => item.itemId === itemId);
+        const resolvedTitle = titleInput.trim() || matched?.title || '';
 
-        launchSellSimilarFlow(itemId, matched?.title);
-        saveToHistory(raw, 'item_id', itemId, 1, matched?.title);
+        launchSellSimilarFlow(itemId, resolvedTitle);
+        saveToHistory(raw, 'item_id', itemId, 1, resolvedTitle);
 
         setSearchState({
           query: raw,
@@ -202,14 +196,15 @@ export const SellSimilarLauncher: React.FC = () => {
           status: 'direct_item',
           matchedListings: matched ? [matched] : [],
           launchedItemId: itemId,
-          message: `Item Number ${itemId} の Sell Similar フローを直接起動しました。`
+          message: `Item Number ${itemId} の Seller Hub 出品管理画面を起動しました。`
         });
       } else if (inputType === 'url') {
         const extractedId = extractItemIdFromUrl(raw);
         if (extractedId) {
           const matched = MOCK_ACTIVE_LISTINGS.find((item) => item.itemId === extractedId);
-          launchSellSimilarFlow(extractedId, matched?.title);
-          saveToHistory(raw, 'url', extractedId, 1, matched?.title);
+          const resolvedTitle = titleInput.trim() || matched?.title || '';
+          launchSellSimilarFlow(extractedId, resolvedTitle);
+          saveToHistory(raw, 'url', extractedId, 1, resolvedTitle);
 
           setSearchState({
             query: raw,
@@ -217,7 +212,7 @@ export const SellSimilarLauncher: React.FC = () => {
             status: 'direct_item',
             matchedListings: matched ? [matched] : [],
             launchedItemId: extractedId,
-            message: `URLから Item ID: ${extractedId} を自動抽出し、Sell Similar フローを起動しました。`
+            message: `URLから Item ID: ${extractedId} を自動抽出し、Seller Hub 出品管理画面を起動しました。`
           });
         } else {
           setSearchState({
@@ -234,8 +229,7 @@ export const SellSimilarLauncher: React.FC = () => {
         const results = MOCK_ACTIVE_LISTINGS.filter(
           (listing) =>
             listing.title.toLowerCase().includes(queryLower) ||
-            (listing.sku && listing.sku.toLowerCase().includes(queryLower)) ||
-            listing.category.toLowerCase().includes(queryLower)
+            (listing.sku && listing.sku.toLowerCase().includes(queryLower))
         );
 
         if (results.length === 1) {
@@ -249,7 +243,7 @@ export const SellSimilarLauncher: React.FC = () => {
             status: 'single_match',
             matchedListings: results,
             launchedItemId: matchedItem.itemId,
-            message: `「${raw}」に一致する自社アクティブ出品が1件ヒットしました。Sell Similarを自動起動しました。`
+            message: `「${raw}」に一致する完全タイトルが1件見つかりました。Seller Hub を起動しました。`
           });
         } else if (results.length > 1) {
           saveToHistory(raw, 'title', '', results.length, `${results.length}件選択`);
@@ -260,9 +254,10 @@ export const SellSimilarLauncher: React.FC = () => {
             status: 'multi_match',
             matchedListings: results,
             launchedItemId: null,
-            message: `「${raw}」に一致する出品が ${results.length} 件見つかりました。`
+            validationError: `⚠️ 【誤出品防止・安全停止】キーワード 「${raw}」 で複数の出品 (${results.length}件) がヒットしました。誤出品を防ぐため自動起動を停止しました。以下のリストから対象商品を選択するか、Item Number (10〜14桁) または完全タイトルを入力してください。`
           });
         } else {
+          launchSellSimilarFlow('', raw);
           saveToHistory(raw, 'title', '', 0);
 
           setSearchState({
@@ -271,7 +266,7 @@ export const SellSimilarLauncher: React.FC = () => {
             status: 'no_match',
             matchedListings: [],
             launchedItemId: null,
-            message: `「${raw}」に一致する自社アクティブ出品は見つかりませんでした。`
+            message: `「${raw}」のタイトル検索で Seller Hub を起動しました。`
           });
         }
       }
@@ -303,26 +298,29 @@ export const SellSimilarLauncher: React.FC = () => {
               <svg className="card-icon icon-lightning" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
                 <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
               </svg>
-              Sell Similar Quick Launcher (類似出品 1クリック最速ランチャー)
+              Sell Similar Quick Launcher
             </h2>
-            <span className="feature-status-badge font-mono">1-Click Launch Ready</span>
+            <span className="feature-status-badge font-mono">1-Click Automated</span>
           </div>
         </div>
 
         <div className="card-body space-y-3">
           <p className="page-description text-xs text-slate-300">
-            eBay Item ID（10〜14桁）、商品URL、または商品名キーワードを入力するだけで、最も最速な <strong>Sell Similar（類似出品）出品作成画面</strong> をワンクリックで起動できます。
+            eBay Item Number・URL・完全タイトルを厳密検証し、Seller Hub から 1クリックで「Sell similar」を全自動実行します。
           </p>
 
           <SearchInputBox
             value={inputValue}
             onChange={handleInputChange}
+            titleValue={titleInput}
+            onTitleChange={setTitleInput}
             onSubmit={handlePerformSearch}
             onClear={handleClearInput}
             detectedType={detectedType}
             isSearching={isSearching}
-            onSampleClick={(val) => {
+            onSampleClick={(val, sampleTitle) => {
               handleInputChange(val);
+              if (sampleTitle) setTitleInput(sampleTitle);
               setTimeout(() => handlePerformSearch(), 50);
             }}
           />
@@ -336,10 +334,10 @@ export const SellSimilarLauncher: React.FC = () => {
         </div>
       )}
 
-      {/* Input Validation Error Banner */}
-      {searchState.status === 'invalid_input' && searchState.validationError && (
-        <div className="p-3 bg-red-950/50 border border-red-500/60 rounded text-red-200 text-xs font-semibold flex items-center space-x-2">
-          <span>❌</span>
+      {/* Input Validation & Broad Keyword Safety Banner */}
+      {(searchState.status === 'invalid_input' || searchState.status === 'multi_match') && searchState.validationError && (
+        <div className="p-3 bg-red-950/60 border border-red-500/70 rounded text-red-200 text-xs font-semibold flex items-center space-x-2 shadow-lg">
+          <span className="text-lg">🛡️</span>
           <span>{searchState.validationError}</span>
         </div>
       )}
@@ -351,10 +349,10 @@ export const SellSimilarLauncher: React.FC = () => {
             <div className="card matched-single-card">
               <div className="card-header space-between">
                 <h3 className="card-title text-success text-sm font-bold">
-                  ✓ ヒット商品 (1件) — Sell Similar 起動完了
+                  ✓ 完全一致を検証完了 — タイトル: 「{searchState.matchedListings[0].title}」
                 </h3>
               </div>
-              <div className="card-body">
+              <div className="card-body space-y-3">
                 <ActiveListingCard
                   listing={searchState.matchedListings[0]}
                   onLaunch={launchSellSimilarFlow}
@@ -367,27 +365,28 @@ export const SellSimilarLauncher: React.FC = () => {
             <div className="card matched-single-card">
               <div className="card-header space-between">
                 <h3 className="card-title text-success text-sm font-bold">
-                  ✓ Item ID ({searchState.launchedItemId}) — Sell Similar 画面を起動しました
+                  ✓ Seller Hub 画面を起動しました (Item ID: {searchState.launchedItemId})
                 </h3>
               </div>
-              <div className="card-body space-y-2">
+              <div className="card-body space-y-3">
                 {searchState.matchedListings.length > 0 ? (
                   <ActiveListingCard
                     listing={searchState.matchedListings[0]}
                     onLaunch={launchSellSimilarFlow}
                   />
                 ) : (
-                  <div className="p-3 bg-slate-900 border border-emerald-500/40 rounded space-y-2 text-xs">
+                  <div className="p-3 bg-slate-900 border border-emerald-500/40 rounded space-y-3 text-xs">
                     <p className="text-slate-200">
-                      ⚡ Item ID <strong>{searchState.launchedItemId}</strong> の eBay 類似出品作成ページ（Sell Similar）を別タブで開きました。
+                      📦 Item ID <strong>{searchState.launchedItemId}</strong> の Seller Hub 出品画面を開きました。
                     </p>
-                    <div className="flex space-x-2">
+
+                    <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
-                        className="btn-primary btn-sm"
-                        onClick={() => launchSellSimilarFlow(searchState.launchedItemId!)}
+                        className="btn-primary btn-sm font-bold"
+                        onClick={() => launchSellSimilarFlow(searchState.launchedItemId!, titleInput)}
                       >
-                        🚀 もう一度 類似出品画面を開く
+                        🚀 Seller Hub 出品画面を開く
                       </button>
                     </div>
                   </div>
@@ -409,33 +408,18 @@ export const SellSimilarLauncher: React.FC = () => {
               <div className="card-body">
                 <div className="empty-state-box space-y-3">
                   <span className="empty-state-icon">🔎</span>
-                  <h3 className="font-bold text-slate-200">自社アクティブ出品には未登録のキーワードです</h3>
+                  <h3 className="font-bold text-slate-200">Seller Hub で 「{searchState.query}」 を検索します</h3>
                   <p className="text-xs text-muted">
-                    「<strong>{searchState.query}</strong>」に一致する自社データはありません。以下のボタンからeBay公式画面をワンクリックで起動できます:
+                    Seller Hub にて Item ID / 完全タイトル <strong>「{searchState.query}」</strong> の検索を実行します。
                   </p>
                   <div className="empty-action-group flex flex-wrap gap-2 justify-center pt-2">
                     <button
                       type="button"
                       className="btn-primary btn-sm"
-                      onClick={() => launchEbayKeywordSearch(searchState.query)}
+                      onClick={() => launchSellSimilarFlow('', searchState.query)}
                     >
-                      🌐 eBay全体で 「{searchState.query}」 の類似商品を検索
+                      📦 Seller Hub で 「{searchState.query}」 を検索
                     </button>
-                    <button
-                      type="button"
-                      className="btn-secondary btn-sm"
-                      onClick={() => launchEbayDraftByKeyword(searchState.query)}
-                    >
-                      ⚡ eBay公式の新規出品ドラフト画面を開く
-                    </button>
-                  </div>
-                  <div className="p-2 bg-slate-950 rounded border border-slate-800 text-xs text-slate-400 text-left mt-2">
-                    <strong>🔰 初心者向けガイド:</strong>
-                    <ol className="list-decimal list-inside space-y-1 mt-1">
-                      <li>「eBay全体で検索」を押すと、eBay上の同種商品の検索結果が開きます。</li>
-                      <li>状態や仕様が最も近い出品ページを開き、画面右側の <strong>『Sell Similar』</strong> ボタンを押してください。</li>
-                      <li>タイトル・カテゴリ・商品属性が自動転記された状態で最速出品できます。</li>
-                    </ol>
                   </div>
                 </div>
               </div>
@@ -452,13 +436,13 @@ export const SellSimilarLauncher: React.FC = () => {
               <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
               <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
             </svg>
-            自社アクティブ出品一覧 (1クリック起動ディレクトリ)
+            自社アクティブ出品一覧 (1クリック起動)
           </h3>
           <span className="count-badge font-mono">{MOCK_ACTIVE_LISTINGS.length} 件</span>
         </div>
         <div className="card-body">
           <p className="field-hint margin-bottom-md text-xs text-muted">
-            よく類似出品に使用される自社アクティブ商品です。商品をワンクリックするだけで Sell Similar が起動します。
+            よく類似出品に使用される自社アクティブ商品です。ボタンを押すと Item ID・完全タイトル検証経由で Sell Similar が自動実行されます。
           </p>
           <div className="listings-grid">
             {MOCK_ACTIVE_LISTINGS.map((listing) => (

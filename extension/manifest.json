@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "eBay Seller Hub Sell Similar Automation",
+  "version": "1.3.0",
+  "description": "Guaranteed automatic injection and execution of Sell Similar workflow within eBay Seller Hub active listings page.",
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  },
+  "permissions": [
+    "scripting",
+    "activeTab",
+    "webNavigation",
+    "tabs"
+  ],
+  "host_permissions": [
+    "*://*.ebay.com/*",
+    "*://*.ebay.co.uk/*",
+    "*://*.ebay.de/*",
+    "*://*.ebay.com.au/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.ebay.com/*",
+        "*://*.ebay.co.uk/*",
+        "*://*.ebay.de/*",
+        "*://*.ebay.com.au/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ]
+}
