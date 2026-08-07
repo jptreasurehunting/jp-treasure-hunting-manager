@@ -1,5 +1,12 @@
 import React, { useState } from 'react';
 import { ZonosCustomsValidator } from './ZonosCustoms/ZonosCustomsValidator';
+import { DevEnvManagerCard } from './DevEnv/DevEnvManagerCard';
+import { DdpShippingDecisionCard } from './Shipping/DdpShippingDecisionCard';
+import { AiShippingAdvisorCard } from './Shipping/AiShippingAdvisorCard';
+import { AirShippingQuoteCard } from './Shipping/AirShippingQuoteCard';
+import { SourceHealthDashboardCard } from './Shipping/SourceHealthDashboardCard';
+import { ShippingMethodRegistryManager } from './Shipping/ShippingMethodRegistryManager';
+import { ShippingTemplateManagerCard } from './Shipping/ShippingTemplateManagerCard';
 import { AccountListingTransferView } from './ListingTransfer/AccountListingTransferView';
 import { CountryComplianceManager } from './Compliance/CountryComplianceManager';
 import { DestinationShippingManagerCard } from './Compliance/DestinationShippingManagerCard';
@@ -16,13 +23,13 @@ import { CountryComplianceRecord, DestinationShippingCost, AuditLogEntry } from 
 import { exportUnifiedAuditReportJSON } from '../services/unifiedExportService';
 
 interface ZonosCustomsMainContainerProps {
-  initialSubTab?: 'validator' | 'transfer' | 'compliance' | 'safety_gate' | 'brand_assets';
+  initialSubTab?: 'validator' | 'ddp_shipping' | 'transfer' | 'compliance' | 'safety_gate' | 'brand_assets';
 }
 
 export const ZonosCustomsMainContainer: React.FC<ZonosCustomsMainContainerProps> = ({
   initialSubTab = 'validator'
 }) => {
-  const [activeTab, setActiveTab] = useState<'validator' | 'transfer' | 'compliance' | 'safety_gate' | 'brand_assets'>(initialSubTab);
+  const [activeTab, setActiveTab] = useState<'validator' | 'ddp_shipping' | 'transfer' | 'compliance' | 'safety_gate' | 'brand_assets'>(initialSubTab);
   const [complianceRecords, setComplianceRecords] = useState<CountryComplianceRecord[]>(loadComplianceRecords());
   const [shippingRates, setShippingRates] = useState<DestinationShippingCost[]>(loadDestinationShippingRates());
 
@@ -68,8 +75,8 @@ export const ZonosCustomsMainContainer: React.FC<ZonosCustomsMainContainerProps>
         <div className="flex items-center space-x-3">
           <span className="text-xl">🛃</span>
           <div>
-            <h2 className="text-base font-bold text-white">Zonos Customs Manager (Ver.2.0)</h2>
-            <p className="text-xs text-slate-400">eBay注文情報・材質推定・為替換算から Zonos Prepay 用の正確な税関申告データを自動作成</p>
+            <h2 className="text-base font-bold text-white">Zonos Customs Manager &amp; AI Development Suite (Ver.3.16)</h2>
+            <p className="text-xs text-slate-400">DDP専業運用・AI配送コンプライアンス・マルチPC開発環境管理統合環境</p>
           </div>
         </div>
         <div className="flex items-center space-x-2">
@@ -80,7 +87,7 @@ export const ZonosCustomsMainContainer: React.FC<ZonosCustomsMainContainerProps>
           >
             📥 監査レポート出力 (.json)
           </button>
-          <span className="text-xs font-mono text-emerald-400 bg-slate-800 px-2 py-1 rounded border border-slate-700 font-bold">Zonos Active</span>
+          <span className="text-xs font-mono text-emerald-400 bg-slate-800 px-2 py-1 rounded border border-slate-700 font-bold">DDP Active</span>
         </div>
       </div>
 
@@ -92,7 +99,14 @@ export const ZonosCustomsMainContainer: React.FC<ZonosCustomsMainContainerProps>
             className={`tab-nav-btn ${activeTab === 'validator' ? 'active' : ''}`}
             onClick={() => setActiveTab('validator')}
           >
-            🛃 Zonos Prepay カスタム申告 (Ver.2.0)
+            🛃 Zonos Prepay カスタム申告 (Ver.2.5)
+          </button>
+          <button
+            type="button"
+            className={`tab-nav-btn ${activeTab === 'ddp_shipping' ? 'active' : ''}`}
+            onClick={() => setActiveTab('ddp_shipping')}
+          >
+            ✈️ DDP配送判定 &amp; 開発環境同期 (Ver.3.16)
           </button>
           <button
             type="button"
@@ -128,6 +142,16 @@ export const ZonosCustomsMainContainer: React.FC<ZonosCustomsMainContainerProps>
       {/* Main Tab Content */}
       {activeTab === 'validator' ? (
         <ZonosCustomsValidator />
+      ) : activeTab === 'ddp_shipping' ? (
+        <div className="space-y-4">
+          <DevEnvManagerCard />
+          <SourceHealthDashboardCard />
+          <AiShippingAdvisorCard />
+          <DdpShippingDecisionCard />
+          <AirShippingQuoteCard />
+          <ShippingTemplateManagerCard />
+          <ShippingMethodRegistryManager />
+        </div>
       ) : activeTab === 'safety_gate' ? (
         <SafetyGateDashboard onAddAuditLog={handleAddAuditLog} />
       ) : activeTab === 'brand_assets' ? (

@@ -17,7 +17,10 @@ import {
 import { fetchEbayOrderData } from '../../services/ebayImportService';
 import {
   loadEbayAccounts,
-  saveEbayAccounts
+  saveEbayAccounts,
+  addEbayAccount,
+  removeEbayAccount,
+  moveEbayAccount
 } from '../../services/ebayAccountService';
 import {
   exportPortableProjectJSON,
@@ -36,9 +39,10 @@ import { OverwriteConfirmModal } from './OverwriteConfirmModal';
 import { SecondComputerSetupGuide } from './SecondComputerSetupGuide';
 import { SystemDiagnosticsChecklist } from './SystemDiagnosticsChecklist';
 import { RefetchComparisonModal } from './RefetchComparisonModal';
+import { ConflictResolutionModal } from './ConflictResolutionModal';
 
 export const ZonosCustomsValidator: React.FC = () => {
-  // Multi-eBay Account State
+  // Multi-eBay Account State (Dynamic Unlimited Accounts)
   const [ebayAccounts, setEbayAccounts] = useState<EbaySellerAccount[]>(loadEbayAccounts());
   const [selectedAccountId, setSelectedAccountId] = useState<string>('acc_01');
   const [prepModalAccount, setPrepModalAccount] = useState<EbaySellerAccount | null>(null);
@@ -55,7 +59,7 @@ export const ZonosCustomsValidator: React.FC = () => {
   // Declaration state
   const [declaration, setDeclaration] = useState<ZonosCustomsDeclaration | null>(null);
 
-  // Modal & Guide states
+  // Modal & Conflict states
   const [isCopyModalOpen, setIsCopyModalOpen] = useState<boolean>(false);
   const [copySummary, setCopySummary] = useState<string>('');
   const [isSetupGuideOpen, setIsSetupGuideOpen] = useState<boolean>(false);
@@ -63,6 +67,7 @@ export const ZonosCustomsValidator: React.FC = () => {
   const [pendingImportProject, setPendingImportProject] = useState<ZonosPortableProjectFile | null>(null);
   const [isComparisonModalOpen, setIsComparisonModalOpen] = useState<boolean>(false);
   const [latestFetchedOrder, setLatestFetchedOrder] = useState<EbayOrderPayload | null>(null);
+  const [isConflictModalOpen, setIsConflictModalOpen] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -94,7 +99,27 @@ export const ZonosCustomsValidator: React.FC = () => {
     }
   }, [declaration]);
 
-  // Handle Account Name Update
+  // Dynamic Account Actions
+  const handleAddAccount = (name: string, username: string) => {
+    const updated = addEbayAccount(name, username);
+    setEbayAccounts(updated);
+    showToast(`✅ 新規アカウント「${name}」を追加しました`);
+  };
+
+  const handleRemoveAccount = (id: string) => {
+    const updated = removeEbayAccount(id);
+    setEbayAccounts(updated);
+    if (selectedAccountId === id) {
+      setSelectedAccountId(updated[0]?.id || 'acc_01');
+    }
+    showToast('アカウントを削除しました');
+  };
+
+  const handleMoveAccount = (id: string, direction: 'up' | 'down') => {
+    const updated = moveEbayAccount(id, direction);
+    setEbayAccounts(updated);
+  };
+
   const handleUpdateDisplayName = (accountId: string, newDisplayName: string) => {
     const updated = ebayAccounts.map((a) => (a.id === accountId ? { ...a, displayName: newDisplayName } : a));
     setEbayAccounts(updated);
@@ -111,7 +136,7 @@ export const ZonosCustomsValidator: React.FC = () => {
     showToast('アカウント接続を解除しました');
   };
 
-  // Handle Fetching eBay Order Data with Account Verification
+  // Handle Fetching eBay Order Data
   const handleFetchEbayOrder = async (queryStr?: string) => {
     const query = (queryStr || searchInput).trim();
     if (!query) {
@@ -124,7 +149,6 @@ export const ZonosCustomsValidator: React.FC = () => {
       const payload = await fetchEbayOrderData(query, selectedAccountId);
       if (payload) {
         if (declaration) {
-          // If declaration already exists from portable import, open side-by-side comparison modal!
           setLatestFetchedOrder(payload);
           setIsComparisonModalOpen(true);
         } else {
@@ -249,7 +273,6 @@ export const ZonosCustomsValidator: React.FC = () => {
     setDeclaration(reallocated);
   };
 
-  // Re-calculate & Auto-Generate Customs Declarations
   const handleAutoGenerateCustoms = () => {
     if (!declaration) return;
     const updatedItems = declaration.items.map((item) => {
@@ -279,7 +302,6 @@ export const ZonosCustomsValidator: React.FC = () => {
     showToast('🔄 申告価格の再計算を完了しました！');
   };
 
-  // Validation Status
   const validationStatus: CustomsValidationStatus = useMemo(() => {
     if (!declaration) {
       return {
@@ -315,7 +337,6 @@ export const ZonosCustomsValidator: React.FC = () => {
     return validateZonosPrepayDeclaration(declaration);
   }, [declaration]);
 
-  // Handle Item Updates
   const handleUpdateItem = (updatedItem: ZonosCustomsItem) => {
     if (!declaration) return;
     const updatedItems = declaration.items.map((i) => (i.id === updatedItem.id ? updatedItem : i));
@@ -372,7 +393,6 @@ export const ZonosCustomsValidator: React.FC = () => {
     showToast('➕ 新規品目を追加・分割しました');
   };
 
-  // PORTABLE PROJECT EXPORT & BACKUP
   const handleExportPortableProject = () => {
     if (!declaration) {
       showToast('⚠️ エクスポートする申告データがありません。');
@@ -382,7 +402,6 @@ export const ZonosCustomsValidator: React.FC = () => {
     showToast('💻 別PC用ポータブル申告プロジェクト (.json) をエクスポートしました！');
   };
 
-  // PORTABLE PROJECT IMPORT HANDLER
   const handleTriggerFileImport = () => {
     if (fileInputRef.current) {
       fileInputRef.current.click();
@@ -406,7 +425,13 @@ export const ZonosCustomsValidator: React.FC = () => {
       }
 
       setPendingImportProject(result.project);
-      setIsOverwriteModalOpen(true);
+
+      // Detect duplicate or conflict
+      if (declaration && declaration.orderId === result.project.ebayOrderId) {
+        setIsConflictModalOpen(true);
+      } else {
+        setIsOverwriteModalOpen(true);
+      }
     };
 
     reader.readAsText(file);
@@ -420,18 +445,13 @@ export const ZonosCustomsValidator: React.FC = () => {
     setPlannedShipmentDate(pendingImportProject.plannedShipmentDate || '2026-08-13');
     setDeclarationNotes(pendingImportProject.notes || '');
 
-    // Account Mismatch Check
-    if (pendingImportProject.ebayAccountId !== selectedAccountId) {
-      showToast(`⚠️ 注意: インポートされたアカウント (${pendingImportProject.ebayAccountDisplayName}) と現在選択中のアカウント (${activeAccount.displayName}) が異なります。`);
-    } else {
-      showToast(`✅ ポータブル申告プロジェクト (${pendingImportProject.shipmentId}) を読み込みました！`);
-    }
+    showToast(`✅ ポータブル申告プロジェクト (${pendingImportProject.shipmentId}) を読み込みました！`);
 
     setIsOverwriteModalOpen(false);
+    setIsConflictModalOpen(false);
     setPendingImportProject(null);
   };
 
-  // Copy Zonos Prepay Payload
   const handleCopyZonosPayload = () => {
     if (!declaration || !validationStatus.isValid) {
       showToast('❌ 入力エラーまたは合計不一致があるためコピーできません。');
@@ -451,7 +471,6 @@ export const ZonosCustomsValidator: React.FC = () => {
     showToast('📋 Zonos Prepay 用の申告データをクリップボードにコピーしました！');
   };
 
-  // Export CSV
   const handleExportCSV = () => {
     if (!declaration) return;
 
@@ -484,7 +503,6 @@ export const ZonosCustomsValidator: React.FC = () => {
     showToast('📊 申告CSVファイルをダウンロードしました！');
   };
 
-  // Days remaining calculation
   const daysRemaining = useMemo(() => {
     if (!plannedShipmentDate) return 0;
     const target = new Date(plannedShipmentDate).getTime();
@@ -495,7 +513,6 @@ export const ZonosCustomsValidator: React.FC = () => {
 
   return (
     <div className="zonos-customs-validator-container space-y-4 text-xs">
-      {/* Hidden File Input for JSON Project Import */}
       <input
         type="file"
         ref={fileInputRef}
@@ -504,20 +521,19 @@ export const ZonosCustomsValidator: React.FC = () => {
         onChange={handleFileChange}
       />
 
-      {/* Toast Notification */}
       {toastMessage && (
         <div className="toast-notification">
           <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* Account Switcher Header */}
+      {/* Account Switcher Header with Dynamic Unlimited Accounts */}
       <div className="card p-3 bg-slate-900 border border-slate-700 rounded-lg flex justify-between items-center flex-wrap gap-2">
         <div className="flex items-center space-x-3">
           <span className="text-xl">🛃</span>
           <div>
-            <h3 className="font-bold text-sm text-slate-100">Zonos Prepay カスタム申告モジュール (2台目PC移送 Ver.2.4)</h3>
-            <p className="text-[11px] text-slate-400">8月13日 本番発送対応 — 2台のPC間で申告プロジェクト (.json) を安全移送・点検します。</p>
+            <h3 className="font-bold text-sm text-slate-100">Zonos Prepay カスタム申告モジュール (マルチPC対応 Ver.2.5)</h3>
+            <p className="text-[11px] text-slate-400">8月13日 本番発送対応 — アカウント数無制限・重複発送防止・競合検知付きポータブル申告プロジェクト</p>
           </div>
         </div>
 
@@ -543,6 +559,9 @@ export const ZonosCustomsValidator: React.FC = () => {
               setIsOAuthPrepOpen(true);
             }}
             onDisconnectAccount={handleDisconnectAccount}
+            onAddAccount={handleAddAccount}
+            onRemoveAccount={handleRemoveAccount}
+            onMoveAccount={handleMoveAccount}
           />
         </div>
       </div>
@@ -571,7 +590,6 @@ export const ZonosCustomsValidator: React.FC = () => {
           )}
         </div>
 
-        {/* Portable Export / Import Actions */}
         <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
@@ -667,16 +685,6 @@ export const ZonosCustomsValidator: React.FC = () => {
         </div>
       </div>
 
-      {/* Account Safety Warning Banner */}
-      {declaration && declaration.selectedAccountId && declaration.selectedAccountId !== selectedAccountId && (
-        <div className="p-3 bg-amber-950/80 border border-amber-500/80 rounded-lg text-amber-200 text-xs font-semibold flex items-center space-x-2">
-          <span>⚠️</span>
-          <span>
-            【アカウント不一致警告】この申告データはアカウント (ID: {declaration.selectedAccountId}) で作成されています。現在選択中のアカウント ({activeAccount.displayName}) と一致しているか確認してください。
-          </span>
-        </div>
-      )}
-
       {/* Validation Status & Status Badges Bar */}
       {declaration && (
         <div className="card p-3 bg-slate-900 border border-slate-700 rounded-lg space-y-3">
@@ -722,7 +730,6 @@ export const ZonosCustomsValidator: React.FC = () => {
             </div>
           </div>
 
-          {/* JPY Value Allocation Breakdown Box */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 bg-slate-950 p-3 rounded-lg border border-slate-800 font-mono">
             <div>
               <span className="text-slate-400 block text-[11px]">原通貨取引額 ({declaration.currency}):</span>
@@ -747,7 +754,6 @@ export const ZonosCustomsValidator: React.FC = () => {
             </div>
           </div>
 
-          {/* Validation Warnings & Error Alerts */}
           {validationStatus.errors.length > 0 && (
             <div className="p-3 bg-red-950/70 border border-red-500/80 rounded-lg space-y-1 text-red-200 font-semibold">
               {validationStatus.errors.map((err, idx) => (
@@ -779,7 +785,6 @@ export const ZonosCustomsValidator: React.FC = () => {
             </button>
           </div>
 
-          {/* Declaration Items List */}
           <div className="space-y-3">
             {declaration.items.map((item, idx) => (
               <ZonosItemEditor
@@ -828,6 +833,26 @@ export const ZonosCustomsValidator: React.FC = () => {
           onConfirm={(_mode) => handleConfirmImport()}
           onCancel={() => {
             setIsOverwriteModalOpen(false);
+            setPendingImportProject(null);
+          }}
+        />
+      )}
+
+      {/* Conflict Resolution Warning Modal */}
+      {isConflictModalOpen && pendingImportProject && declaration && (
+        <ConflictResolutionModal
+          isOpen={isConflictModalOpen}
+          importedProject={pendingImportProject}
+          currentLocalDeclaration={declaration}
+          onAdoptImported={handleConfirmImport}
+          onKeepLocal={() => {
+            setIsConflictModalOpen(false);
+            setPendingImportProject(null);
+            showToast('本PCのローカルデータを保護し維持しました。');
+          }}
+          onMergeUnedited={handleConfirmImport}
+          onCancel={() => {
+            setIsConflictModalOpen(false);
             setPendingImportProject(null);
           }}
         />
