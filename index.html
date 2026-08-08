@@ -55,6 +55,11 @@
           <span>ブランドアセット ＋ SNSマネージャ準備 (Phase 4.1)</span>
           <span class="tab-pill-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border-color: rgba(52, 211, 153, 0.3);">Phase 4.1</span>
         </button>
+        <button type="button" id="tabProjectHealth" class="nav-tab-btn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          <span>Project Health (システム診断・稼働判定)</span>
+          <span class="tab-pill-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border-color: rgba(52, 211, 153, 0.3);">Live Health</span>
+        </button>
       </nav>
     </header>
 
@@ -432,6 +437,13 @@
         <div id="brand-asset-root"></div>
       </main>
     </div>
+
+    <!-- 5. Project Health Dashboard (システム診断・稼働判定) ページ (Reactコンポーネントマウント領域) -->
+    <div id="pageProjectHealth" class="page-view hidden">
+      <main class="main-layout-single">
+        <div id="project-health-root"></div>
+      </main>
+    </div>
   </div>
 
   <!-- 二段階確認モーダル (最終確認画面) -->
@@ -504,6 +516,7 @@
   <script type="module" src="./src/mountSellSimilar.tsx"></script>
   <script type="module" src="./src/mountZonosCustoms.tsx"></script>
   <script type="module" src="./src/mountBrandAsset.tsx"></script>
+  <script type="module" src="./src/mountProjectHealth.tsx"></script>
 </body>
 </html>
 

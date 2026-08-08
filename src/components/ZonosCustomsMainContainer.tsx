@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ZonosCustomsValidator } from './ZonosCustoms/ZonosCustomsValidator';
+import { ProjectHealthDashboard } from './ProjectHealth/ProjectHealthDashboard';
 import { DevEnvManagerCard } from './DevEnv/DevEnvManagerCard';
 import { DdpShippingDecisionCard } from './Shipping/DdpShippingDecisionCard';
 import { AiShippingAdvisorCard } from './Shipping/AiShippingAdvisorCard';
@@ -19,21 +20,23 @@ import {
   loadDestinationShippingRates,
   saveDestinationShippingRates
 } from '../services/countryComplianceService';
+import { evaluateProjectHealth } from '../services/projectHealthService';
 import { CountryComplianceRecord, DestinationShippingCost, AuditLogEntry } from '../types/zonosCustoms';
 import { exportUnifiedAuditReportJSON } from '../services/unifiedExportService';
 
 interface ZonosCustomsMainContainerProps {
-  initialSubTab?: 'validator' | 'ddp_shipping' | 'transfer' | 'compliance' | 'safety_gate' | 'brand_assets';
+  initialSubTab?: 'validator' | 'ddp_shipping' | 'transfer' | 'compliance' | 'safety_gate' | 'brand_assets' | 'health_dashboard';
 }
 
 export const ZonosCustomsMainContainer: React.FC<ZonosCustomsMainContainerProps> = ({
-  initialSubTab = 'validator'
+  initialSubTab = 'health_dashboard'
 }) => {
-  const [activeTab, setActiveTab] = useState<'validator' | 'ddp_shipping' | 'transfer' | 'compliance' | 'safety_gate' | 'brand_assets'>(initialSubTab);
+  const [activeTab, setActiveTab] = useState<'validator' | 'ddp_shipping' | 'transfer' | 'compliance' | 'safety_gate' | 'brand_assets' | 'health_dashboard'>(initialSubTab);
   const [complianceRecords, setComplianceRecords] = useState<CountryComplianceRecord[]>(loadComplianceRecords());
   const [shippingRates, setShippingRates] = useState<DestinationShippingCost[]>(loadDestinationShippingRates());
 
   const accounts = loadEbayAccounts();
+  const health = evaluateProjectHealth();
 
   const handleUpdateRecord = (updated: CountryComplianceRecord) => {
     const updatedList = complianceRecords.map((r) =>
@@ -76,7 +79,7 @@ export const ZonosCustomsMainContainer: React.FC<ZonosCustomsMainContainerProps>
           <span className="text-xl">🛃</span>
           <div>
             <h2 className="text-base font-bold text-white">Zonos Customs Manager &amp; AI Development Suite (Ver.3.16)</h2>
-            <p className="text-xs text-slate-400">DDP専業運用・AI配送コンプライアンス・マルチPC開発環境管理統合環境</p>
+            <p className="text-xs text-slate-400">DDP専業運用・AI配送コンプライアンス・マルチPC開発環境・プロジェクト健全性管理</p>
           </div>
         </div>
         <div className="flex items-center space-x-2">
@@ -87,13 +90,33 @@ export const ZonosCustomsMainContainer: React.FC<ZonosCustomsMainContainerProps>
           >
             📥 監査レポート出力 (.json)
           </button>
-          <span className="text-xs font-mono text-emerald-400 bg-slate-800 px-2 py-1 rounded border border-slate-700 font-bold">DDP Active</span>
+          <button
+            type="button"
+            className={`text-xs font-mono px-2 py-1 rounded border font-bold flex items-center gap-1 ${
+              health.overallStatus === 'ready'
+                ? 'bg-emerald-950 text-emerald-400 border-emerald-800'
+                : health.overallStatus === 'needs_verification'
+                ? 'bg-amber-950 text-amber-300 border-amber-800'
+                : 'bg-rose-950 text-rose-300 border-rose-800'
+            }`}
+            onClick={() => setActiveTab('health_dashboard')}
+          >
+            <span>{health.overallStatus === 'ready' ? '✅' : health.overallStatus === 'needs_verification' ? '🟡' : '⛔'}</span>
+            <span>{health.overallStatusLabel}</span>
+          </button>
         </div>
       </div>
 
       {/* Top Application Navigation Tabs */}
       <div className="main-tab-nav-bar card margin-bottom-md">
         <div className="flex items-center space-x-3 p-2 bg-slate-900 border-b border-slate-700 overflow-x-auto">
+          <button
+            type="button"
+            className={`tab-nav-btn ${activeTab === 'health_dashboard' ? 'active' : ''}`}
+            onClick={() => setActiveTab('health_dashboard')}
+          >
+            🩺 プロジェクト健全性 &amp; 稼働診断 (Project Health)
+          </button>
           <button
             type="button"
             className={`tab-nav-btn ${activeTab === 'validator' ? 'active' : ''}`}
@@ -140,10 +163,13 @@ export const ZonosCustomsMainContainer: React.FC<ZonosCustomsMainContainerProps>
       </div>
 
       {/* Main Tab Content */}
-      {activeTab === 'validator' ? (
+      {activeTab === 'health_dashboard' ? (
+        <ProjectHealthDashboard onAddAuditLog={handleAddAuditLog} />
+      ) : activeTab === 'validator' ? (
         <ZonosCustomsValidator />
       ) : activeTab === 'ddp_shipping' ? (
         <div className="space-y-4">
+          <ProjectHealthDashboard onAddAuditLog={handleAddAuditLog} />
           <DevEnvManagerCard />
           <SourceHealthDashboardCard />
           <AiShippingAdvisorCard />
