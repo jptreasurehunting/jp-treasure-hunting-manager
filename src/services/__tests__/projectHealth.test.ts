@@ -17,6 +17,12 @@ import {
 import { HealthCheckModulePlugin } from '../../types/projectHealth';
 
 export function runProjectHealthTests(): { passed: number; failed: number; log: string[] } {
+  try {
+    localStorage.clear();
+  } catch (e) {
+    // Ignore
+  }
+
   const log: string[] = [];
   let passed = 0;
   let failed = 0;

@@ -75,6 +75,11 @@
           <span>Operational Knowledge (共有運用ナレッジ)</span>
           <span class="tab-pill-badge" style="background: rgba(168, 85, 247, 0.2); color: #c084fc; border-color: rgba(192, 132, 252, 0.3);">Shared Engine</span>
         </button>
+        <button type="button" id="tabKnowledgeOrchestrator" class="nav-tab-btn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          <span>Knowledge Orchestrator (統合調停)</span>
+          <span class="tab-pill-badge" style="background: rgba(236, 72, 153, 0.2); color: #f472b6; border-color: rgba(244, 114, 182, 0.3);">Orchestrator</span>
+        </button>
       </nav>
     </header>
 
@@ -480,6 +485,13 @@
         <div id="operational-knowledge-root"></div>
       </main>
     </div>
+
+    <!-- 9. Knowledge Orchestrator ページ (Reactコンポーネントマウント領域) -->
+    <div id="pageKnowledgeOrchestrator" class="page-view hidden">
+      <main class="main-layout-single">
+        <div id="knowledge-orchestrator-root"></div>
+      </main>
+    </div>
   </div>
 
   <!-- 二段階確認モーダル (最終確認画面) -->
@@ -556,6 +568,7 @@
   <script type="module" src="./src/mountMarketingStudio.tsx"></script>
   <script type="module" src="./src/mountSafeAutomation.tsx"></script>
   <script type="module" src="./src/mountOperationalKnowledge.tsx"></script>
+  <script type="module" src="./src/mountKnowledgeOrchestrator.tsx"></script>
 </body>
 </html>
 

@@ -651,6 +651,7 @@ function initEventListeners() {
   const tabMarketingStudio = document.getElementById('tabMarketingStudio');
   const tabSafeAutomation = document.getElementById('tabSafeAutomation');
   const tabOperationalKnowledge = document.getElementById('tabOperationalKnowledge');
+  const tabKnowledgeOrchestrator = document.getElementById('tabKnowledgeOrchestrator');
 
   const pageProfitCalculator = document.getElementById('pageProfitCalculator');
   const pageSellSimilar = document.getElementById('pageSellSimilar');
@@ -660,12 +661,13 @@ function initEventListeners() {
   const pageMarketingStudio = document.getElementById('pageMarketingStudio');
   const pageSafeAutomation = document.getElementById('pageSafeAutomation');
   const pageOperationalKnowledge = document.getElementById('pageOperationalKnowledge');
+  const pageKnowledgeOrchestrator = document.getElementById('pageKnowledgeOrchestrator');
 
   const switchTab = (activeTab, activePage) => {
-    [tabProfitCalculator, tabSellSimilar, tabZonosCustoms, tabBrandAsset, tabProjectHealth, tabMarketingStudio, tabSafeAutomation, tabOperationalKnowledge].forEach(tab => {
+    [tabProfitCalculator, tabSellSimilar, tabZonosCustoms, tabBrandAsset, tabProjectHealth, tabMarketingStudio, tabSafeAutomation, tabOperationalKnowledge, tabKnowledgeOrchestrator].forEach(tab => {
       if (tab) tab.classList.remove('active');
     });
-    [pageProfitCalculator, pageSellSimilar, pageZonosCustoms, pageBrandAsset, pageProjectHealth, pageMarketingStudio, pageSafeAutomation, pageOperationalKnowledge].forEach(page => {
+    [pageProfitCalculator, pageSellSimilar, pageZonosCustoms, pageBrandAsset, pageProjectHealth, pageMarketingStudio, pageSafeAutomation, pageOperationalKnowledge, pageKnowledgeOrchestrator].forEach(page => {
       if (page) page.classList.add('hidden');
     });
 
@@ -696,6 +698,9 @@ function initEventListeners() {
   }
   if (tabOperationalKnowledge) {
     tabOperationalKnowledge.addEventListener('click', () => switchTab(tabOperationalKnowledge, pageOperationalKnowledge));
+  }
+  if (tabKnowledgeOrchestrator) {
+    tabKnowledgeOrchestrator.addEventListener('click', () => switchTab(tabKnowledgeOrchestrator, pageKnowledgeOrchestrator));
   }
 }
 

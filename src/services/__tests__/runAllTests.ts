@@ -13,6 +13,7 @@ import { runZonosPortableTests } from './zonosPortableProject.test';
 import { runAiMarketingStudioTests } from './aiMarketingStudio.test';
 import { runSafeAutomationPolicyTests } from './safeAutomationPolicy.test';
 import { runOperationalKnowledgeTests } from './operationalKnowledge.test';
+import { runKnowledgeOrchestratorTests } from './knowledgeOrchestrator.test';
 
 export interface MasterTestSummary {
   totalPassed: number;
@@ -27,6 +28,7 @@ export interface MasterTestSummary {
 
 export function runAllAppTests(): MasterTestSummary {
   const suites = [
+    { name: 'Knowledge Orchestrator & Cross-Module Reuse Tests', fn: runKnowledgeOrchestratorTests },
     { name: 'Shared Operational Knowledge Engine Tests', fn: runOperationalKnowledgeTests },
     { name: 'Safe Automation Policy & Risk-Based Approval Tests', fn: runSafeAutomationPolicyTests },
     { name: 'AI Marketing Studio & Rights Gate Tests', fn: runAiMarketingStudioTests },
