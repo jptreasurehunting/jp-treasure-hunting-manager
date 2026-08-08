@@ -80,6 +80,11 @@
           <span>Knowledge Orchestrator (統合調停)</span>
           <span class="tab-pill-badge" style="background: rgba(236, 72, 153, 0.2); color: #f472b6; border-color: rgba(244, 114, 182, 0.3);">Orchestrator</span>
         </button>
+        <button type="button" id="tabRuleFreshness" class="nav-tab-btn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span>Rule Freshness (ルール鮮度)</span>
+          <span class="tab-pill-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border-color: rgba(52, 211, 153, 0.3);">Live Verified</span>
+        </button>
       </nav>
     </header>
 
@@ -492,6 +497,13 @@
         <div id="knowledge-orchestrator-root"></div>
       </main>
     </div>
+
+    <!-- 10. Rule Freshness & Live Source Verification ページ (Reactコンポーネントマウント領域) -->
+    <div id="pageRuleFreshness" class="page-view hidden">
+      <main class="main-layout-single">
+        <div id="rule-freshness-root"></div>
+      </main>
+    </div>
   </div>
 
   <!-- 二段階確認モーダル (最終確認画面) -->
@@ -569,6 +581,7 @@
   <script type="module" src="./src/mountSafeAutomation.tsx"></script>
   <script type="module" src="./src/mountOperationalKnowledge.tsx"></script>
   <script type="module" src="./src/mountKnowledgeOrchestrator.tsx"></script>
+  <script type="module" src="./src/mountRuleFreshness.tsx"></script>
 </body>
 </html>
 

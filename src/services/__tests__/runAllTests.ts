@@ -14,6 +14,7 @@ import { runAiMarketingStudioTests } from './aiMarketingStudio.test';
 import { runSafeAutomationPolicyTests } from './safeAutomationPolicy.test';
 import { runOperationalKnowledgeTests } from './operationalKnowledge.test';
 import { runKnowledgeOrchestratorTests } from './knowledgeOrchestrator.test';
+import { runRuleFreshnessTests } from './ruleFreshness.test';
 
 export interface MasterTestSummary {
   totalPassed: number;
@@ -28,6 +29,7 @@ export interface MasterTestSummary {
 
 export function runAllAppTests(): MasterTestSummary {
   const suites = [
+    { name: 'Rule Freshness & Live Source Verification Tests', fn: runRuleFreshnessTests },
     { name: 'Knowledge Orchestrator & Cross-Module Reuse Tests', fn: runKnowledgeOrchestratorTests },
     { name: 'Shared Operational Knowledge Engine Tests', fn: runOperationalKnowledgeTests },
     { name: 'Safe Automation Policy & Risk-Based Approval Tests', fn: runSafeAutomationPolicyTests },

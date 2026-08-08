@@ -652,6 +652,7 @@ function initEventListeners() {
   const tabSafeAutomation = document.getElementById('tabSafeAutomation');
   const tabOperationalKnowledge = document.getElementById('tabOperationalKnowledge');
   const tabKnowledgeOrchestrator = document.getElementById('tabKnowledgeOrchestrator');
+  const tabRuleFreshness = document.getElementById('tabRuleFreshness');
 
   const pageProfitCalculator = document.getElementById('pageProfitCalculator');
   const pageSellSimilar = document.getElementById('pageSellSimilar');
@@ -662,12 +663,13 @@ function initEventListeners() {
   const pageSafeAutomation = document.getElementById('pageSafeAutomation');
   const pageOperationalKnowledge = document.getElementById('pageOperationalKnowledge');
   const pageKnowledgeOrchestrator = document.getElementById('pageKnowledgeOrchestrator');
+  const pageRuleFreshness = document.getElementById('pageRuleFreshness');
 
   const switchTab = (activeTab, activePage) => {
-    [tabProfitCalculator, tabSellSimilar, tabZonosCustoms, tabBrandAsset, tabProjectHealth, tabMarketingStudio, tabSafeAutomation, tabOperationalKnowledge, tabKnowledgeOrchestrator].forEach(tab => {
+    [tabProfitCalculator, tabSellSimilar, tabZonosCustoms, tabBrandAsset, tabProjectHealth, tabMarketingStudio, tabSafeAutomation, tabOperationalKnowledge, tabKnowledgeOrchestrator, tabRuleFreshness].forEach(tab => {
       if (tab) tab.classList.remove('active');
     });
-    [pageProfitCalculator, pageSellSimilar, pageZonosCustoms, pageBrandAsset, pageProjectHealth, pageMarketingStudio, pageSafeAutomation, pageOperationalKnowledge, pageKnowledgeOrchestrator].forEach(page => {
+    [pageProfitCalculator, pageSellSimilar, pageZonosCustoms, pageBrandAsset, pageProjectHealth, pageMarketingStudio, pageSafeAutomation, pageOperationalKnowledge, pageKnowledgeOrchestrator, pageRuleFreshness].forEach(page => {
       if (page) page.classList.add('hidden');
     });
 
@@ -701,6 +703,9 @@ function initEventListeners() {
   }
   if (tabKnowledgeOrchestrator) {
     tabKnowledgeOrchestrator.addEventListener('click', () => switchTab(tabKnowledgeOrchestrator, pageKnowledgeOrchestrator));
+  }
+  if (tabRuleFreshness) {
+    tabRuleFreshness.addEventListener('click', () => switchTab(tabRuleFreshness, pageRuleFreshness));
   }
 }
 
