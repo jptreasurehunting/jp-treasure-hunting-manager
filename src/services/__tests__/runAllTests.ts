@@ -10,6 +10,9 @@ import { runAirShippingQuoteTests } from './airShippingQuote.test';
 import { runShippingRegistryTests } from './shippingRegistry.test';
 import { runShippingTemplateTests } from './shippingTemplate.test';
 import { runZonosPortableTests } from './zonosPortableProject.test';
+import { runAiMarketingStudioTests } from './aiMarketingStudio.test';
+import { runSafeAutomationPolicyTests } from './safeAutomationPolicy.test';
+import { runOperationalKnowledgeTests } from './operationalKnowledge.test';
 
 export interface MasterTestSummary {
   totalPassed: number;
@@ -24,6 +27,9 @@ export interface MasterTestSummary {
 
 export function runAllAppTests(): MasterTestSummary {
   const suites = [
+    { name: 'Shared Operational Knowledge Engine Tests', fn: runOperationalKnowledgeTests },
+    { name: 'Safe Automation Policy & Risk-Based Approval Tests', fn: runSafeAutomationPolicyTests },
+    { name: 'AI Marketing Studio & Rights Gate Tests', fn: runAiMarketingStudioTests },
     { name: 'Project Health Dashboard & Safety Architecture Tests', fn: runProjectHealthTests },
     { name: 'Dev Environment Manager Tests', fn: runDevEnvManagerTests },
     { name: 'Rule Sync & Pre-action Verification Tests', fn: runRuleSyncTests },

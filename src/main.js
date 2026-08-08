@@ -648,18 +648,24 @@ function initEventListeners() {
   const tabZonosCustoms = document.getElementById('tabZonosCustoms');
   const tabBrandAsset = document.getElementById('tabBrandAsset');
   const tabProjectHealth = document.getElementById('tabProjectHealth');
+  const tabMarketingStudio = document.getElementById('tabMarketingStudio');
+  const tabSafeAutomation = document.getElementById('tabSafeAutomation');
+  const tabOperationalKnowledge = document.getElementById('tabOperationalKnowledge');
 
   const pageProfitCalculator = document.getElementById('pageProfitCalculator');
   const pageSellSimilar = document.getElementById('pageSellSimilar');
   const pageZonosCustoms = document.getElementById('pageZonosCustoms');
   const pageBrandAsset = document.getElementById('pageBrandAsset');
   const pageProjectHealth = document.getElementById('pageProjectHealth');
+  const pageMarketingStudio = document.getElementById('pageMarketingStudio');
+  const pageSafeAutomation = document.getElementById('pageSafeAutomation');
+  const pageOperationalKnowledge = document.getElementById('pageOperationalKnowledge');
 
   const switchTab = (activeTab, activePage) => {
-    [tabProfitCalculator, tabSellSimilar, tabZonosCustoms, tabBrandAsset, tabProjectHealth].forEach(tab => {
+    [tabProfitCalculator, tabSellSimilar, tabZonosCustoms, tabBrandAsset, tabProjectHealth, tabMarketingStudio, tabSafeAutomation, tabOperationalKnowledge].forEach(tab => {
       if (tab) tab.classList.remove('active');
     });
-    [pageProfitCalculator, pageSellSimilar, pageZonosCustoms, pageBrandAsset, pageProjectHealth].forEach(page => {
+    [pageProfitCalculator, pageSellSimilar, pageZonosCustoms, pageBrandAsset, pageProjectHealth, pageMarketingStudio, pageSafeAutomation, pageOperationalKnowledge].forEach(page => {
       if (page) page.classList.add('hidden');
     });
 
@@ -681,6 +687,15 @@ function initEventListeners() {
   }
   if (tabProjectHealth) {
     tabProjectHealth.addEventListener('click', () => switchTab(tabProjectHealth, pageProjectHealth));
+  }
+  if (tabMarketingStudio) {
+    tabMarketingStudio.addEventListener('click', () => switchTab(tabMarketingStudio, pageMarketingStudio));
+  }
+  if (tabSafeAutomation) {
+    tabSafeAutomation.addEventListener('click', () => switchTab(tabSafeAutomation, pageSafeAutomation));
+  }
+  if (tabOperationalKnowledge) {
+    tabOperationalKnowledge.addEventListener('click', () => switchTab(tabOperationalKnowledge, pageOperationalKnowledge));
   }
 }
 

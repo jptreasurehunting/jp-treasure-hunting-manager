@@ -60,6 +60,21 @@
           <span>Project Health (システム診断・稼働判定)</span>
           <span class="tab-pill-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border-color: rgba(52, 211, 153, 0.3);">Live Health</span>
         </button>
+        <button type="button" id="tabMarketingStudio" class="nav-tab-btn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          <span>AI Marketing Studio (SNS・EC販促 &amp; Rights Gate)</span>
+          <span class="tab-pill-badge" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; border-color: rgba(96, 165, 250, 0.3);">Rights Gate</span>
+        </button>
+        <button type="button" id="tabSafeAutomation" class="nav-tab-btn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          <span>Safe Automation (安全自動化ポリシー)</span>
+          <span class="tab-pill-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border-color: rgba(52, 211, 153, 0.3);">Precedence</span>
+        </button>
+        <button type="button" id="tabOperationalKnowledge" class="nav-tab-btn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          <span>Operational Knowledge (共有運用ナレッジ)</span>
+          <span class="tab-pill-badge" style="background: rgba(168, 85, 247, 0.2); color: #c084fc; border-color: rgba(192, 132, 252, 0.3);">Shared Engine</span>
+        </button>
       </nav>
     </header>
 
@@ -444,6 +459,27 @@
         <div id="project-health-root"></div>
       </main>
     </div>
+
+    <!-- 6. AI Marketing Studio ページ (Reactコンポーネントマウント領域) -->
+    <div id="pageMarketingStudio" class="page-view hidden">
+      <main class="main-layout-single">
+        <div id="marketing-studio-root"></div>
+      </main>
+    </div>
+
+    <!-- 7. Safe Automation Policy ページ (Reactコンポーネントマウント領域) -->
+    <div id="pageSafeAutomation" class="page-view hidden">
+      <main class="main-layout-single">
+        <div id="safe-automation-root"></div>
+      </main>
+    </div>
+
+    <!-- 8. Operational Knowledge Engine ページ (Reactコンポーネントマウント領域) -->
+    <div id="pageOperationalKnowledge" class="page-view hidden">
+      <main class="main-layout-single">
+        <div id="operational-knowledge-root"></div>
+      </main>
+    </div>
   </div>
 
   <!-- 二段階確認モーダル (最終確認画面) -->
@@ -517,6 +553,9 @@
   <script type="module" src="./src/mountZonosCustoms.tsx"></script>
   <script type="module" src="./src/mountBrandAsset.tsx"></script>
   <script type="module" src="./src/mountProjectHealth.tsx"></script>
+  <script type="module" src="./src/mountMarketingStudio.tsx"></script>
+  <script type="module" src="./src/mountSafeAutomation.tsx"></script>
+  <script type="module" src="./src/mountOperationalKnowledge.tsx"></script>
 </body>
 </html>
 
