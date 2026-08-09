@@ -17,6 +17,7 @@ import { runKnowledgeOrchestratorTests } from './knowledgeOrchestrator.test';
 import { runRuleFreshnessTests } from './ruleFreshness.test';
 import { runShipmentReadinessTests } from './shipmentReadiness.test';
 import { runShippingRouterTests } from './shippingRouter.test';
+import { runEnvelopeLayoutTests } from './envelopeLayout.test';
 
 export interface MasterTestSummary {
   totalPassed: number;
@@ -31,6 +32,7 @@ export interface MasterTestSummary {
 
 export function runAllAppTests(): MasterTestSummary {
   const suites = [
+    { name: 'Envelope Vector Layout & Safe Test Mode Tests', fn: runEnvelopeLayoutTests },
     { name: 'Automated Domestic Shipping Router Tests', fn: runShippingRouterTests },
     { name: 'Order Fulfillment & Shipment Readiness Gate Tests', fn: runShipmentReadinessTests },
     { name: 'Rule Freshness & Live Source Verification Tests', fn: runRuleFreshnessTests },

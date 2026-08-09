@@ -7,6 +7,7 @@ import {
   ReusablePackagingProfile,
   PackagingType
 } from '../../types/shippingRouter';
+import { SenderProfile } from '../../types/envelopeLayout';
 import {
   loadFulfillmentOrders,
   evaluateShippingRoute,
@@ -16,6 +17,8 @@ import {
   savePackagingKnowledge,
   initShippingRouterHealthModule
 } from '../../services/shippingRouterService';
+import { loadSenderProfile, saveSenderProfile } from '../../services/envelopeLayoutService';
+import { EnvelopePreviewModal } from './EnvelopePreviewModal';
 
 interface ShippingRouterCardProps {
   onAddAuditLog?: (action: string, beforeState?: string, afterState?: string) => void;
@@ -25,11 +28,13 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
   const [orders, setOrders] = useState<NormalizedFulfillmentOrder[]>(loadFulfillmentOrders());
   const [printerProfiles, setPrinterProfiles] = useState<PrinterProfile[]>(loadPrinterProfiles());
   const [packagingKnowledge, setPackagingKnowledge] = useState<ReusablePackagingProfile[]>(loadPackagingKnowledge());
+  const [senderProfile, setSenderProfile] = useState<SenderProfile>(loadSenderProfile());
   const [selectedOrderId, setSelectedOrderId] = useState<string>(orders[0]?.orderId || '');
-  const [activeTab, setActiveTab] = useState<'orders' | 'printers' | 'knowledge'>('orders');
+  const [activeTab, setActiveTab] = useState<'orders' | 'printers' | 'knowledge' | 'sender'>('orders');
   const [filterAction, setFilterAction] = useState<FulfillmentAction | 'ALL'>('ALL');
   const [showProvenance, setShowProvenance] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [previewOrder, setPreviewOrder] = useState<NormalizedFulfillmentOrder | null>(null);
 
   useEffect(() => {
     initShippingRouterHealthModule();
@@ -99,6 +104,12 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
     showToast(`🖨️ プリンタ設定を更新しました: ${newName}`);
   };
 
+  const handleSaveSenderProfile = (updated: SenderProfile) => {
+    saveSenderProfile(updated);
+    setSenderProfile(updated);
+    showToast('📭 差出人情報を更新しました');
+  };
+
   return (
     <div className="shipping-router-card card p-4 bg-slate-900 border border-slate-700 rounded-xl space-y-4 text-xs">
       {toastMessage && (
@@ -106,6 +117,11 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
           <span>🚦</span>
           <span>{toastMessage}</span>
         </div>
+      )}
+
+      {/* Envelope Preview Modal (Safe Test Mode) */}
+      {previewOrder && (
+        <EnvelopePreviewModal order={previewOrder} onClose={() => setPreviewOrder(null)} />
       )}
 
       {/* Header Banner */}
@@ -122,7 +138,7 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
           </div>
         </div>
 
-        {/* Action Counters (Spec #2, #3) */}
+        {/* Action Counters */}
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs font-mono font-bold text-emerald-300 bg-emerald-950 px-2.5 py-1 rounded border border-emerald-800 shadow">
             ✉️ 封筒直接印刷: {counts.envelope}件
@@ -167,6 +183,15 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
           onClick={() => setActiveTab('knowledge')}
         >
           📚 登録済み梱包ナレッジ ({packagingKnowledge.length})
+        </button>
+        <button
+          type="button"
+          className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+            activeTab === 'sender' ? 'bg-cyan-600 text-slate-950 shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+          }`}
+          onClick={() => setActiveTab('sender')}
+        >
+          📭 差出人情報設定
         </button>
       </div>
 
@@ -298,7 +323,7 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
                     </span>
                   </div>
 
-                  {/* Manual Review Guidance Box (Spec #9, #10) */}
+                  {/* Manual Review Guidance Box */}
                   {selectedDecision.requiresHumanReview && selectedDecision.actionRequiredReasonJa && (
                     <div className="p-3 bg-amber-950/40 rounded-lg border border-amber-800 space-y-2 text-[11px]">
                       <div className="flex items-center gap-1.5 text-amber-300 font-bold">
@@ -353,8 +378,8 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
                       <div className="font-bold text-cyan-300">{selectedDecision.packagingLabelJa}</div>
                     </div>
                     <div>
-                      <span className="text-slate-400">配送キャリア:</span>
-                      <div className="font-bold text-slate-100">{selectedDecision.carrierName}</div>
+                      <span className="text-slate-400">選定配送便:</span>
+                      <div className="font-bold text-slate-100">{selectedDecision.selectedServiceMethod || selectedDecision.carrierName}</div>
                     </div>
                   </div>
 
@@ -370,7 +395,7 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
                     </p>
                   </div>
 
-                  {/* Assigned Windows Printer Profile (Spec #17) */}
+                  {/* Assigned Windows Printer Profile */}
                   <div className="p-2.5 bg-slate-900 rounded border border-slate-800 flex justify-between items-center text-[11px]">
                     <div>
                       <span className="text-slate-400 font-bold">自動割当プリンタプロファイル:</span>
@@ -384,6 +409,20 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
                       役割: {selectedDecision.assignedPrinterProfile?.targetRole}
                     </span>
                   </div>
+
+                  {/* Phase B: Interactive Envelope Preview Button */}
+                  {selectedDecision.action === 'PRINT_ENVELOPE' && (
+                    <div className="pt-2 border-t border-slate-900 flex justify-end">
+                      <button
+                        type="button"
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-2 shadow-lg transition-all"
+                        onClick={() => setPreviewOrder(selectedOrder)}
+                      >
+                        <span>✉️</span>
+                        <span>封筒レイアウトプレビュー ＆ 安全テスト印刷 (Safe Test Mode)</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Decision Provenance Section */}
@@ -419,7 +458,7 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
         </div>
       )}
 
-      {/* TAB 2: Windows プリンタプロファイル管理 (Spec #17) */}
+      {/* TAB 2: Windows プリンタプロファイル管理 */}
       {activeTab === 'printers' && (
         <div className="space-y-3">
           <div className="flex justify-between items-center border-b border-slate-800 pb-2">
@@ -458,7 +497,7 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
         </div>
       )}
 
-      {/* TAB 3: 登録済み梱包ナレッジ (Spec #8) */}
+      {/* TAB 3: 登録済み梱包ナレッジ */}
       {activeTab === 'knowledge' && (
         <div className="space-y-3">
           <div className="flex justify-between items-center border-b border-slate-800 pb-2">
@@ -489,6 +528,102 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
                 </span>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: 差出人情報設定 (Phase B) */}
+      {activeTab === 'sender' && (
+        <div className="space-y-3">
+          <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+            <h4 className="font-bold text-cyan-300 flex items-center gap-1.5">
+              <span>📭</span>
+              <span>差出人情報設定 (Sender Information Profile)</span>
+            </h4>
+            <span className="text-xs text-slate-400">封筒表面の左下や裏面に印字される自社ショップ情報</span>
+          </div>
+
+          <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 space-y-3 max-w-xl">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-[10px] text-slate-400 font-bold">ショップ名 / 屋号:</label>
+                <input
+                  type="text"
+                  className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-slate-100 text-xs"
+                  defaultValue={senderProfile.shopName}
+                  onChange={(e) => setSenderProfile({ ...senderProfile, shopName: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] text-slate-400 font-bold">担当者 / センター名:</label>
+                <input
+                  type="text"
+                  className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-slate-100 text-xs"
+                  defaultValue={senderProfile.senderName}
+                  onChange={(e) => setSenderProfile({ ...senderProfile, senderName: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <label className="text-[10px] text-slate-400 font-bold">郵便番号:</label>
+                <input
+                  type="text"
+                  className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-slate-100 text-xs font-mono"
+                  defaultValue={senderProfile.postalCode}
+                  onChange={(e) => setSenderProfile({ ...senderProfile, postalCode: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] text-slate-400 font-bold">都道府県:</label>
+                <input
+                  type="text"
+                  className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-slate-100 text-xs"
+                  defaultValue={senderProfile.stateOrProvince}
+                  onChange={(e) => setSenderProfile({ ...senderProfile, stateOrProvince: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] text-slate-400 font-bold">市区町村:</label>
+                <input
+                  type="text"
+                  className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-slate-100 text-xs"
+                  defaultValue={senderProfile.city}
+                  onChange={(e) => setSenderProfile({ ...senderProfile, city: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] text-slate-400 font-bold">番地・建物名:</label>
+              <input
+                type="text"
+                className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-slate-100 text-xs"
+                defaultValue={`${senderProfile.addressLine1} ${senderProfile.addressLine2 || ''}`}
+                onChange={(e) => setSenderProfile({ ...senderProfile, addressLine1: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] text-slate-400 font-bold">電話番号 (任意):</label>
+              <input
+                type="text"
+                className="w-full p-2 bg-slate-900 border border-slate-700 rounded text-slate-100 text-xs font-mono"
+                defaultValue={senderProfile.phoneNumber}
+                onChange={(e) => setSenderProfile({ ...senderProfile, phoneNumber: e.target.value })}
+              />
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded-lg text-xs shadow transition-all"
+                onClick={() => handleSaveSenderProfile(senderProfile)}
+              >
+                💾 差出人情報を保存する
+              </button>
+            </div>
           </div>
         </div>
       )}
