@@ -90,6 +90,11 @@
           <span>Shipment Readiness (出荷準備ゲート)</span>
           <span class="tab-pill-badge" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; border-color: rgba(96, 165, 250, 0.3);">Readiness</span>
         </button>
+        <button type="button" id="tabShippingRouter" class="nav-tab-btn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 4.24 4.24"/><path d="m14.83 9.17 4.24-4.24"/><path d="m14.83 14.83 4.24 4.24"/><path d="m9.17 14.83-4.24 4.24"/></svg>
+          <span>Shipping Router (汎用配送ルーター)</span>
+          <span class="tab-pill-badge" style="background: rgba(14, 165, 233, 0.2); color: #38bdf8; border-color: rgba(56, 189, 248, 0.3);">Auto Router</span>
+        </button>
       </nav>
     </header>
 
@@ -516,6 +521,13 @@
         <div id="shipment-readiness-root"></div>
       </main>
     </div>
+
+    <!-- 12. Automated Domestic Shipping Router ページ (Reactコンポーネントマウント領域) -->
+    <div id="pageShippingRouter" class="page-view hidden">
+      <main class="main-layout-single">
+        <div id="shipping-router-root"></div>
+      </main>
+    </div>
   </div>
 
   <!-- 二段階確認モーダル (最終確認画面) -->
@@ -595,6 +607,7 @@
   <script type="module" src="./src/mountKnowledgeOrchestrator.tsx"></script>
   <script type="module" src="./src/mountRuleFreshness.tsx"></script>
   <script type="module" src="./src/mountShipmentReadiness.tsx"></script>
+  <script type="module" src="./src/mountShippingRouter.tsx"></script>
 </body>
 </html>
 

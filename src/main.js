@@ -654,6 +654,7 @@ function initEventListeners() {
   const tabKnowledgeOrchestrator = document.getElementById('tabKnowledgeOrchestrator');
   const tabRuleFreshness = document.getElementById('tabRuleFreshness');
   const tabShipmentReadiness = document.getElementById('tabShipmentReadiness');
+  const tabShippingRouter = document.getElementById('tabShippingRouter');
 
   const pageProfitCalculator = document.getElementById('pageProfitCalculator');
   const pageSellSimilar = document.getElementById('pageSellSimilar');
@@ -666,12 +667,13 @@ function initEventListeners() {
   const pageKnowledgeOrchestrator = document.getElementById('pageKnowledgeOrchestrator');
   const pageRuleFreshness = document.getElementById('pageRuleFreshness');
   const pageShipmentReadiness = document.getElementById('pageShipmentReadiness');
+  const pageShippingRouter = document.getElementById('pageShippingRouter');
 
   const switchTab = (activeTab, activePage) => {
-    [tabProfitCalculator, tabSellSimilar, tabZonosCustoms, tabBrandAsset, tabProjectHealth, tabMarketingStudio, tabSafeAutomation, tabOperationalKnowledge, tabKnowledgeOrchestrator, tabRuleFreshness, tabShipmentReadiness].forEach(tab => {
+    [tabProfitCalculator, tabSellSimilar, tabZonosCustoms, tabBrandAsset, tabProjectHealth, tabMarketingStudio, tabSafeAutomation, tabOperationalKnowledge, tabKnowledgeOrchestrator, tabRuleFreshness, tabShipmentReadiness, tabShippingRouter].forEach(tab => {
       if (tab) tab.classList.remove('active');
     });
-    [pageProfitCalculator, pageSellSimilar, pageZonosCustoms, pageBrandAsset, pageProjectHealth, pageMarketingStudio, pageSafeAutomation, pageOperationalKnowledge, pageKnowledgeOrchestrator, pageRuleFreshness, pageShipmentReadiness].forEach(page => {
+    [pageProfitCalculator, pageSellSimilar, pageZonosCustoms, pageBrandAsset, pageProjectHealth, pageMarketingStudio, pageSafeAutomation, pageOperationalKnowledge, pageKnowledgeOrchestrator, pageRuleFreshness, pageShipmentReadiness, pageShippingRouter].forEach(page => {
       if (page) page.classList.add('hidden');
     });
 
@@ -711,6 +713,9 @@ function initEventListeners() {
   }
   if (tabShipmentReadiness) {
     tabShipmentReadiness.addEventListener('click', () => switchTab(tabShipmentReadiness, pageShipmentReadiness));
+  }
+  if (tabShippingRouter) {
+    tabShippingRouter.addEventListener('click', () => switchTab(tabShippingRouter, pageShippingRouter));
   }
 }
 

@@ -16,11 +16,13 @@ import {
 } from '../projectHealthService';
 import { initRuleFreshnessHealthModule } from '../ruleFreshnessService';
 import { initShipmentReadinessHealthModule } from '../shipmentReadinessService';
+import { initShippingRouterHealthModule } from '../shippingRouterService';
 import { HealthCheckModulePlugin } from '../../types/projectHealth';
 
 export function runProjectHealthTests(): { passed: number; failed: number; log: string[] } {
   try {
     localStorage.clear();
+    unregisterHealthCheckModule('module_shipping_router_engine');
     unregisterHealthCheckModule('module_shipment_readiness_engine');
     unregisterHealthCheckModule('module_rule_freshness_engine');
     unregisterHealthCheckModule('module_knowledge_orchestrator');
@@ -274,6 +276,7 @@ export function runProjectHealthTests(): { passed: number; failed: number; log: 
 
   initRuleFreshnessHealthModule();
   initShipmentReadinessHealthModule();
+  initShippingRouterHealthModule();
 
   return { passed, failed, log };
 }
