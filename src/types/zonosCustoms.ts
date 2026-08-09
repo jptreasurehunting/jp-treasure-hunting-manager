@@ -67,6 +67,8 @@ export interface ZonosCustomsDeclaration {
   importSource?: 'mock' | 'live_api'; // 取込元
   selectedAccountId?: string;
   selectedAccountDisplayName?: string;
+  isDryRunMode?: boolean;             // 8月13日 本番前テスト実行(Dry Run)フラグ
+  dryRunExecutionLog?: string[];      // Dry Run 検証ログ
 }
 
 export interface ShippingSnapshotItem {

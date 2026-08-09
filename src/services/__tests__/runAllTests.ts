@@ -2,6 +2,27 @@
  * Central Test Suite Runner for JP Treasure Hunting Manager
  */
 
+// Node.js test runtime in-memory storage polyfill
+if (typeof globalThis.localStorage === 'undefined') {
+  const store: Record<string, string> = {};
+  (globalThis as any).localStorage = {
+    getItem: (key: string) => store[key] || null,
+    setItem: (key: string, val: string) => { store[key] = String(val); },
+    removeItem: (key: string) => { delete store[key]; },
+    clear: () => { Object.keys(store).forEach((k) => delete store[k]); }
+  };
+}
+
+if (typeof globalThis.sessionStorage === 'undefined') {
+  const sessStore: Record<string, string> = {};
+  (globalThis as any).sessionStorage = {
+    getItem: (key: string) => sessStore[key] || null,
+    setItem: (key: string, val: string) => { sessStore[key] = String(val); },
+    removeItem: (key: string) => { delete sessStore[key]; },
+    clear: () => { Object.keys(sessStore).forEach((k) => delete sessStore[k]); }
+  };
+}
+
 import { runProjectHealthTests } from './projectHealth.test';
 import { runDevEnvManagerTests } from './devEnvManager.test';
 import { runRuleSyncTests } from './ruleSync.test';
@@ -18,6 +39,11 @@ import { runRuleFreshnessTests } from './ruleFreshness.test';
 import { runShipmentReadinessTests } from './shipmentReadiness.test';
 import { runShippingRouterTests } from './shippingRouter.test';
 import { runEnvelopeLayoutTests } from './envelopeLayout.test';
+import { runConsolidationTests } from './consolidation.test';
+import { runCentralInventoryTests } from './centralInventory.test';
+import { runShopeeAutomationTests } from './shopeeAutomation.test';
+import { runI18nTests } from './i18n.test';
+import { runZonosAugust13ReadinessTests } from './zonosAugust13Readiness.test';
 
 export interface MasterTestSummary {
   totalPassed: number;
@@ -32,6 +58,11 @@ export interface MasterTestSummary {
 
 export function runAllAppTests(): MasterTestSummary {
   const suites = [
+    { name: 'Zonos Prepay August 13 Production-Readiness Tests', fn: runZonosAugust13ReadinessTests },
+    { name: 'Marketplace-Aware Shipment Consolidation Tests', fn: runConsolidationTests },
+    { name: 'Central Inventory SSOT & Cross-Channel Sync Tests', fn: runCentralInventoryTests },
+    { name: 'Shopee Automation & Optimization Scoring Tests', fn: runShopeeAutomationTests },
+    { name: 'Internationalization (i18n) & Locale Formatter Tests', fn: runI18nTests },
     { name: 'Envelope Vector Layout & Safe Test Mode Tests', fn: runEnvelopeLayoutTests },
     { name: 'Automated Domestic Shipping Router Tests', fn: runShippingRouterTests },
     { name: 'Order Fulfillment & Shipment Readiness Gate Tests', fn: runShipmentReadinessTests },

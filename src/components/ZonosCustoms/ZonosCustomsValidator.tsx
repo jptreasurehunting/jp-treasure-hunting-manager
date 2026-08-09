@@ -12,7 +12,8 @@ import {
   generateZonosCustomsDescription,
   inferMaterialAndSource,
   reallocateJpyDeclaredValues,
-  validateZonosPrepayDeclaration
+  validateZonosPrepayDeclaration,
+  runZonosPrepayDryRun
 } from '../../utils/zonosCustomsValidation';
 import { fetchEbayOrderData } from '../../services/ebayImportService';
 import {
@@ -68,6 +69,12 @@ export const ZonosCustomsValidator: React.FC = () => {
   const [isComparisonModalOpen, setIsComparisonModalOpen] = useState<boolean>(false);
   const [latestFetchedOrder, setLatestFetchedOrder] = useState<EbayOrderPayload | null>(null);
   const [isConflictModalOpen, setIsConflictModalOpen] = useState<boolean>(false);
+  const [isDryRunModalOpen, setIsDryRunModalOpen] = useState<boolean>(false);
+  const [dryRunReport, setDryRunReport] = useState<{
+    isReadyForAugust13: boolean;
+    executionLogs: string[];
+    reviewedPayloadText: string;
+  } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -503,6 +510,26 @@ export const ZonosCustomsValidator: React.FC = () => {
     showToast('📊 申告CSVファイルをダウンロードしました！');
   };
 
+  const handleRunDryRun = () => {
+    if (!declaration) return;
+    const report = runZonosPrepayDryRun(declaration);
+    setDryRunReport(report);
+    setIsDryRunModalOpen(true);
+    showToast(report.isReadyForAugust13 ? '🟢 8月13日 本番Dry Run 判定: READY (準備完了)' : '🟡 8月13日 本番Dry Run 判定: 要修正箇所を検知');
+  };
+
+  const handleExchangeRateChange = (newRateVal: number) => {
+    if (!declaration || isNaN(newRateVal) || newRateVal <= 0) return;
+    const updatedDecl: ZonosCustomsDeclaration = {
+      ...declaration,
+      exchangeRate: newRateVal,
+      exchangeRateSource: 'Operator Manual Override (2026-08-13 Readiness)'
+    };
+    const reallocated = reallocateJpyDeclaredValues(updatedDecl);
+    setDeclaration(reallocated);
+    showToast(`💱 為替レートを手動更新しました: ${newRateVal} JPY/${declaration.currency}`);
+  };
+
   const daysRemaining = useMemo(() => {
     if (!plannedShipmentDate) return 0;
     const target = new Date(plannedShipmentDate).getTime();
@@ -660,6 +687,14 @@ export const ZonosCustomsValidator: React.FC = () => {
           </button>
           <button
             type="button"
+            className="btn-secondary text-xs font-bold px-3 py-1.5 flex items-center gap-1 bg-purple-950 border-purple-600/60 text-purple-300 hover:bg-purple-900"
+            onClick={handleRunDryRun}
+            disabled={!declaration}
+          >
+            🧪 8月13日 Dry Run (テスト実行)
+          </button>
+          <button
+            type="button"
             className="btn-secondary text-xs font-bold px-3 py-1.5 flex items-center gap-1"
             onClick={handleRecalculate}
             disabled={!declaration}
@@ -725,8 +760,17 @@ export const ZonosCustomsValidator: React.FC = () => {
               )}
             </div>
 
-            <div className="font-mono text-xs text-slate-300">
-              為替レート: <strong className="text-amber-300">{declaration.exchangeRate} JPY/{declaration.currency}</strong> ({declaration.exchangeRateSource})
+            <div className="flex items-center gap-2 flex-wrap text-xs">
+              <span className="text-slate-400 font-mono">為替レート:</span>
+              <input
+                type="number"
+                step="0.01"
+                className="w-20 p-1 bg-slate-950 border border-slate-700 rounded text-amber-300 font-bold font-mono text-xs text-right"
+                defaultValue={declaration.exchangeRate}
+                onBlur={(e) => handleExchangeRateChange(parseFloat(e.target.value))}
+              />
+              <span className="font-mono text-slate-300">JPY/{declaration.currency}</span>
+              <span className="text-[10px] text-slate-400 font-mono">({declaration.exchangeRateSource})</span>
             </div>
           </div>
 
@@ -880,6 +924,68 @@ export const ZonosCustomsValidator: React.FC = () => {
             setLatestFetchedOrder(null);
           }}
         />
+      )}
+
+      {/* 8月13日 本番 Dry Run (テスト実行) 結果モーダル */}
+      {isDryRunModalOpen && dryRunReport && (
+        <div className="modal-overlay">
+          <div className="modal-card max-w-2xl bg-slate-900 border border-slate-700 text-slate-100 p-4 rounded-xl space-y-3">
+            <div className="flex justify-between items-center pb-2 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">🧪</span>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-100">8月13日 本番発送 Dry Run (テスト実行) 判定レポート</h3>
+                  <p className="text-[10px] text-slate-400">実API送信・決済・変更を行わず、全14項目および手動転記ペイロードの整合性を完全検証</p>
+                </div>
+              </div>
+              <span className={`px-2.5 py-1 rounded text-xs font-mono font-bold ${dryRunReport.isReadyForAugust13 ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-amber-950 text-amber-300 border border-amber-800'}`}>
+                {dryRunReport.isReadyForAugust13 ? '🟢 判定: READY (準備完了)' : '🟡 判定: REVIEW_REQUIRED (要確認)'}
+              </span>
+            </div>
+
+            {/* Logs box */}
+            <div className="space-y-1">
+              <span className="text-[10px] text-slate-400 font-bold">検証ログ (Execution Trace):</span>
+              <div className="p-2.5 bg-slate-950 rounded border border-slate-800 font-mono text-[11px] space-y-1 max-h-36 overflow-y-auto">
+                {dryRunReport.executionLogs.map((log, idx) => (
+                  <div key={idx} className={log.includes('Error') ? 'text-red-400 font-bold' : log.includes('PASS') ? 'text-emerald-400 font-bold' : 'text-slate-300'}>
+                    {log}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Formatted payload */}
+            <div className="space-y-1">
+              <span className="text-[10px] text-slate-400 font-bold">手動転記用整形データ (Manual Entry Payload):</span>
+              <textarea
+                readOnly
+                className="w-full h-36 p-2 bg-slate-950 border border-slate-800 rounded font-mono text-[11px] text-slate-200 resize-none"
+                value={dryRunReport.reviewedPayloadText}
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs font-bold"
+                onClick={() => setIsDryRunModalOpen(false)}
+              >
+                閉じる
+              </button>
+              <button
+                type="button"
+                className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-slate-100 rounded text-xs font-bold"
+                onClick={() => {
+                  navigator.clipboard.writeText(dryRunReport.reviewedPayloadText);
+                  showToast('📋 整形済み申告データをクリップボードにコピーしました！');
+                }}
+              >
+                📋 転記用テキストをコピー
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
