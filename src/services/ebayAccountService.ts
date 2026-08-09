@@ -34,7 +34,9 @@ export function createInitialEbayAccounts(): EbaySellerAccount[] {
  */
 export function loadEbayAccounts(): EbaySellerAccount[] {
   try {
-    const raw = localStorage.getItem(ACCOUNT_STORAGE_KEY) || sessionStorage.getItem(ACCOUNT_STORAGE_KEY);
+    const rawLocal = typeof localStorage !== 'undefined' ? localStorage.getItem(ACCOUNT_STORAGE_KEY) : null;
+    const rawSession = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(ACCOUNT_STORAGE_KEY) : null;
+    const raw = rawLocal || rawSession;
     if (!raw) return createInitialEbayAccounts();
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {

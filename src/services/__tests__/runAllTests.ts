@@ -15,6 +15,7 @@ import { runSafeAutomationPolicyTests } from './safeAutomationPolicy.test';
 import { runOperationalKnowledgeTests } from './operationalKnowledge.test';
 import { runKnowledgeOrchestratorTests } from './knowledgeOrchestrator.test';
 import { runRuleFreshnessTests } from './ruleFreshness.test';
+import { runShipmentReadinessTests } from './shipmentReadiness.test';
 
 export interface MasterTestSummary {
   totalPassed: number;
@@ -29,6 +30,7 @@ export interface MasterTestSummary {
 
 export function runAllAppTests(): MasterTestSummary {
   const suites = [
+    { name: 'Order Fulfillment & Shipment Readiness Gate Tests', fn: runShipmentReadinessTests },
     { name: 'Rule Freshness & Live Source Verification Tests', fn: runRuleFreshnessTests },
     { name: 'Knowledge Orchestrator & Cross-Module Reuse Tests', fn: runKnowledgeOrchestratorTests },
     { name: 'Shared Operational Knowledge Engine Tests', fn: runOperationalKnowledgeTests },

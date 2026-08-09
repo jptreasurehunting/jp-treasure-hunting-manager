@@ -85,6 +85,11 @@
           <span>Rule Freshness (ルール鮮度)</span>
           <span class="tab-pill-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border-color: rgba(52, 211, 153, 0.3);">Live Verified</span>
         </button>
+        <button type="button" id="tabShipmentReadiness" class="nav-tab-btn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+          <span>Shipment Readiness (出荷準備ゲート)</span>
+          <span class="tab-pill-badge" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; border-color: rgba(96, 165, 250, 0.3);">Readiness</span>
+        </button>
       </nav>
     </header>
 
@@ -504,6 +509,13 @@
         <div id="rule-freshness-root"></div>
       </main>
     </div>
+
+    <!-- 11. Order Fulfillment & Shipment Readiness ページ (Reactコンポーネントマウント領域) -->
+    <div id="pageShipmentReadiness" class="page-view hidden">
+      <main class="main-layout-single">
+        <div id="shipment-readiness-root"></div>
+      </main>
+    </div>
   </div>
 
   <!-- 二段階確認モーダル (最終確認画面) -->
@@ -582,6 +594,7 @@
   <script type="module" src="./src/mountOperationalKnowledge.tsx"></script>
   <script type="module" src="./src/mountKnowledgeOrchestrator.tsx"></script>
   <script type="module" src="./src/mountRuleFreshness.tsx"></script>
+  <script type="module" src="./src/mountShipmentReadiness.tsx"></script>
 </body>
 </html>
 

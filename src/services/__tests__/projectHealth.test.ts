@@ -14,11 +14,16 @@ import {
   getStatusDisplayLabel,
   getAuthorityLevelDisplayLabel
 } from '../projectHealthService';
+import { initRuleFreshnessHealthModule } from '../ruleFreshnessService';
+import { initShipmentReadinessHealthModule } from '../shipmentReadinessService';
 import { HealthCheckModulePlugin } from '../../types/projectHealth';
 
 export function runProjectHealthTests(): { passed: number; failed: number; log: string[] } {
   try {
     localStorage.clear();
+    unregisterHealthCheckModule('module_shipment_readiness_engine');
+    unregisterHealthCheckModule('module_rule_freshness_engine');
+    unregisterHealthCheckModule('module_knowledge_orchestrator');
   } catch (e) {
     // Ignore
   }
@@ -266,6 +271,9 @@ export function runProjectHealthTests(): { passed: number; failed: number; log: 
     'Test 18: Future module dynamically registered without redesigning dashboard'
   );
   unregisterHealthCheckModule('module_custom_test_plugin');
+
+  initRuleFreshnessHealthModule();
+  initShipmentReadinessHealthModule();
 
   return { passed, failed, log };
 }
