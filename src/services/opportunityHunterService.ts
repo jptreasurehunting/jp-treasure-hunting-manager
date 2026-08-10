@@ -14,7 +14,7 @@ import { HealthCheckModulePlugin } from '../types/projectHealth';
 
 const OPPORTUNITY_STORAGE_KEY = 'jp_opportunity_hunter_candidates';
 
-function safeGetItem(key: string): string | null {
+export function safeGetItem(key: string): string | null {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
       return window.localStorage.getItem(key);
@@ -25,7 +25,7 @@ function safeGetItem(key: string): string | null {
   return null;
 }
 
-function safeSetItem(key: string, value: string): void {
+export function safeSetItem(key: string, value: string): void {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
       window.localStorage.setItem(key, value);

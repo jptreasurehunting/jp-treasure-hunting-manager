@@ -2,18 +2,30 @@ import React, { useState } from 'react';
 import {
   OpportunityCandidate,
   OpportunityCategoryType,
-  OpportunityLifecycleStage
+  OpportunityLifecycleStage,
+  SourceAuthorityLevel
 } from '../../types/opportunityHunter';
 import {
   getInitialOpportunityCandidates,
   approveOpportunityCandidate,
   updateOpportunityLifecycleStage
 } from '../../services/opportunityHunterService';
+import {
+  ingestOpportunitySignals,
+  getPhase2SeedOpportunitySignals
+} from '../../services/opportunityDiscoveryService';
+import {
+  evaluateCandidateFreshness,
+  refreshOpportunityPoolFreshness
+} from '../../services/opportunityMonitoringService';
 import { formatLocaleCurrency } from '../../services/i18nService';
 
 export const OpportunityHunterCard: React.FC = () => {
   const formatCurrency = (amount: number, cur: string = 'JPY') => formatLocaleCurrency(amount, cur, 'ja-JP');
-  const [candidates, setCandidates] = useState<OpportunityCandidate[]>(() => getInitialOpportunityCandidates());
+  const [candidates, setCandidates] = useState<OpportunityCandidate[]>(() => {
+    const initial = getInitialOpportunityCandidates();
+    return refreshOpportunityPoolFreshness(initial);
+  });
   const [selectedId, setSelectedId] = useState<string>(() => candidates[0]?.id || '');
   const [operatorName, setOperatorName] = useState<string>('Staff-A (Primary)');
   const [approvalNote, setApprovalNote] = useState<string>('');
@@ -22,11 +34,21 @@ export const OpportunityHunterCard: React.FC = () => {
 
   const selectedCandidate = candidates.find((c) => c.id === selectedId) || candidates[0];
 
+  const handleIngestSignals = () => {
+    const seedSignals = getPhase2SeedOpportunitySignals();
+    const updatedPool = ingestOpportunitySignals(candidates, seedSignals);
+    const refreshed = refreshOpportunityPoolFreshness(updatedPool);
+    setCandidates(refreshed);
+    if (!refreshed.some((c) => c.id === selectedId) && refreshed.length > 0) {
+      setSelectedId(refreshed[0].id);
+    }
+  };
+
   const handleOpenApprovalModal = (action: 'WATCH' | 'PREPURCHASE' | 'REJECT') => {
     setPendingAction(action);
     setApprovalNote(
       action === 'PREPURCHASE'
-        ? '仕入原価・納期・利益率を確認の上、予約仕入を承認。'
+        ? '仕入原価・納期・利益率・知財を確認の上、予約仕入を承認。'
         : action === 'WATCH'
         ? '需要・完売速度の動向を監視リストで追跡。'
         : '利益率または需要不足のため見送り。'
@@ -75,6 +97,23 @@ export const OpportunityHunterCard: React.FC = () => {
     }
   };
 
+  const getAuthorityBadge = (authority?: SourceAuthorityLevel) => {
+    switch (authority) {
+      case 'OFFICIAL_MANUFACTURER':
+        return { label: 'Tier 1: 公式メーカー (100%)', color: 'bg-emerald-950 text-emerald-300 border-emerald-700' };
+      case 'OFFICIAL_RETAILER_OR_EVENT':
+        return { label: 'Tier 2: 公式直営/イベント (95%)', color: 'bg-cyan-950 text-cyan-300 border-cyan-700' };
+      case 'AUTHORIZED_DISTRIBUTOR':
+        return { label: 'Tier 3: 公認販売店 (85%)', color: 'bg-blue-950 text-blue-300 border-blue-700' };
+      case 'REPUTABLE_NEWS_MEDIA':
+        return { label: 'Tier 4: 大手メディア (70%)', color: 'bg-purple-950 text-purple-300 border-purple-700' };
+      case 'SECONDARY_AGGREGATOR':
+        return { label: 'Tier 5: 非公式まとめ (40%)', color: 'bg-amber-950 text-amber-300 border-amber-700' };
+      default:
+        return { label: 'Tier 6: 未検証ソース (20%)', color: 'bg-slate-800 text-slate-400 border-slate-700' };
+    }
+  };
+
   const getLifecycleStageLabel = (stage: OpportunityLifecycleStage) => {
     switch (stage) {
       case 'ANNOUNCEMENT':
@@ -101,22 +140,30 @@ export const OpportunityHunterCard: React.FC = () => {
               先行・限定品機会ハンター (Pre-Release Opportunity Hunter)
             </h2>
             <span className="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800">
-              Phase 1
+              Phase 1 & 2
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            日本限定・数量限定・予約・抽選・受注生産品を多要素（需要30%＋利益30%＋希少性20%＋実績20%）で分析し、人間承認を経て仕入判断を行います。
+            日本限定・数量限定・予約・抽選・受注生産品を多要素（需要30%＋利益30%＋希少性20%＋実績20%）で分析し、5段階ライフサイクル監視と人間承認を経て仕入判断を行います。
           </p>
         </div>
 
         <div className="flex items-center gap-3">
-          <label className="text-xs text-slate-400">操作担当者:</label>
-          <input
-            type="text"
-            value={operatorName}
-            onChange={(e) => setOperatorName(e.target.value)}
-            className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
-          />
+          <button
+            onClick={handleIngestSignals}
+            className="px-3 py-1.5 text-xs font-bold rounded-lg bg-cyan-900/70 hover:bg-cyan-800 text-cyan-200 border border-cyan-700 shadow flex items-center gap-1.5 transition"
+          >
+            <span>📥</span> 新規シグナル取得・名寄せ
+          </button>
+          <div className="flex items-center gap-2 pl-2 border-l border-slate-800">
+            <label className="text-xs text-slate-400">操作者:</label>
+            <input
+              type="text"
+              value={operatorName}
+              onChange={(e) => setOperatorName(e.target.value)}
+              className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 w-36"
+            />
+          </div>
         </div>
       </div>
 
@@ -129,7 +176,7 @@ export const OpportunityHunterCard: React.FC = () => {
             <span>総合スコア順</span>
           </div>
 
-          <div className="space-y-2.5 max-h-[560px] overflow-y-auto pr-1">
+          <div className="space-y-2.5 max-h-[580px] overflow-y-auto pr-1">
             {candidates
               .sort((a, b) => b.scoreBreakdown.finalScore - a.scoreBreakdown.finalScore)
               .map((cand) => {
@@ -137,6 +184,7 @@ export const OpportunityHunterCard: React.FC = () => {
                 const score = cand.scoreBreakdown.finalScore;
                 const isTrap = cand.scoreBreakdown.isRarityOnlyTrap;
                 const isVero = cand.scoreBreakdown.isVeroBlocked;
+                const isStale = cand.isDataStale;
 
                 return (
                   <div
@@ -159,6 +207,8 @@ export const OpportunityHunterCard: React.FC = () => {
                               ? 'bg-red-950 text-red-400 border border-red-800'
                               : isTrap
                               ? 'bg-amber-950 text-amber-400 border border-amber-800'
+                              : isStale
+                              ? 'bg-yellow-950 text-yellow-400 border border-yellow-800'
                               : score >= 75
                               ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
                               : 'bg-slate-800 text-slate-300 border border-slate-700'
@@ -181,9 +231,9 @@ export const OpportunityHunterCard: React.FC = () => {
                           </span>
                         );
                       })}
-                      {cand.opportunityTypes.length > 2 && (
-                        <span className="px-1.5 py-0.5 text-[10px] rounded border bg-slate-800 text-slate-400 border-slate-700">
-                          +{cand.opportunityTypes.length - 2}
+                      {cand.isDataStale && (
+                        <span className="px-1.5 py-0.5 text-[10px] rounded border bg-yellow-950 text-yellow-300 border-yellow-700">
+                          ⚠️ 情報陳腐化
                         </span>
                       )}
                     </div>
@@ -212,14 +262,21 @@ export const OpportunityHunterCard: React.FC = () => {
             {/* Title & Brand */}
             <div>
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-cyan-400 uppercase tracking-wider">
-                  {selectedCandidate.brand} • {selectedCandidate.category}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-cyan-400 uppercase tracking-wider">
+                    {selectedCandidate.brand} • {selectedCandidate.category}
+                  </span>
+                  {selectedCandidate.evidence.sourceAuthority && (
+                    <span className={`px-2 py-0.5 text-[10px] rounded border ${getAuthorityBadge(selectedCandidate.evidence.sourceAuthority).color}`}>
+                      {getAuthorityBadge(selectedCandidate.evidence.sourceAuthority).label}
+                    </span>
+                  )}
+                </div>
                 <span className="text-xs text-slate-400">
                   発売予定: {selectedCandidate.releaseDate || '未定'}
                 </span>
               </div>
-              <h3 className="text-base font-bold text-white mt-1 leading-snug">
+              <h3 className="text-base font-bold text-white mt-1.5 leading-snug">
                 {selectedCandidate.title}
               </h3>
             </div>
@@ -288,7 +345,7 @@ export const OpportunityHunterCard: React.FC = () => {
 
               {selectedCandidate.scoreBreakdown.penaltyDeductions > 0 && (
                 <div className="text-xs text-rose-300 bg-rose-950/40 border border-rose-800/60 p-2.5 rounded-lg flex items-center justify-between">
-                  <span>リスク・送料・規約ペナルティ減点:</span>
+                  <span>リスク・送料・規約・鮮度ペナルティ減点:</span>
                   <span className="font-bold">-{selectedCandidate.scoreBreakdown.penaltyDeductions}点</span>
                 </div>
               )}
@@ -370,6 +427,20 @@ export const OpportunityHunterCard: React.FC = () => {
                 )}
               </div>
             </div>
+
+            {/* Geographic Exclusivity & Supply Signal (Phase 2) */}
+            {selectedCandidate.geographicExclusivity && (
+              <div className="text-xs bg-slate-900/60 border border-slate-800 p-3 rounded-xl space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-rose-300">🇯🇵 国内限定証明:</span>
+                  <span className="text-slate-300">{selectedCandidate.geographicExclusivity.japanExclusivityProof}</span>
+                </div>
+                <div className="flex items-center justify-between text-slate-400">
+                  <span>海外発売予定:</span>
+                  <span>{selectedCandidate.geographicExclusivity.hasOverseasReleasePlan ? 'あり' : 'なし (日本限定)'}</span>
+                </div>
+              </div>
+            )}
 
             {/* Provenance & Evidence Details */}
             <div className="text-xs bg-slate-900/60 border border-slate-800 p-3 rounded-xl space-y-1.5">
