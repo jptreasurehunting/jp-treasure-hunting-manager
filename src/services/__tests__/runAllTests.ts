@@ -44,6 +44,7 @@ import { runCentralInventoryTests } from './centralInventory.test';
 import { runShopeeAutomationTests } from './shopeeAutomation.test';
 import { runI18nTests } from './i18n.test';
 import { runZonosAugust13ReadinessTests } from './zonosAugust13Readiness.test';
+import { runOpportunityHunterTests } from './opportunityHunter.test';
 
 export interface MasterTestSummary {
   totalPassed: number;
@@ -59,6 +60,7 @@ export interface MasterTestSummary {
 export function runAllAppTests(): MasterTestSummary {
   const suites = [
     { name: 'Zonos Prepay August 13 Production-Readiness Tests', fn: runZonosAugust13ReadinessTests },
+    { name: 'Pre-Release Opportunity Hunter Tests', fn: runOpportunityHunterTests },
     { name: 'Marketplace-Aware Shipment Consolidation Tests', fn: runConsolidationTests },
     { name: 'Central Inventory SSOT & Cross-Channel Sync Tests', fn: runCentralInventoryTests },
     { name: 'Shopee Automation & Optimization Scoring Tests', fn: runShopeeAutomationTests },
