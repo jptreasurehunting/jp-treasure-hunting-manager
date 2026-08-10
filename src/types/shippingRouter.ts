@@ -1,4 +1,4 @@
-export type SalesChannel = 'eBay' | 'Mercari' | 'YahooAuction' | 'Shopify' | 'Rakuma' | 'ManualDomestic';
+export type SalesChannel = 'eBay' | 'Mercari' | 'YahooAuction' | 'Shopify' | 'Rakuma' | 'Shopee' | 'ManualDomestic';
 
 export type PackagingType =
   | 'ENVELOPE_NAGAGATA_3' // 長形3号 (120x235mm, 厚さ1cm以内, 50g以内)
@@ -50,6 +50,7 @@ export interface NormalizedFulfillmentOrder {
   orderId: string;
   orderNumber: string;
   salesChannel: SalesChannel;
+  sellerAccountId?: string;
   buyerName: string;
   postalCode: string; // e.g. '150-0001'
   stateOrProvince: string; // e.g. '東京都'

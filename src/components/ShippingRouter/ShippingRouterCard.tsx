@@ -18,7 +18,13 @@ import {
   initShippingRouterHealthModule
 } from '../../services/shippingRouterService';
 import { loadSenderProfile, saveSenderProfile } from '../../services/envelopeLayoutService';
+import { initCentralInventoryHealthModule } from '../../services/centralInventoryService';
+import { initConsolidationHealthModule, loadFulfillmentGroups } from '../../services/consolidationService';
+import { initShopeeAutomationHealthModule } from '../../services/shopeeAutomationService';
+import { t, tBilingual, formatLocaleCurrency } from '../../services/i18nService';
 import { EnvelopePreviewModal } from './EnvelopePreviewModal';
+import { ConsolidationGroupCard } from './ConsolidationGroupCard';
+import { ShopeeAutomationCard } from './ShopeeAutomationCard';
 
 interface ShippingRouterCardProps {
   onAddAuditLog?: (action: string, beforeState?: string, afterState?: string) => void;
@@ -30,14 +36,19 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
   const [packagingKnowledge, setPackagingKnowledge] = useState<ReusablePackagingProfile[]>(loadPackagingKnowledge());
   const [senderProfile, setSenderProfile] = useState<SenderProfile>(loadSenderProfile());
   const [selectedOrderId, setSelectedOrderId] = useState<string>(orders[0]?.orderId || '');
-  const [activeTab, setActiveTab] = useState<'orders' | 'printers' | 'knowledge' | 'sender'>('orders');
+  const [activeTab, setActiveTab] = useState<'orders' | 'consolidation' | 'shopee' | 'printers' | 'knowledge' | 'sender'>('orders');
   const [filterAction, setFilterAction] = useState<FulfillmentAction | 'ALL'>('ALL');
   const [showProvenance, setShowProvenance] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [previewOrder, setPreviewOrder] = useState<NormalizedFulfillmentOrder | null>(null);
 
+  const fulfillmentGroups = useMemo(() => loadFulfillmentGroups(), [activeTab]);
+
   useEffect(() => {
     initShippingRouterHealthModule();
+    initCentralInventoryHealthModule();
+    initConsolidationHealthModule();
+    initShopeeAutomationHealthModule();
   }, []);
 
   const decisions: ShippingRouteDecision[] = useMemo(() => {
@@ -51,6 +62,11 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
   const selectedOrder = useMemo(() => {
     return orders.find((o) => o.orderId === selectedOrderId) || orders[0];
   }, [orders, selectedOrderId]);
+
+  // Check if selected order is locked inside a fulfillment group
+  const containingGroup = useMemo(() => {
+    return fulfillmentGroups.find((g) => g.orders.some((o) => o.orderId === selectedOrderId));
+  }, [fulfillmentGroups, selectedOrderId]);
 
   const counts = useMemo(() => {
     return {
@@ -130,10 +146,10 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
           <span className="text-2xl">🚦</span>
           <div>
             <h3 className="font-black text-sm text-slate-100">
-              Automated Domestic Shipping Router (汎用シッピング・ルーター ＆ 自動フルフィルメント基盤)
+              {tBilingual('nav.shipping_router')}
             </h3>
             <p className="text-[11px] text-slate-400">
-              国内/国際・梱包形態・数量・配送方法から最適なフルフィルメントアクション（封筒直接印刷・段ボール小包・レターパック・QR便）を自動判定します。
+              国内/国際・梱包形態・数量・モール規約から最適なフルフィルメントアクション（封筒直接印刷・おまとめ同梱・Shopee自動最適化）を自動判定します。
             </p>
           </div>
         </div>
@@ -164,7 +180,25 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
           }`}
           onClick={() => setActiveTab('orders')}
         >
-          📋 受注ルーティング判定一覧 ({orders.length})
+          {tBilingual('nav.orders')} ({orders.length})
+        </button>
+        <button
+          type="button"
+          className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+            activeTab === 'consolidation' ? 'bg-cyan-600 text-slate-950 shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+          }`}
+          onClick={() => setActiveTab('consolidation')}
+        >
+          {tBilingual('nav.consolidation')} ({fulfillmentGroups.length})
+        </button>
+        <button
+          type="button"
+          className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+            activeTab === 'shopee' ? 'bg-cyan-600 text-slate-950 shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+          }`}
+          onClick={() => setActiveTab('shopee')}
+        >
+          {tBilingual('nav.shopee')}
         </button>
         <button
           type="button"
@@ -173,7 +207,7 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
           }`}
           onClick={() => setActiveTab('printers')}
         >
-          🖨️ Windows プリンタプロファイル ({printerProfiles.length})
+          {tBilingual('nav.printers')} ({printerProfiles.length})
         </button>
         <button
           type="button"
@@ -182,7 +216,7 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
           }`}
           onClick={() => setActiveTab('knowledge')}
         >
-          📚 登録済み梱包ナレッジ ({packagingKnowledge.length})
+          {tBilingual('nav.knowledge')} ({packagingKnowledge.length})
         </button>
         <button
           type="button"
@@ -191,9 +225,19 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
           }`}
           onClick={() => setActiveTab('sender')}
         >
-          📭 差出人情報設定
+          {tBilingual('nav.sender')}
         </button>
       </div>
+
+      {/* SUB-TAB: CONSOLIDATION (PHASE C) */}
+      {activeTab === 'consolidation' && (
+        <ConsolidationGroupCard onAddAuditLog={onAddAuditLog} />
+      )}
+
+      {/* SUB-TAB: SHOPEE AUTOMATION & INVENTORY SYNC (PHASE C) */}
+      {activeTab === 'shopee' && (
+        <ShopeeAutomationCard onAddAuditLog={onAddAuditLog} />
+      )}
 
       {/* TAB 1: 受注ルーティング判定一覧 */}
       {activeTab === 'orders' && (
@@ -254,6 +298,7 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
                 {filteredOrders.map((order) => {
                   const dec = decisions.find((d) => d.orderId === order.orderId);
                   const isSelected = order.orderId === selectedOrderId;
+                  const isGroupLocked = fulfillmentGroups.some((g) => g.orders.some((o) => o.orderId === order.orderId));
 
                   return (
                     <div
@@ -269,19 +314,26 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
                         <span className="font-mono text-[10px] text-cyan-400 font-bold">
                           [{order.salesChannel}] {order.orderNumber}
                         </span>
-                        <span
-                          className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded ${
-                            dec?.action === 'PRINT_ENVELOPE'
-                              ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
-                              : dec?.action === 'CREATE_SHIPMENT_AND_PRINT_LABEL'
-                              ? 'bg-cyan-950 text-cyan-300 border border-cyan-800'
-                              : dec?.action === 'MANUAL_REVIEW'
-                              ? 'bg-amber-950 text-amber-300 border border-amber-800'
-                              : 'bg-purple-950 text-purple-300 border border-purple-800'
-                          }`}
-                        >
-                          {dec?.action}
-                        </span>
+                        <div className="flex items-center gap-1">
+                          {isGroupLocked && (
+                            <span className="text-[8px] font-mono px-1 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
+                              🔒 同梱
+                            </span>
+                          )}
+                          <span
+                            className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                              dec?.action === 'PRINT_ENVELOPE'
+                                ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                                : dec?.action === 'CREATE_SHIPMENT_AND_PRINT_LABEL'
+                                ? 'bg-cyan-950 text-cyan-300 border border-cyan-800'
+                                : dec?.action === 'MANUAL_REVIEW'
+                                ? 'bg-amber-950 text-amber-300 border border-amber-800'
+                                : 'bg-purple-950 text-purple-300 border border-purple-800'
+                            }`}
+                          >
+                            {dec?.action}
+                          </span>
+                        </div>
                       </div>
 
                       <p className="text-[11px] text-slate-200 font-medium line-clamp-2 mt-1">{order.itemTitle}</p>
@@ -322,6 +374,23 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
                       ハッシュ: {selectedDecision.idempotencyHash}
                     </span>
                   </div>
+
+                  {/* Exclusive Print Lock Warning if in Group */}
+                  {containingGroup && (
+                    <div className="p-2.5 bg-emerald-950/40 rounded-lg border border-emerald-700 text-emerald-200 text-xs font-bold flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span>🔒</span>
+                        <span>{t('consolidation.action.print_locked')} [{containingGroup.groupName}]</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="text-[10px] text-cyan-300 underline font-bold"
+                        onClick={() => setActiveTab('consolidation')}
+                      >
+                        同梱タブで確認 ➔
+                      </button>
+                    </div>
+                  )}
 
                   {/* Manual Review Guidance Box */}
                   {selectedDecision.requiresHumanReview && selectedDecision.actionRequiredReasonJa && (
@@ -371,7 +440,7 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
                     </div>
                     <div>
                       <span className="text-slate-400">購入数量 / 金額:</span>
-                      <div className="font-bold text-emerald-300">{selectedOrder.quantity}点 ({selectedOrder.unitPriceJpyOrUsd.toLocaleString()} {selectedOrder.currency})</div>
+                      <div className="font-bold text-emerald-300">{selectedOrder.quantity}点 ({formatLocaleCurrency(selectedOrder.unitPriceJpyOrUsd, selectedOrder.currency)})</div>
                     </div>
                     <div>
                       <span className="text-slate-400">梱包タイプ:</span>
@@ -410,16 +479,21 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
                     </span>
                   </div>
 
-                  {/* Phase B: Interactive Envelope Preview Button */}
+                  {/* Envelope Preview Button */}
                   {selectedDecision.action === 'PRINT_ENVELOPE' && (
                     <div className="pt-2 border-t border-slate-900 flex justify-end">
                       <button
                         type="button"
-                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-2 shadow-lg transition-all"
+                        disabled={Boolean(containingGroup)}
+                        className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 shadow-lg transition-all ${
+                          containingGroup
+                            ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                            : 'bg-emerald-600 hover:bg-emerald-500 text-slate-950'
+                        }`}
                         onClick={() => setPreviewOrder(selectedOrder)}
                       >
                         <span>✉️</span>
-                        <span>封筒レイアウトプレビュー ＆ 安全テスト印刷 (Safe Test Mode)</span>
+                        <span>{containingGroup ? '🔒 おまとめグループに含まれているため個別印刷ロック中' : '封筒レイアウトプレビュー ＆ 安全テスト印刷 (Safe Test Mode)'}</span>
                       </button>
                     </div>
                   )}
@@ -464,7 +538,7 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
           <div className="flex justify-between items-center border-b border-slate-800 pb-2">
             <h4 className="font-bold text-cyan-300 flex items-center gap-1.5">
               <span>🖨️</span>
-              <span>Windows プリンタプロファイル設定</span>
+              <span>{tBilingual('nav.printers')}</span>
             </h4>
             <span className="text-xs text-slate-400">ハードコードを排除し、Windows上の実プリンタ名と給紙トレイを柔軟にマッピング</span>
           </div>
@@ -503,7 +577,7 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
           <div className="flex justify-between items-center border-b border-slate-800 pb-2">
             <h4 className="font-bold text-cyan-300 flex items-center gap-1.5">
               <span>📚</span>
-              <span>再利用可能 梱包 ＆ シッピングナレッジ (Packaging Knowledge Profiles)</span>
+              <span>{tBilingual('nav.knowledge')}</span>
             </h4>
             <span className="text-xs text-slate-400">過去に確定した梱包実績を自動再利用し、重複確認をゼロ化</span>
           </div>
@@ -532,13 +606,13 @@ export const ShippingRouterCard: React.FC<ShippingRouterCardProps> = ({ onAddAud
         </div>
       )}
 
-      {/* TAB 4: 差出人情報設定 (Phase B) */}
+      {/* TAB 4: 差出人情報設定 */}
       {activeTab === 'sender' && (
         <div className="space-y-3">
           <div className="flex justify-between items-center border-b border-slate-800 pb-2">
             <h4 className="font-bold text-cyan-300 flex items-center gap-1.5">
               <span>📭</span>
-              <span>差出人情報設定 (Sender Information Profile)</span>
+              <span>{tBilingual('nav.sender')}</span>
             </h4>
             <span className="text-xs text-slate-400">封筒表面の左下や裏面に印字される自社ショップ情報</span>
           </div>

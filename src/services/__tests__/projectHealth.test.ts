@@ -17,11 +17,17 @@ import {
 import { initRuleFreshnessHealthModule } from '../ruleFreshnessService';
 import { initShipmentReadinessHealthModule } from '../shipmentReadinessService';
 import { initShippingRouterHealthModule } from '../shippingRouterService';
+import { initCentralInventoryHealthModule } from '../centralInventoryService';
+import { initConsolidationHealthModule } from '../consolidationService';
+import { initShopeeAutomationHealthModule } from '../shopeeAutomationService';
 import { HealthCheckModulePlugin } from '../../types/projectHealth';
 
 export function runProjectHealthTests(): { passed: number; failed: number; log: string[] } {
   try {
     localStorage.clear();
+    unregisterHealthCheckModule('module_central_inventory_sync');
+    unregisterHealthCheckModule('module_shopee_automation_engine');
+    unregisterHealthCheckModule('module_shipment_consolidation_engine');
     unregisterHealthCheckModule('module_shipping_router_engine');
     unregisterHealthCheckModule('module_shipment_readiness_engine');
     unregisterHealthCheckModule('module_rule_freshness_engine');
@@ -277,6 +283,9 @@ export function runProjectHealthTests(): { passed: number; failed: number; log: 
   initRuleFreshnessHealthModule();
   initShipmentReadinessHealthModule();
   initShippingRouterHealthModule();
+  initCentralInventoryHealthModule();
+  initConsolidationHealthModule();
+  initShopeeAutomationHealthModule();
 
   return { passed, failed, log };
 }
