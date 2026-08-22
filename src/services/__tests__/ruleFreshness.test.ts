@@ -37,6 +37,7 @@ export function runRuleFreshnessTests(): { passed: number; failed: number; log: 
     }
   };
 
+  refreshTargetedRuleFreshness('all_stale');
   const kb = loadOperationalKnowledge();
 
   // Test 1: Fresh official rule -> evaluates to CURRENT (最新確認済み)

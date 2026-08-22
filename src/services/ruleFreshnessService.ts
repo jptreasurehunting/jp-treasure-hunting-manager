@@ -377,7 +377,11 @@ export function refreshTargetedRuleFreshness(knowledgeIdOrDomain: string): {
 
   kb.forEach((entry) => {
     if (entry.knowledgeId === knowledgeIdOrDomain || entry.domain === knowledgeIdOrDomain || knowledgeIdOrDomain === 'all_stale') {
-      entry.verifiedDate = new Date().toISOString().split('T')[0];
+      const today = new Date().toISOString().split('T')[0];
+      entry.verifiedDate = today;
+      if (entry.expiryDate && entry.expiryDate < today) {
+        entry.expiryDate = `${parseInt(today.slice(0, 4), 10) + 1}${today.slice(4)}`;
+      }
       entry.currentStatus = 'ACTIVE';
       updatedEntries.push(entry);
     }

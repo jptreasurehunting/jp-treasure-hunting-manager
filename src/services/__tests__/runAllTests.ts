@@ -46,6 +46,7 @@ import { runI18nTests } from './i18n.test';
 import { runZonosAugust13ReadinessTests } from './zonosAugust13Readiness.test';
 import { runOpportunityHunterTests } from './opportunityHunter.test';
 import { runOpportunityHunterPhase2Tests } from './opportunityHunterPhase2.test';
+import { runShippingDecisionEngineTests } from './shippingDecisionEngine.test';
 
 export interface MasterTestSummary {
   totalPassed: number;
@@ -60,6 +61,7 @@ export interface MasterTestSummary {
 
 export function runAllAppTests(): MasterTestSummary {
   const suites = [
+    { name: 'Shipping Decision Engine Foundation Tests', fn: runShippingDecisionEngineTests },
     { name: 'Zonos Prepay August 13 Production-Readiness Tests', fn: runZonosAugust13ReadinessTests },
     { name: 'Pre-Release Opportunity Hunter Phase 1 Tests', fn: runOpportunityHunterTests },
     { name: 'Pre-Release Opportunity Hunter Phase 2 Discovery & Lifecycle Tests', fn: runOpportunityHunterPhase2Tests },
