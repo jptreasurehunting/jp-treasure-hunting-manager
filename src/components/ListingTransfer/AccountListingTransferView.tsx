@@ -1,173 +1,215 @@
 import React, { useState, useMemo } from 'react';
-import {
-  EbaySellerAccount,
-  EbayListingTransferItem,
-  ListingTransferSettings
-} from '../../types/zonosCustoms';
-import { TransferConfirmModal } from './TransferConfirmModal';
+import { EbaySellerAccount, CountryComplianceRecord, EbayListingTransferItem } from '../../types/zonosCustoms';
+import { MOCK_ACTIVE_LISTINGS } from '../../data/mockActiveListings';
+import { DuplicateListingWarningModal } from '../Compliance/DuplicateListingWarningModal';
 
 interface AccountListingTransferViewProps {
   accounts: EbaySellerAccount[];
-  complianceRecords?: Array<{ countryCode: string; countryName: string; isSalesEnabled: boolean }>;
-  onAddAuditLog?: (action: string, beforeState?: string, afterState?: string) => void;
+  complianceRecords: CountryComplianceRecord[];
+  onAddAuditLog: (action: string, beforeState?: string, afterState?: string) => void;
 }
-
-// Sample listing items for UI demonstration (Ver.1.6 UI Scope)
-const SAMPLE_TRANSFER_ITEMS: EbayListingTransferItem[] = [
-  {
-    itemId: '256111222001',
-    sku: 'SKU-CAM-001',
-    title: 'Canon AE-1 Program Vintage 35mm Film Camera w/ 50mm Lens',
-    price: 300.0,
-    currency: 'USD',
-    quantity: 1,
-    category: 'Cameras & Photo > Film Cameras',
-    imageUrl: 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=150&auto=format&fit=crop&q=80',
-    isSelected: true
-  },
-  {
-    itemId: '256111222002',
-    sku: 'SKU-LENS-002',
-    title: 'Canon FD 50mm f/1.4 S.S.C. Prime Lens - Mint Condition',
-    price: 125.5,
-    currency: 'USD',
-    quantity: 2,
-    category: 'Cameras & Photo > Lenses & Filters',
-    imageUrl: 'https://images.unsplash.com/photo-1617005082133-548c4dd27f35?w=150&auto=format&fit=crop&q=80',
-    isSelected: true
-  },
-  {
-    itemId: '256111222003',
-    sku: 'SKU-SONY-003',
-    title: 'Sony Alpha A7 IV Mirrorless Digital Camera Body',
-    price: 2100.0,
-    currency: 'USD',
-    quantity: 1,
-    category: 'Cameras & Photo > Digital Cameras',
-    imageUrl: 'https://images.unsplash.com/photo-1512790182412-b19e6d62bc39?w=150&auto=format&fit=crop&q=80',
-    isSelected: false
-  },
-  {
-    itemId: '256111222004',
-    sku: 'SKU-NIKON-004',
-    title: 'Nikon F3 HP SLR 35mm Film Camera Body Only',
-    price: 340.0,
-    currency: 'USD',
-    quantity: 1,
-    category: 'Cameras & Photo > Film Cameras',
-    imageUrl: 'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=150&auto=format&fit=crop&q=80',
-    isSelected: false
-  }
-];
 
 export const AccountListingTransferView: React.FC<AccountListingTransferViewProps> = ({
   accounts,
   complianceRecords,
   onAddAuditLog
 }) => {
-  const [sourceAccountId, setSourceAccountId] = useState<string>('acc_01');
-  const [destinationAccountId, setDestinationAccountId] = useState<string>('acc_02');
+  // 1. 接続済み（connected）セラーアカウントのみを抽出
+  const connectedAccounts = useMemo(() => accounts.filter(a => a.connectionStatus === 'connected'), [accounts]);
+
+  // デフォルト値: 接続されているアカウントのうち最初の2つを割り当てる
+  const initialSourceId = connectedAccounts[0]?.id || '';
+  const initialDestId = connectedAccounts[1]?.id || connectedAccounts[0]?.id || '';
+
+  const [sourceAccountId, setSourceAccountId] = useState<string>(initialSourceId);
+  const [destinationAccountId, setDestinationAccountId] = useState<string>(initialDestId);
   const [listingVisibility, setListingVisibility] = useState<'draft' | 'active'>('draft');
 
-  const [items, setItems] = useState<EbayListingTransferItem[]>(SAMPLE_TRANSFER_ITEMS);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState<boolean>(false);
+  // 2. リスティングデータ状態
+  const [items, setItems] = useState<EbayListingTransferItem[]>(() =>
+    MOCK_ACTIVE_LISTINGS.map(item => ({
+      itemId: item.itemId,
+      sku: item.sku || '',
+      title: item.title,
+      price: item.price,
+      currency: item.currency,
+      quantity: item.quantity,
+      category: item.category,
+      imageUrl: item.imageUrl,
+      isSelected: false
+    }))
+  );
+
+  // 3. ローディングやトースト表示
+  const [isTransferring, setIsTransferring] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Accounts objects lookup
-  const sourceAccount = useMemo(() => {
-    return accounts.find((a) => a.id === sourceAccountId) || accounts[0];
-  }, [accounts, sourceAccountId]);
-
-  const destinationAccount = useMemo(() => {
-    return accounts.find((a) => a.id === destinationAccountId) || accounts[1] || accounts[0];
-  }, [accounts, destinationAccountId]);
-
-  // Validation: Source and Destination cannot be the same account
-  const isSameAccount = sourceAccountId === destinationAccountId;
-
-  // Filtered items by search query
-  const filteredItems = useMemo(() => {
-    if (!searchQuery.trim()) return items;
-    const q = searchQuery.toLowerCase().trim();
-    return items.filter(
-      (item) =>
-        item.title.toLowerCase().includes(q) ||
-        item.sku.toLowerCase().includes(q) ||
-        item.itemId.includes(q)
-    );
-  }, [items, searchQuery]);
-
-  // Selected items list
-  const selectedItems = useMemo(() => {
-    return items.filter((i) => i.isSelected);
-  }, [items]);
-
-  // Checkbox toggle handlers
-  const handleToggleItem = (itemId: string) => {
-    setItems((prev) =>
-      prev.map((i) => (i.itemId === itemId ? { ...i, isSelected: !i.isSelected } : i))
-    );
-  };
-
-  const handleSelectAll = (select: boolean) => {
-    setItems((prev) => prev.map((i) => ({ ...i, isSelected: select })));
-  };
-
-  const handleExecuteTransferTrigger = () => {
-    if (isSameAccount) {
-      alert('転記元と転記先には異なるアカウントを選択してください。');
-      return;
-    }
-    if (selectedItems.length === 0) {
-      alert('転記対象のリスティングを1件以上選択してください。');
-      return;
-    }
-
-    // Spec #9: Validate destination country compliance before Move
-    if (complianceRecords) {
-      const disabledCountries = complianceRecords.filter((c) => !c.isSalesEnabled);
-      const isGermanyDisabled = disabledCountries.some((c) => c.countryCode === 'DE');
-      if (isGermanyDisabled) {
-        if (onAddAuditLog) {
-          onAddAuditLog('未承認国のためMove Listingを停止', 'Germany', 'LUCID未検証のためMoveブロック');
-        }
-      }
-    }
-
-    setIsConfirmModalOpen(true);
-  };
-
-  const handleConfirmTransfer = () => {
-    setIsConfirmModalOpen(false);
-    const visText = listingVisibility === 'draft' ? '下書き (Draft)' : '出品中 (Active)';
-    showToast(
-      `🎉 ${selectedItems.length}件のリスティングを [${sourceAccount.displayName}] から [${destinationAccount.displayName}] へ安全移動 (${visText}) しました！(転記先成功確認後に元出品を終了)`
-    );
-  };
+  // 4. 重複出品警告モーダルの状態
+  const [duplicateModalOpen, setDuplicateModalOpen] = useState<boolean>(false);
+  const [duplicateItem, setDuplicateItem] = useState<{ sku: string; title: string } | null>(null);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 4000);
+    setTimeout(() => setToastMessage(null), 3500);
   };
 
-  const settings: ListingTransferSettings = {
-    sourceAccountId,
-    destinationAccountId,
-    transferMode: 'move',
-    listingVisibility
+  const sourceAccount = accounts.find(a => a.id === sourceAccountId);
+  const destAccount = accounts.find(a => a.id === destinationAccountId);
+
+  // ドイツ包装法(LUCID)の適合チェック
+  const destGermanyCompliant = useMemo(() => {
+    const deRec = complianceRecords.find(r => r.countryCode === 'DE');
+    return deRec ? deRec.isSalesEnabled : false;
+  }, [complianceRecords]);
+
+  // ドイツ以外も含めた全規制適合チェック（移行先アカウント基準）
+  const blockedCountries = useMemo(() => {
+    return complianceRecords.filter(r => !r.isSalesEnabled && r.countryCode !== 'US' && r.countryCode !== 'CA' && r.countryCode !== 'AU');
+  }, [complianceRecords]);
+
+  const selectedCount = useMemo(() => items.filter(i => i.isSelected).length, [items]);
+
+  // 必須条件に基づく現在発生している全ての実行不可理由の配列
+  const validationErrors = useMemo((): string[] => {
+    const errors: string[] = [];
+
+    if (items.length > 0 && selectedCount === 0) {
+      errors.push('移転するリスティングを1件以上選択してください。');
+    }
+    if (!sourceAccountId) {
+      errors.push('コピー元の接続済みセラーアカウントを選択してください。');
+    }
+    if (!destinationAccountId) {
+      errors.push('コピー先の接続済みセラーアカウントを選択してください。');
+    }
+
+    const srcAcc = accounts.find(a => a.id === sourceAccountId);
+    const dstAcc = accounts.find(a => a.id === destinationAccountId);
+
+    if (srcAcc && srcAcc.connectionStatus !== 'connected') {
+      errors.push(`コピー元アカウント [${srcAcc.displayName}] が接続状態ではありません。`);
+    }
+    if (dstAcc && dstAcc.connectionStatus !== 'connected') {
+      errors.push(`コピー先アカウント [${dstAcc.displayName}] が接続状態ではありません。`);
+    }
+    if (sourceAccountId && destinationAccountId && sourceAccountId === destinationAccountId) {
+      errors.push('コピー元とコピー先には異なるアカウントを指定してください。');
+    }
+    if (!destGermanyCompliant) {
+      errors.push('コピー先アカウントはドイツ包装法(LUCID)への適合が未完了です。ドイツ向け発送設定が含まれる商品は適合完了まで移行できません。');
+    }
+    if (blockedCountries.length > 0) {
+      const countryNames = blockedCountries.map(c => c.countryName).join(', ');
+      errors.push(`コピー先アカウントで以下の配送先国のコンプライアンス適合が未完了です: ${countryNames}`);
+    }
+
+    return errors;
+  }, [items, selectedCount, sourceAccountId, destinationAccountId, accounts, destGermanyCompliant, blockedCountries]);
+
+  // チェックボックス切り替え
+  const handleSelectItem = (itemId: string) => {
+    setItems(prev => prev.map(i => i.itemId === itemId ? { ...i, isSelected: !i.isSelected } : i));
+  };
+
+  // 全選択・全解除
+  const handleSelectAll = (checked: boolean) => {
+    setItems(prev => prev.map(i => ({ ...i, isSelected: checked })));
+  };
+
+  // 転記実行トリガー
+  const handleStartTransfer = () => {
+    const selectedItems = items.filter(i => i.isSelected);
+
+    // ガード条件 1: リスティング未選択（通常の未選択状態は監査ログを出さない）
+    if (selectedItems.length === 0) {
+      alert('⚠️ 移行対象のリスティングを選択してください。');
+      return;
+    }
+
+    const srcAcc = accounts.find(a => a.id === sourceAccountId);
+    const dstAcc = accounts.find(a => a.id === destinationAccountId);
+
+    // ガード条件 2〜5: 実行不可判定の再確認 (関数先頭での防御)
+    const criticalErrors: string[] = [];
+    if (!srcAcc || srcAcc.connectionStatus !== 'connected') {
+      criticalErrors.push('コピー元アカウント未接続');
+    }
+    if (!dstAcc || dstAcc.connectionStatus !== 'connected') {
+      criticalErrors.push('コピー先アカウント未接続');
+    }
+    if (sourceAccountId === destinationAccountId) {
+      criticalErrors.push('コピー元とコピー先が同一アカウント');
+    }
+    if (!destGermanyCompliant) {
+      criticalErrors.push('移行先ドイツ包装法(LUCID)未適合');
+    }
+    if (blockedCountries.length > 0) {
+      const countryCodes = blockedCountries.map(c => c.countryCode).join(', ');
+      criticalErrors.push(`移行先配送先不適合 (${countryCodes})`);
+    }
+
+    if (criticalErrors.length > 0) {
+      const errorMsg = criticalErrors.join(', ');
+      // 監査ログに移行拒否エラーを詳細に記録
+      onAddAuditLog(
+        'eBayリスティング移行拒否',
+        `移行元: ${srcAcc?.displayName || sourceAccountId} -> 移行先: ${dstAcc?.displayName || destinationAccountId}`,
+        `安全ガード作動: [${errorMsg}] により移行処理を強制中断しました。`
+      );
+      alert(`❌ 安全ガードにより移行を中止しました。\n理由:\n${criticalErrors.map(err => `・${err}`).join('\n')}`);
+      return;
+    }
+
+    // 重複ポリシーチェックのシミュレーション
+    const hasDuplicate = selectedItems.find(i => i.sku === 'CANON-AE1-001');
+    if (hasDuplicate) {
+      setDuplicateItem({ sku: hasDuplicate.sku, title: hasDuplicate.title });
+      setDuplicateModalOpen(true);
+      onAddAuditLog(
+        '重複出品ポリシー警告検出',
+        `移行元: ${srcAcc?.displayName || sourceAccountId}`,
+        `重複SKU: ${hasDuplicate.sku}`
+      );
+      return;
+    }
+
+    // 通常の移行実行
+    executeTransfer(selectedItems);
+  };
+
+  // 実際の移行処理（シミュレーション）
+  const executeTransfer = (itemsToTransfer: EbayListingTransferItem[]) => {
+    setIsTransferring(true);
+    setDuplicateModalOpen(false);
+
+    setTimeout(() => {
+      setIsTransferring(false);
+
+      const skuList = itemsToTransfer.map(i => i.sku).join(', ');
+      onAddAuditLog(
+        'eBayリスティング移行完了',
+        `移行元: ${sourceAccount?.displayName || sourceAccountId} (件数: ${itemsToTransfer.length})`,
+        `移行先: ${destAccount?.displayName || destinationAccountId} | 状態: ${listingVisibility === 'draft' ? '下書き(Draft)' : 'アクティブ(Active)'} | SKU: ${skuList}`
+      );
+
+      showToast(`✓ ${itemsToTransfer.length}件の出品データを ${destAccount?.displayName || '移行先アカウント'} へ正常に移行しました！`);
+
+      // 移行完了したものを未選択に戻す
+      setItems(prev => prev.map(i => ({ ...i, isSelected: false })));
+    }, 1500);
   };
 
   return (
-    <div className="account-listing-transfer-view space-y-6">
-      {/* Top Banner Header */}
+    <div className="account-listing-transfer-container space-y-6">
+      {/* ページ案内 */}
       <div className="japan-post-banner card">
         <div className="banner-content-row space-between">
           <div className="banner-text-group">
-            <div className="banner-tag-badge">🚚 eBay リスティング移動 (Move 専用)</div>
-            <h2 className="banner-title-ja">eBay アカウント間 リスティング安全移動・移行 (Ver.1.6)</h2>
+            <div className="banner-tag-badge">🔄 eBay アカウント間連携 (Ver.1.6)</div>
+            <h2 className="banner-title-ja">eBay Listing Transfer Manager (リスティング転記・移行)</h2>
             <p className="banner-desc-ja">
-              転記先アカウントに出品を作成・検証し、成功確認後にのみ転記元の元出品を安全に終了する専用移動ワークフローです。
+              接続済みのeBayセラーアカウント間での出品データの複製・移転シミュレーションを行います。
+              重複出品（Duplicate Listing）によるアカウント規制ポリシーの適用を未然に防ぎます。
             </p>
           </div>
         </div>
@@ -179,249 +221,239 @@ export const AccountListingTransferView: React.FC<AccountListingTransferViewProp
         </div>
       )}
 
-      {/* 3-Step Sequential Workflow Safety Banner */}
-      <div className="sequential-workflow-banner card border-emerald-500/40 bg-slate-900/90 padding-md">
-        <div className="flex items-center gap-3 margin-bottom-xs">
-          <span className="text-xl">🛡️</span>
-          <h3 className="font-bold text-emerald-400 text-sm">安心移動 3ステップ・シーケンシャルワークフロー</h3>
-        </div>
-        <div className="grid-3col text-xs space-x-2 margin-top-xs">
-          <div className="step-card-sub p-2 rounded bg-slate-800/80 border border-slate-700">
-            <strong className="text-highlight block mb-1">1. 転記先に出品作成</strong>
-            <span className="text-muted">転記先アカウントへ出品を作成します。</span>
+      {/* 設定エリア */}
+      <div className="grid-2col gap-6">
+        {/* アカウント選択＆モード設定カード */}
+        <div className="card">
+          <div className="card-header">
+            <h3 className="card-title text-base font-bold">1. アカウント＆公開モードの指定</h3>
           </div>
-          <div className="step-card-sub p-2 rounded bg-slate-800/80 border border-slate-700">
-            <strong className="text-highlight-gold block mb-1">2. 成功を検証・確認</strong>
-            <span className="text-muted">転記先での正常作成（Item ID発行）を確認します。</span>
-          </div>
-          <div className="step-card-sub p-2 rounded bg-slate-800/80 border border-slate-700">
-            <strong className="text-emerald-400 block mb-1">3. 元出品を安全に終了</strong>
-            <span className="text-muted">成功確定後に初めて転記元の元出品を終了します。</span>
-          </div>
-        </div>
-      </div>
 
-      {/* Account Selection Card */}
-      <div className="card ebay-baseline-card">
-        <div className="card-header space-between">
-          <h3 className="card-title text-base font-semibold">1. 転記元・転記先アカウント選択</h3>
-          <span className="baseline-badge">アカウント設定</span>
-        </div>
-
-        <div className="card-body space-y-4">
-          <div className="grid-2col">
-            {/* Source Account */}
-            <div className="form-group">
-              <label htmlFor="sourceAccountSelect" className="form-label font-bold text-xs">
-                転記元アカウント (Source Account)
+          <div className="card-body space-y-4">
+            {/* コピー元アカウント */}
+            <div>
+              <label className="input-label-sm block mb-1">
+                コピー元セラーアカウント (Source Account)
               </label>
               <select
-                id="sourceAccountSelect"
-                className="form-control select-account-dropdown font-semibold"
+                className="input-select-sm w-full"
                 value={sourceAccountId}
                 onChange={(e) => setSourceAccountId(e.target.value)}
               >
-                {accounts.map((acc) => (
+                {connectedAccounts.length === 0 && (
+                  <option value="">接続済みアカウントが存在しません</option>
+                )}
+                {connectedAccounts.map((acc) => (
                   <option key={acc.id} value={acc.id}>
-                    {acc.displayName} ({acc.ebayUsername})
+                    {acc.displayName} ({acc.ebayUsername}) - Connected
                   </option>
                 ))}
               </select>
-              <p className="field-hint text-xs">※ 移動する出品データの元所有アカウントを選択します</p>
             </div>
 
-            {/* Destination Account */}
-            <div className="form-group">
-              <label htmlFor="destinationAccountSelect" className="form-label font-bold text-xs">
-                転記先アカウント (Destination Account)
+            {/* コピー先アカウント */}
+            <div>
+              <label className="input-label-sm block mb-1">
+                コピー先セラーアカウント (Destination Account)
               </label>
               <select
-                id="destinationAccountSelect"
-                className="form-control select-account-dropdown font-semibold"
+                className="input-select-sm w-full"
                 value={destinationAccountId}
                 onChange={(e) => setDestinationAccountId(e.target.value)}
               >
-                {accounts.map((acc) => (
+                {connectedAccounts.length === 0 && (
+                  <option value="">接続済みアカウントが存在しません</option>
+                )}
+                {connectedAccounts.map((acc) => (
                   <option key={acc.id} value={acc.id}>
-                    {acc.displayName} ({acc.ebayUsername})
+                    {acc.displayName} ({acc.ebayUsername}) - Connected
                   </option>
                 ))}
               </select>
-              <p className="field-hint text-xs">※ 出品データの新規作成先アカウントを選択します</p>
+            </div>
+
+            {/* 公開ステータス設定 */}
+            <div>
+              <label className="input-label-sm block mb-1">
+                移行先の公開ステータス (Target Listing Visibility)
+              </label>
+              <div className="flex gap-4 items-center pt-1">
+                <select
+                  className="input-select-sm w-full"
+                  value={listingVisibility}
+                  onChange={(e) => setListingVisibility(e.target.value as 'draft' | 'active')}
+                >
+                  <option value="draft">Draft (下書きとして保存 - 推奨)</option>
+                  <option value="active">Active (即時出品として公開)</option>
+                </select>
+              </div>
             </div>
           </div>
-
-          {/* Same Account Validation Warning */}
-          {isSameAccount && (
-            <div className="validation-error-item margin-top-xs">
-              ❌ <strong>エラー:</strong> 転記元と転記先には異なるアカウントを選択してください。
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Transfer Settings Card (Move Only) */}
-      <div className="card ebay-baseline-card">
-        <div className="card-header space-between">
-          <h3 className="card-title text-base font-semibold">2. 移動設定・出品公開状態設定</h3>
-          <span className="baseline-badge">安全移動設定</span>
         </div>
 
-        <div className="card-body">
-          <div className="grid-2col">
-            {/* Transfer Mode Fixed Banner (Move Only) */}
-            <div className="form-group">
-              <label className="form-label font-bold text-xs">転記モード (Transfer Mode)</label>
-              <div className="move-only-badge-card p-3 rounded bg-slate-800 border border-emerald-500/30 flex items-center gap-2">
-                <span className="text-lg">🚚</span>
-                <div>
-                  <strong className="text-emerald-400 text-sm block">移動 (Move) 専用</strong>
-                  <span className="text-xs text-muted">転記成功の検証確定後に元出品を自動終了します。</span>
-                </div>
-              </div>
+        {/* 移行適合性チェック結果カード */}
+        <div className="card">
+          <div className="card-header">
+            <h3 className="card-title text-base font-bold">2. 移行先アカウントの配送先適合チェック</h3>
+          </div>
+          <div className="card-body text-xs space-y-3">
+            <div className="flex items-center justify-between p-2 bg-slate-900 border border-slate-700 rounded">
+              <span className="font-bold">🇩🇪 ドイツ向け配送適合状況 (LUCID包装法)</span>
+              {destGermanyCompliant ? (
+                <span className="status-badge status-connected">🟢 適合完了 (Available)</span>
+              ) : (
+                <span className="status-badge status-unconnected text-danger">⚠️ 未適合 (Locked)</span>
+              )}
             </div>
 
-            {/* Listing Visibility Toggle */}
-            <div className="form-group">
-              <label className="form-label font-bold text-xs">出品公開状態 (Listing Visibility)</label>
-              <div className="segment-toggle-group">
-                <button
-                  type="button"
-                  className={`segment-btn ${listingVisibility === 'draft' ? 'active' : ''}`}
-                  onClick={() => setListingVisibility('draft')}
-                >
-                  📝 下書き (Draft)
-                </button>
-                <button
-                  type="button"
-                  className={`segment-btn ${listingVisibility === 'active' ? 'active' : ''}`}
-                  onClick={() => setListingVisibility('active')}
-                >
-                  🟢 出品中 (Active)
-                </button>
+            {blockedCountries.length > 0 && (
+              <div className="card-sub-box bg-amber-500/10 border-amber-500/30">
+                <h4 className="font-bold text-amber-400 mb-1">⚠️ 警告: 以下の配送先国がロックされています</h4>
+                <p className="text-slate-300">
+                  移行先アカウントにおいて、以下の国々がコンプライアンス管理画面で有効化されていません。
+                  該当国への発送設定を含む商品は、適合登録が完了するまで販売できません。
+                </p>
+                <ul className="list-disc pl-4 mt-1 space-y-0.5 text-muted">
+                  {blockedCountries.map(c => (
+                    <li key={c.countryCode}>{c.countryName} ({c.countryCode})</li>
+                  ))}
+                </ul>
               </div>
-              <p className="field-hint text-xs">
-                {listingVisibility === 'draft'
-                  ? '※ 転記先アカウントで「下書き」として作成し、検証確認後に元出品を終了します。'
-                  : '※ 転記先アカウントで「出品中」として即時公開し、検証確認後に元出品を終了します。'}
-              </p>
-            </div>
+            )}
+
+            <p className="text-muted">
+              💡 移行先アカウントの適合状況に応じて、出品商品の配送除外設定（Excluding Shipping Locations）が移行時に自動調整されます。
+            </p>
           </div>
         </div>
       </div>
 
-      {/* Target Items Selection & Preview Table */}
-      <div className="card items-section-card">
+      {/* 対象Listing一覧 */}
+      <div className="card">
         <div className="card-header space-between">
-          <h3 className="card-title text-base font-semibold">
-            3. 移動対象リスティング選択 ({selectedItems.length} / {items.length} 件選択中)
-          </h3>
-          <div className="action-btn-group">
-            <button
-              type="button"
-              className="btn-pill-sm active"
-              onClick={() => handleSelectAll(true)}
-            >
-              全選択
-            </button>
-            <button
-              type="button"
-              className="btn-pill-sm"
-              onClick={() => handleSelectAll(false)}
-            >
-              全解除
-            </button>
-          </div>
+          <h3 className="card-title text-base font-bold">3. 移転対象リスティングの選択</h3>
+          <span className="api-sync-badge">
+            選択中: <strong>{selectedCount}</strong> 件
+          </span>
         </div>
 
         <div className="card-body">
-          {/* Search Filter Bar */}
-          <div className="form-group margin-bottom-md">
-            <input
-              type="text"
-              className="form-control"
-              placeholder="タイトル, SKU, または Item ID で検索..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
-
-          {/* Items Table */}
           <div className="accounts-table-wrapper">
-            <table className="accounts-table">
+            <table className="accounts-table text-xs">
               <thead>
                 <tr>
-                  <th className="w-12 text-center">選択</th>
-                  <th>画像</th>
-                  <th>Item ID</th>
-                  <th>SKU</th>
-                  <th>タイトル</th>
-                  <th>価格 ($)</th>
-                  <th>数量</th>
-                  <th>カテゴリー</th>
+                  <th style={{ width: '40px' }} className="text-center">
+                    <input
+                      type="checkbox"
+                      checked={items.length > 0 && items.every(i => i.isSelected)}
+                      onChange={(e) => handleSelectAll(e.target.checked)}
+                    />
+                  </th>
+                  <th style={{ width: '80px' }}>画像</th>
+                  <th style={{ width: '120px' }}>Item ID</th>
+                  <th style={{ width: '140px' }}>SKU</th>
+                  <th>商品名 / カテゴリー</th>
+                  <th style={{ width: '100px' }} className="text-right">価格</th>
+                  <th style={{ width: '80px' }} className="text-center">数量</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredItems.map((item) => (
+                {items.map(item => (
                   <tr key={item.itemId} className={item.isSelected ? 'selected-account-row' : ''}>
                     <td className="text-center">
                       <input
                         type="checkbox"
                         checked={item.isSelected}
-                        onChange={() => handleToggleItem(item.itemId)}
+                        onChange={() => handleSelectItem(item.itemId)}
                       />
                     </td>
                     <td>
-                      <img
-                        src={item.imageUrl}
-                        alt={item.title}
-                        className="w-10 h-10 object-cover rounded"
-                      />
+                      {item.imageUrl ? (
+                        <img src={item.imageUrl} alt={item.title} className="product-thumb" style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }} />
+                      ) : (
+                        <div className="no-image-box" style={{ width: '50px', height: '50px' }}>No Image</div>
+                      )}
                     </td>
-                    <td><strong className="font-mono text-xs">{item.itemId}</strong></td>
-                    <td><span className="font-mono text-xs text-muted">{item.sku}</span></td>
-                    <td><strong className="text-xs text-primary block">{item.title}</strong></td>
-                    <td><strong className="font-mono text-highlight-gold">${item.price.toFixed(2)}</strong></td>
-                    <td><span className="font-mono text-xs">{item.quantity}</span></td>
-                    <td><span className="text-xs text-muted">{item.category}</span></td>
+                    <td className="font-mono text-highlight-gold font-bold">{item.itemId}</td>
+                    <td className="font-mono text-muted">{item.sku}</td>
+                    <td>
+                      <div><strong>{item.title}</strong></div>
+                      <div className="text-muted text-xxs mt-0.5">{item.category}</div>
+                    </td>
+                    <td className="text-right font-mono font-bold text-highlight">${item.price.toFixed(2)}</td>
+                    <td className="text-center font-mono">{item.quantity}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+
+          {/* 移行不可の理由メッセージ領域 */}
+          {validationErrors.length > 0 && (
+            <div className={`p-3 rounded border text-xs margin-top-lg margin-bottom-md ${
+              validationErrors.length === 1 && validationErrors[0] === '移転するリスティングを1件以上選択してください。'
+                ? 'bg-slate-900 border-slate-700 text-muted'
+                : 'bg-red-500/10 border-red-500/30 text-danger'
+            }`}>
+              <div className="font-bold mb-1">⚠️ 移行を実行するための必須条件:</div>
+              {validationErrors.length === 1 ? (
+                <div>{validationErrors[0]}</div>
+              ) : (
+                <ul className="list-disc pl-4 space-y-1">
+                  {validationErrors.map((err, idx) => (
+                    <li key={idx}>{err}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {/* 実行ボタン領域 */}
+          <div className="margin-top-lg flex justify-end">
+            <button
+              type="button"
+              className={validationErrors.length > 0 ? "btn-zonos btn-disabled-prep" : "btn-zonos"}
+              style={{ minWidth: '220px', padding: '0.8rem 1.5rem', fontSize: '0.9rem' }}
+              disabled={validationErrors.length > 0 || isTransferring}
+              onClick={handleStartTransfer}
+            >
+              {isTransferring ? (
+                <span>⏳ 移転データを生成中...</span>
+              ) : (
+                <span>⚡ 選択したリスティングの移行を実行</span>
+              )}
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Execution Footer Bar */}
-      <div className="card padding-md flex justify-between items-center bg-slate-900 border-slate-700">
-        <div>
-          <span className="text-sm font-semibold">選択中: </span>
-          <strong className="text-highlight-gold font-mono text-base">{selectedItems.length} 件</strong>
-          <span className="text-xs text-muted ml-3">
-            ({sourceAccount.displayName} ➔ {destinationAccount.displayName})
-          </span>
-        </div>
-
-        <button
-          type="button"
-          className="btn-primary btn-lg btn-transfer-zonos"
-          onClick={handleExecuteTransferTrigger}
-          disabled={isSameAccount || selectedItems.length === 0}
-        >
-          🚚 選択したリスティングを移動 (安全シーケンシャル処理)
-        </button>
-      </div>
-
-      {/* Confirmation Modal */}
-      <TransferConfirmModal
-        settings={settings}
-        sourceAccount={sourceAccount}
-        destinationAccount={destinationAccount}
-        selectedItems={selectedItems}
-        isOpen={isConfirmModalOpen}
-        onConfirm={handleConfirmTransfer}
-        onCancel={() => setIsConfirmModalOpen(false)}
-      />
+      {/* 重複ポリシー警告モーダルのレンダリング */}
+      {duplicateItem && (
+        <DuplicateListingWarningModal
+          sku={duplicateItem.sku}
+          itemTitle={duplicateItem.title}
+          existingAccountName={destAccount?.displayName || destinationAccountId}
+          isOpen={duplicateModalOpen}
+          onOpenExisting={() => {
+            alert('既存の出品ページ (eBay Listing) を開きます。');
+            setDuplicateModalOpen(false);
+          }}
+          onAddDestinationToExisting={() => {
+            alert('既存出品の配送地域に適合国を追加しました。');
+            setDuplicateModalOpen(false);
+            onAddAuditLog('既存出品へ配送地域追加', duplicateItem.sku, `移行先アカウントに宛先国を追加`);
+            showToast('✓ 既存の出品に配送地域を正常に追加しました！');
+          }}
+          onUseMoveListing={() => {
+            // Move Listing を明示的に使って複製ではなく移行する
+            const matchedItem = items.find(i => i.sku === duplicateItem.sku);
+            if (matchedItem) {
+              executeTransfer([matchedItem]);
+            }
+          }}
+          onCancel={() => setDuplicateModalOpen(false)}
+        />
+      )}
     </div>
   );
 };
