@@ -4,6 +4,7 @@ import {
   TransferSession
 } from '../types/zonosCustoms';
 import { formatZonosCustomsDescription } from '../utils/zonosCustomsValidation';
+import { classifyDestination } from './shippingDecisionEngineService';
 
 const TRANSFER_SESSION_STORAGE_KEY = 'zonos_transfer_active_session';
 
@@ -35,9 +36,13 @@ export function runPreTransferCheck(
     missingItems.push({ fieldName: '発送元国', stepTarget: 'shipping_info', reason: '日本を指定してください' });
   }
 
-  // 3. Destination country non-Japan
-  if (status.isDomesticShipment || status.destinationMissing) {
-    errors.push('発送先国が国内または未設定です。');
+  // 3. Destination country non-Japan (Validated via Shipping Decision Engine)
+  const destClass = classifyDestination(declaration.destinationCountry);
+  if (destClass.classification === 'DOMESTIC_JP' || status.isDomesticShipment || status.destinationMissing) {
+    const reasonMsg = destClass.classification === 'DOMESTIC_JP'
+      ? '日本国内発送(DOMESTIC_JP)の注文です。Zonos Prepay 転記処理は不要です（スキップされます）。'
+      : '発送先国が国内または未設定です。';
+    errors.push(reasonMsg);
     missingItems.push({ fieldName: '発送先国', stepTarget: 'shipping_info', reason: '海外の発送先国を指定してください' });
   }
 

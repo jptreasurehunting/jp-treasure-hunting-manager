@@ -10,6 +10,7 @@ import {
   DomesticShippingCandidateService
 } from '../types/shippingRouter';
 import { registerHealthCheckModule, getStatusDisplayLabel, getAuthorityLevelDisplayLabel } from './projectHealthService';
+import { evaluateShippingDecision } from './shippingDecisionEngineService';
 
 const ROUTER_ORDERS_STORAGE_KEY = 'zonos_shipping_router_orders_v1';
 const PROFILES_STORAGE_KEY = 'zonos_shipping_router_profiles_v1';
@@ -478,10 +479,50 @@ export function evaluateShippingRoute(order: NormalizedFulfillmentOrder): Shippi
   const auditLogs = loadRouterAuditLogs();
   const allServices = getStandardDomesticServices();
 
-  const isDomestic = order.destinationCountryCode.toUpperCase() === 'JP';
+  // Delegate destination classification & routing safety to ShippingDecisionEngineService
+  const decisionResult = evaluateShippingDecision({
+    orderId: order.orderId,
+    salesChannel: order.salesChannel,
+    destinationCountryCode: order.destinationCountryCode,
+    destinationCountryName: (order as { destinationCountryName?: string }).destinationCountryName,
+    postalCode: order.postalCode,
+    stateOrProvince: order.stateOrProvince,
+    city: order.city,
+    addressLine1: order.addressLine1,
+    addressLine2: order.addressLine2,
+    buyerName: order.buyerName
+  });
 
-  // 1. Check International Routing
-  if (!isDomestic) {
+  // Handle REVIEW_REQUIRED (Never Guess policy for missing, ambiguous, or invalid country data)
+  if (decisionResult.route === 'REVIEW_REQUIRED') {
+    const idmpHash = calculateIdempotencyHash(order.salesChannel, order.orderId, 'MANUAL_REVIEW');
+    return {
+      orderId: order.orderId,
+      salesChannel: order.salesChannel,
+      isDomestic: false,
+      action: 'MANUAL_REVIEW',
+      actionLabelJa: '⚠️ 要人間確認 (仕向国データ不足・曖昧・不正)',
+      status: 'ACTION_REQUIRED',
+      packagingType: 'OTHER_CUSTOM',
+      packagingLabelJa: '未確定 (仕向国確認待ち)',
+      carrierName: '未定',
+      selectedServiceMethod: '未定',
+      estimatedCostJpy: 0,
+      hasTracking: false,
+      idempotencyHash: idmpHash,
+      isSafeForAutomaticExecution: false,
+      decisionProvenanceJa: decisionResult.explanation,
+      matchedRuleSource: `Shipping Decision Engine (${decisionResult.reasonCode})`,
+      eligibleServicesCount: 0,
+      filteredOutServicesCount: allServices.length,
+      actionRequiredReasonJa: decisionResult.explanation,
+      requiresHumanReview: true,
+      evaluatedAt: new Date().toISOString()
+    };
+  }
+
+  // Handle INTERNATIONAL_FLOW
+  if (decisionResult.route === 'INTERNATIONAL_FLOW') {
     const idmpHash = calculateIdempotencyHash(order.salesChannel, order.orderId, 'INTERNATIONAL_SHIPMENT');
     return {
       orderId: order.orderId,
@@ -499,8 +540,8 @@ export function evaluateShippingRoute(order: NormalizedFulfillmentOrder): Shippi
       assignedPrinterProfile: printerProfiles.find((p) => p.targetRole === 'document'),
       idempotencyHash: idmpHash,
       isSafeForAutomaticExecution: true,
-      decisionProvenanceJa: `仕向国 [${order.destinationCountryCode}] を検知。国際通関・Zonos 1/3申告・DDP計算フローへ自動引き渡し。`,
-      matchedRuleSource: 'Global Trade Compliance Router v4.7',
+      decisionProvenanceJa: decisionResult.explanation,
+      matchedRuleSource: `Shipping Decision Engine (${decisionResult.reasonCode})`,
       eligibleServicesCount: 1,
       filteredOutServicesCount: 0,
       requiresHumanReview: false,
