@@ -48,6 +48,8 @@ import { runOpportunityHunterTests } from './opportunityHunter.test';
 import { runOpportunityHunterPhase2Tests } from './opportunityHunterPhase2.test';
 import { runShippingDecisionEngineTests } from './shippingDecisionEngine.test';
 import { runShippingDecisionIntegrationTests } from './shippingDecisionIntegration.test';
+import { runPhotoQaTests } from './photoQa.test';
+import { runPhotoCaptureInputTests } from './photoCaptureInput.test';
 
 export interface MasterTestSummary {
   totalPassed: number;
@@ -62,6 +64,8 @@ export interface MasterTestSummary {
 
 export function runAllAppTests(): MasterTestSummary {
   const suites = [
+    { name: 'Photo Capture Input Abstraction & Hardware-Ready Tests', fn: runPhotoCaptureInputTests },
+    { name: 'Pedal-Assisted Photo Capture & Automated Photo QA Tests', fn: runPhotoQaTests },
     { name: 'Shipping Decision Engine Integration Tests', fn: runShippingDecisionIntegrationTests },
     { name: 'Shipping Decision Engine Foundation Tests', fn: runShippingDecisionEngineTests },
     { name: 'Zonos Prepay August 13 Production-Readiness Tests', fn: runZonosAugust13ReadinessTests },

@@ -1,6 +1,24 @@
 export type CaptureTrigger = 'PEDAL' | 'KEYBOARD' | 'BUTTON';
 
+export type PhotoSource = 'CAMERA' | 'TEST_IMAGE';
+
 export type PhotoQaDecision = 'USE_AS_IS' | 'AUTO_FIX' | 'RETAKE';
+
+export type HardwareValidationStatus = 'NOT_RUN' | 'PASSED' | 'FAILED';
+
+export interface HardwareValidationRecord {
+  status: HardwareValidationStatus;
+  validatedAt?: string;
+  deviceLabel?: string;
+  notes?: string;
+}
+
+export interface PedalInputProfile {
+  mode: 'KEYBOARD_EMULATION';
+  pedalKeyCode: string;
+  fallbackKeyboardCode: 'Space';
+  hardwareValidation: HardwareValidationRecord;
+}
 
 export interface NormalizedRect {
   x: number;
@@ -44,6 +62,7 @@ export interface CapturedPhoto {
   angleNumber: number;
   capturedAt: string;
   trigger: CaptureTrigger;
+  source: PhotoSource;
   originalDataUrl: string;
   finalDataUrl: string;
   qa: PhotoQaResult;
