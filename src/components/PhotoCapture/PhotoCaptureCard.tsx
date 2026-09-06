@@ -1,15 +1,21 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   assessPhotoPixels,
   createPerceptualHash,
   isLikelyDuplicate
 } from '../../services/photoQaService';
 import {
+  createPedalInputProfile,
+  describeHardwareValidation,
+  resolveKeyboardCaptureSignal
+} from '../../services/photoCaptureInputService';
+import {
   CapturedPhoto,
   CaptureTrigger,
   PhotoAutoFix,
   PhotoQaDecision,
-  PhotoQaResult
+  PhotoQaResult,
+  PhotoSource
 } from '../../types/photoCapture';
 
 const PEDAL_KEY_OPTIONS = [
@@ -91,25 +97,49 @@ function withDuplicateRetake(qa: PhotoQaResult): PhotoQaResult {
   };
 }
 
+function createCanvasFromVideo(video: HTMLVideoElement): HTMLCanvasElement | null {
+  if (video.readyState < 2 || video.videoWidth <= 0 || video.videoHeight <= 0) return null;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
 export function PhotoCaptureCard() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const testCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const capturingRef = useRef(false);
 
   const [cameraActive, setCameraActive] = useState(false);
-  const [cameraMessage, setCameraMessage] = useState('「カメラを開始」を押して撮影を開始してください。');
+  const [cameraMessage, setCameraMessage] = useState('カメラ未接続でもテスト画像を読み込めばMVPを検証できます。');
   const [pedalKey, setPedalKey] = useState<string>('F9');
   const [angleNumber, setAngleNumber] = useState(1);
   const [acceptedPhotos, setAcceptedPhotos] = useState<CapturedPhoto[]>([]);
   const [lastAttempt, setLastAttempt] = useState<CapturedPhoto | null>(null);
+  const [testImagePreview, setTestImagePreview] = useState<string | null>(null);
+  const [testImageName, setTestImageName] = useState<string | null>(null);
+  const [softwareTestRuns, setSoftwareTestRuns] = useState(0);
   const [busy, setBusy] = useState(false);
+
+  const pedalProfile = useMemo(() => createPedalInputProfile(pedalKey), [pedalKey]);
+  const hasSoftwareSource = Boolean(testCanvasRef.current && testImagePreview);
+  const canCapture = cameraActive || hasSoftwareSource;
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
     setCameraActive(false);
-    setCameraMessage('カメラを停止しました。');
+    setCameraMessage(
+      testCanvasRef.current
+        ? 'カメラを停止しました。テスト画像によるSoftware Validationを続けられます。'
+        : 'カメラを停止しました。テスト画像を読み込めばSoftware Validationを続けられます。'
+    );
   }, []);
 
   useEffect(() => () => {
@@ -119,7 +149,7 @@ export function PhotoCaptureCard() {
   const startCamera = useCallback(async () => {
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
-        setCameraMessage('このブラウザではカメラAPIを利用できません。対応ブラウザで開いてください。');
+        setCameraMessage('このブラウザではカメラAPIを利用できません。テスト画像でSoftware Validationを継続してください。');
         return;
       }
 
@@ -138,73 +168,95 @@ export function PhotoCaptureCard() {
         await videoRef.current.play();
       }
       setCameraActive(true);
-      setCameraMessage(`撮影準備OK。ペダル(${pedalKey})・Spaceキー・画面ボタンのどれでも撮影できます。`);
+      setCameraMessage(`撮影準備OK。ペダル互換キー(${pedalKey})・Spaceキー・画面ボタンのどれでも同じ撮影処理を呼びます。`);
     } catch (error) {
       const message = error instanceof Error ? error.message : '不明なカメラエラー';
       setCameraActive(false);
-      setCameraMessage(`カメラを開始できませんでした: ${message}`);
+      setCameraMessage(`カメラを開始できませんでした: ${message}。テスト画像でSoftware Validationは継続できます。`);
     }
   }, [pedalKey]);
 
-  const capturePhoto = useCallback(async (trigger: CaptureTrigger) => {
-    if (capturingRef.current) return;
-    const video = videoRef.current;
-    if (!cameraActive || !video || video.readyState < 2 || video.videoWidth <= 0 || video.videoHeight <= 0) {
-      setCameraMessage('カメラ映像の準備ができていません。「カメラを開始」を確認してください。');
-      return;
-    }
+  const processCanvas = useCallback((canvas: HTMLCanvasElement, trigger: CaptureTrigger, source: PhotoSource) => {
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) throw new Error('画像解析用Canvasを利用できません。');
 
-    capturingRef.current = true;
-    setBusy(true);
-    try {
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      if (!ctx) {
-        setCameraMessage('画像解析用Canvasを作成できませんでした。');
-        return;
-      }
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const originalDataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    const perceptualHash = createPerceptualHash(imageData.data, canvas.width, canvas.height);
+    let qa = assessPhotoPixels(imageData.data, canvas.width, canvas.height);
 
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const originalDataUrl = canvas.toDataURL('image/jpeg', 0.92);
-      const perceptualHash = createPerceptualHash(imageData.data, canvas.width, canvas.height);
-      let qa = assessPhotoPixels(imageData.data, canvas.width, canvas.height);
-
+    // Duplicate rejection belongs to the real camera session. Software test images are
+    // intentionally reusable so F9/Space/button can each validate the same input source.
+    if (source === 'CAMERA') {
       const priorHashes = acceptedPhotos.map((photo) => photo.perceptualHash);
       if (isLikelyDuplicate(perceptualHash, priorHashes)) {
         qa = withDuplicateRetake(qa);
       }
+    }
 
-      const finalDataUrl = qa.decision === 'AUTO_FIX'
-        ? applySafeAutoFix(canvas, qa.autoFix)
-        : originalDataUrl;
+    const finalDataUrl = qa.decision === 'AUTO_FIX'
+      ? applySafeAutoFix(canvas, qa.autoFix)
+      : originalDataUrl;
 
-      const captured: CapturedPhoto = {
-        id: `photo_${Date.now()}_${angleNumber}`,
-        angleNumber,
-        capturedAt: new Date().toISOString(),
-        trigger,
-        originalDataUrl,
-        finalDataUrl,
-        qa,
-        perceptualHash
-      };
+    const captured: CapturedPhoto = {
+      id: `photo_${Date.now()}_${angleNumber}_${source.toLowerCase()}`,
+      angleNumber,
+      capturedAt: new Date().toISOString(),
+      trigger,
+      source,
+      originalDataUrl,
+      finalDataUrl,
+      qa,
+      perceptualHash
+    };
 
-      setLastAttempt(captured);
+    setLastAttempt(captured);
 
-      if (qa.decision === 'RETAKE') {
-        setCameraMessage(`角度 ${angleNumber}: 再撮影が必要です。理由を確認して同じ角度を撮り直してください。`);
-      } else {
-        setAcceptedPhotos((previous) => [...previous, captured]);
-        setAngleNumber((previous) => previous + 1);
-        setCameraMessage(
-          qa.decision === 'AUTO_FIX'
-            ? `角度 ${angleNumber}: 安全な自動補正を適用して採用しました。次の角度へ進めます。`
-            : `角度 ${angleNumber}: そのまま採用しました。次の角度へ進めます。`
-        );
+    if (source === 'TEST_IMAGE') {
+      setSoftwareTestRuns((previous) => previous + 1);
+      setCameraMessage(
+        `Software Validation: ${trigger}入力 → TEST_IMAGE → ${qa.decision}。` +
+        ' 実機撮影ではないため採用写真一覧・角度番号は変更しません。'
+      );
+      return;
+    }
+
+    if (qa.decision === 'RETAKE') {
+      setCameraMessage(`角度 ${angleNumber}: 再撮影が必要です。理由を確認して同じ角度を撮り直してください。`);
+      return;
+    }
+
+    setAcceptedPhotos((previous) => [...previous, captured]);
+    setAngleNumber((previous) => previous + 1);
+    setCameraMessage(
+      qa.decision === 'AUTO_FIX'
+        ? `角度 ${angleNumber}: 安全な自動補正を適用して採用しました。次の角度へ進めます。`
+        : `角度 ${angleNumber}: そのまま採用しました。次の角度へ進めます。`
+    );
+  }, [acceptedPhotos, angleNumber]);
+
+  const capturePhoto = useCallback(async (trigger: CaptureTrigger) => {
+    if (capturingRef.current) return;
+    capturingRef.current = true;
+    setBusy(true);
+
+    try {
+      if (cameraActive && videoRef.current) {
+        const cameraCanvas = createCanvasFromVideo(videoRef.current);
+        if (!cameraCanvas) {
+          setCameraMessage('カメラ映像の準備ができていません。少し待ってから再度撮影してください。');
+          return;
+        }
+        processCanvas(cameraCanvas, trigger, 'CAMERA');
+        return;
       }
+
+      if (testCanvasRef.current) {
+        processCanvas(testCanvasRef.current, trigger, 'TEST_IMAGE');
+        return;
+      }
+
+      setCameraMessage('撮影元がありません。カメラを開始するか、Software Validation用のテスト画像を読み込んでください。');
     } catch (error) {
       const message = error instanceof Error ? error.message : '不明な撮影エラー';
       setCameraMessage(`撮影または品質判定に失敗しました: ${message}`);
@@ -212,36 +264,86 @@ export function PhotoCaptureCard() {
       capturingRef.current = false;
       setBusy(false);
     }
-  }, [acceptedPhotos, angleNumber, cameraActive]);
+  }, [cameraActive, processCanvas]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (event.repeat || isTextEntryTarget(event.target)) return;
+      if (isTextEntryTarget(event.target)) return;
 
-      if (event.code === pedalKey) {
-        event.preventDefault();
-        void capturePhoto('PEDAL');
-        return;
-      }
+      const trigger = resolveKeyboardCaptureSignal(
+        { code: event.code, repeat: event.repeat },
+        pedalProfile
+      );
+      if (!trigger) return;
 
-      if (event.code === 'Space') {
-        event.preventDefault();
-        void capturePhoto('KEYBOARD');
-      }
+      event.preventDefault();
+      void capturePhoto(trigger);
     };
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [capturePhoto, pedalKey]);
+  }, [capturePhoto, pedalProfile]);
+
+  const loadTestImage = useCallback(async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      setCameraMessage('画像ファイルを選択してください。');
+      return;
+    }
+
+    const url = URL.createObjectURL(file);
+    try {
+      const image = new Image();
+      image.decoding = 'async';
+      const loaded = new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = () => reject(new Error('テスト画像を読み込めませんでした。'));
+      });
+      image.src = url;
+      await loaded;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) throw new Error('テスト画像用Canvasを作成できません。');
+      ctx.drawImage(image, 0, 0);
+
+      testCanvasRef.current = canvas;
+      setTestImagePreview(canvas.toDataURL('image/jpeg', 0.92));
+      setTestImageName(file.name);
+      setCameraMessage(
+        `テスト画像「${file.name}」を読み込みました。` +
+        ` ${pedalKey}（ペダル互換キー）/ Space / 画面ボタンで同じCapture Pipelineを検証できます。`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '不明なテスト画像エラー';
+      setCameraMessage(message);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }, [pedalKey]);
+
+  const clearTestImage = () => {
+    testCanvasRef.current = null;
+    setTestImagePreview(null);
+    setTestImageName(null);
+    setCameraMessage('テスト画像を解除しました。');
+  };
 
   const resetSession = () => {
     setAcceptedPhotos([]);
     setLastAttempt(null);
     setAngleNumber(1);
-    setCameraMessage('撮影セッションをリセットしました。カメラはそのまま利用できます。');
+    setSoftwareTestRuns(0);
+    setCameraMessage(
+      testCanvasRef.current
+        ? '撮影セッションをリセットしました。テスト画像はそのままSoftware Validationに使えます。'
+        : '撮影セッションをリセットしました。'
+    );
   };
 
   const downloadPhoto = (photo: CapturedPhoto) => {
+    if (photo.source !== 'CAMERA') return;
     const link = document.createElement('a');
     link.href = photo.finalDataUrl;
     link.download = `jp-treasure-photo-angle-${String(photo.angleNumber).padStart(2, '0')}.jpg`;
@@ -254,6 +356,20 @@ export function PhotoCaptureCard() {
         <h2 style={{ margin: 0, fontSize: 26, color: '#f8fafc' }}>Photo Capture MVP</h2>
         <p style={{ margin: '6px 0 0', color: '#94a3b8' }}>
           商品を置く → ペダル/キーボード/ボタンで撮影 → 自動QA → OKなら次角度、問題があればその写真だけ再撮影
+        </p>
+      </div>
+
+      <div style={{ ...panelStyle, marginBottom: 16, borderColor: 'rgba(96, 165, 250, 0.35)' }}>
+        <h3 style={{ margin: '0 0 10px', color: '#f8fafc' }}>Hardware / Software Validation</h3>
+        <div style={{ display: 'grid', gap: 6, color: '#cbd5e1', fontSize: 14 }}>
+          <div><strong>Pedal Input Mode:</strong> {pedalProfile.mode}</div>
+          <div><strong>Pedal-compatible key:</strong> {pedalProfile.pedalKeyCode}</div>
+          <div><strong>Keyboard fallback:</strong> {pedalProfile.fallbackKeyboardCode}</div>
+          <div><strong>Hardware Validation:</strong> <span style={{ color: '#fbbf24' }}>{describeHardwareValidation(pedalProfile)}</span></div>
+          <div><strong>Software Validation runs:</strong> {softwareTestRuns}</div>
+        </div>
+        <p style={{ margin: '10px 0 0', color: '#94a3b8', fontSize: 13 }}>
+          実機ペダルは専用APIへ依存しません。購入後、ペダルが設定キーを送れば現在のPEDAL入力経路をそのまま使用し、Hardware Validation記録だけを追加できます。
         </p>
       </div>
 
@@ -270,9 +386,9 @@ export function PhotoCaptureCard() {
               type="button"
               style={{ ...buttonStyle, background: '#2563eb', borderColor: '#3b82f6' }}
               onClick={() => void capturePhoto('BUTTON')}
-              disabled={!cameraActive || busy}
+              disabled={!canCapture || busy}
             >
-              {busy ? '判定中…' : `撮影する（角度 ${angleNumber}）`}
+              {busy ? '判定中…' : cameraActive ? `撮影する（角度 ${angleNumber}）` : '画面ボタンでSoftware Validation'}
             </button>
           </div>
 
@@ -290,7 +406,32 @@ export function PhotoCaptureCard() {
                 <option key={option.code} value={option.code}>{option.label}</option>
               ))}
             </select>
-            <span style={{ color: '#94a3b8', fontSize: 13 }}>通常キーボード: Space / 画面: 撮影する</span>
+            <span style={{ color: '#94a3b8', fontSize: 13 }}>通常キーボード: Space / 画面: 撮影ボタン</span>
+          </div>
+
+          <div style={{ ...panelStyle, padding: 12, marginBottom: 14, background: 'rgba(30, 41, 59, 0.55)' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+              <label htmlFor="photo-test-image" style={{ fontWeight: 700, color: '#cbd5e1' }}>Software Validation用テスト画像</label>
+              <input
+                id="photo-test-image"
+                type="file"
+                accept="image/*"
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  if (file) void loadTestImage(file);
+                  event.currentTarget.value = '';
+                }}
+                style={{ color: '#cbd5e1' }}
+              />
+              {testImageName && (
+                <button type="button" style={{ ...buttonStyle, padding: '7px 10px' }} onClick={clearTestImage}>
+                  テスト画像を解除
+                </button>
+              )}
+            </div>
+            <p style={{ margin: '8px 0 0', fontSize: 12, color: '#94a3b8' }}>
+              カメラ未接続時はこの画像を疑似フレームとして使います。{pedalKey}・Space・画面ボタンの入力経路とPhoto QAを実機なしで検証できます。
+            </p>
           </div>
 
           <div style={{ background: '#020617', borderRadius: 12, overflow: 'hidden', minHeight: 360, display: 'grid', placeItems: 'center' }}>
@@ -300,7 +441,14 @@ export function PhotoCaptureCard() {
               playsInline
               style={{ display: cameraActive ? 'block' : 'none', width: '100%', maxHeight: 620, objectFit: 'contain' }}
             />
-            {!cameraActive && <span style={{ color: '#64748b' }}>Camera preview</span>}
+            {!cameraActive && testImagePreview && (
+              <img
+                src={testImagePreview}
+                alt="Software Validation用テスト画像"
+                style={{ width: '100%', maxHeight: 620, objectFit: 'contain' }}
+              />
+            )}
+            {!cameraActive && !testImagePreview && <span style={{ color: '#64748b' }}>Camera preview / Test image</span>}
           </div>
 
           <div aria-live="polite" style={{ marginTop: 12, padding: 12, borderRadius: 10, background: 'rgba(30, 41, 59, 0.8)', color: '#cbd5e1' }}>
@@ -312,22 +460,27 @@ export function PhotoCaptureCard() {
           <div style={panelStyle}>
             <h3 style={{ marginTop: 0, color: '#f8fafc' }}>最新の自動QA</h3>
             {!lastAttempt ? (
-              <p style={{ color: '#94a3b8' }}>まだ撮影されていません。</p>
+              <p style={{ color: '#94a3b8' }}>まだ撮影・Software Validationされていません。</p>
             ) : (
               <>
                 <div style={{ fontWeight: 800, color: DECISION_COLORS[lastAttempt.qa.decision], marginBottom: 10 }}>
                   {DECISION_LABELS[lastAttempt.qa.decision]}
                 </div>
+                {lastAttempt.source === 'TEST_IMAGE' && (
+                  <div style={{ marginBottom: 8, color: '#fbbf24', fontSize: 13, fontWeight: 700 }}>
+                    SOFTWARE TEST RESULT（実機写真として保存しません）
+                  </div>
+                )}
                 <img
                   src={lastAttempt.finalDataUrl}
-                  alt={`角度 ${lastAttempt.angleNumber} の撮影結果`}
+                  alt={`${lastAttempt.source} の撮影結果`}
                   style={{ width: '100%', maxHeight: 260, objectFit: 'contain', borderRadius: 10, background: '#020617' }}
                 />
                 <ul style={{ paddingLeft: 20, color: '#cbd5e1', fontSize: 14 }}>
                   {lastAttempt.qa.reasons.map((reason, index) => <li key={`${reason}-${index}`}>{reason}</li>)}
                 </ul>
                 <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>
-                  trigger: {lastAttempt.trigger}<br />
+                  source: {lastAttempt.source} / trigger: {lastAttempt.trigger}<br />
                   sharpness: {lastAttempt.qa.metrics.edgeStrength.toFixed(3)} / contrast: {lastAttempt.qa.metrics.contrast.toFixed(3)}<br />
                   luminance: {lastAttempt.qa.metrics.meanLuminance.toFixed(3)} / min margin: {(lastAttempt.qa.metrics.minimumMargin * 100).toFixed(1)}%
                 </div>
@@ -341,7 +494,8 @@ export function PhotoCaptureCard() {
               <li>商品がフレーム端に近い・情報損失が疑われる場合は RETAKE。</li>
               <li>軽い位置ずれ・余白・明るさ・コントラストだけを AUTO_FIX。</li>
               <li>欠けた商品部分、傷、印刷、形状を生成して補完しません。</li>
-              <li>同一構図の重複写真は再撮影対象にします。</li>
+              <li>実機カメラでは同一構図の重複写真を再撮影対象にします。</li>
+              <li>テスト画像はSoftware Validation専用で、実機写真として採用・保存しません。</li>
             </ul>
           </div>
         </div>
@@ -350,21 +504,21 @@ export function PhotoCaptureCard() {
       <div style={{ ...panelStyle, marginTop: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <div>
-            <h3 style={{ margin: 0, color: '#f8fafc' }}>採用済み写真: {acceptedPhotos.length}枚</h3>
-            <p style={{ margin: '4px 0 0', color: '#94a3b8', fontSize: 13 }}>RETAKE判定の写真は採用一覧へ入りません。</p>
+            <h3 style={{ margin: 0, color: '#f8fafc' }}>実機撮影の採用済み写真: {acceptedPhotos.length}枚</h3>
+            <p style={{ margin: '4px 0 0', color: '#94a3b8', fontSize: 13 }}>RETAKEとTEST_IMAGEは採用一覧へ入りません。</p>
           </div>
           <button type="button" style={buttonStyle} onClick={resetSession}>セッションをリセット</button>
         </div>
 
         {acceptedPhotos.length === 0 ? (
-          <p style={{ color: '#64748b' }}>採用された写真はまだありません。</p>
+          <p style={{ color: '#64748b' }}>実機カメラから採用された写真はまだありません。</p>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: 12, marginTop: 14 }}>
             {acceptedPhotos.map((photo) => (
               <article key={photo.id} style={{ background: '#020617', borderRadius: 10, padding: 10 }}>
                 <img src={photo.finalDataUrl} alt={`採用写真 角度 ${photo.angleNumber}`} style={{ width: '100%', aspectRatio: '4 / 3', objectFit: 'contain' }} />
                 <div style={{ marginTop: 8, fontSize: 13, color: '#cbd5e1' }}>
-                  角度 {photo.angleNumber} · {photo.qa.decision}
+                  角度 {photo.angleNumber} · {photo.qa.decision} · {photo.trigger}
                 </div>
                 <button type="button" style={{ ...buttonStyle, marginTop: 8, width: '100%', padding: '7px 10px' }} onClick={() => downloadPhoto(photo)}>
                   JPGを保存
