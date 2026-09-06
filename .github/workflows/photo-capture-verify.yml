@@ -1,5 +1,6 @@
 name: Photo Capture MVP Verification
 
+# Verification is intentionally scoped to the photo-capture feature branch.
 on:
   push:
     branches:
