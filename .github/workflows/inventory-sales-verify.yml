@@ -47,6 +47,8 @@ jobs:
         run: npx tsx -e "import { runEbayPublishPrerequisiteTests } from './src/services/__tests__/ebayPublishPrerequisite.test.ts'; const r = runEbayPublishPrerequisiteTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
       - name: eBay Official Payload Preview Safety Tests
         run: npx tsx -e "import { runEbayOfficialPayloadPreviewTests } from './src/services/__tests__/ebayOfficialPayloadPreview.test.ts'; const r = runEbayOfficialPayloadPreviewTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
+      - name: eBay Sandbox OAuth Safety Tests
+        run: npx tsx -e "import { runEbaySandboxOAuthTests } from './src/services/__tests__/ebaySandboxOAuth.test.ts'; const r = runEbaySandboxOAuthTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
       - name: Full Test Suite
         run: npm run test:all
       - name: Production Build
