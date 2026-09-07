@@ -53,6 +53,25 @@ class DBProvider {
   async getConnectedAccountsMetadata() {
     throw new Error('Database interface error: getConnectedAccountsMetadata() must be implemented.');
   }
+
+  /**
+   * Atomically stages a one-time eBay Sandbox mutation authorization.
+   * authorization_id must be unique so replay attempts fail closed.
+   * @param {Object} reservation
+   * @returns {Promise<void>}
+   */
+  async createSandboxMutationStageReservation(reservation) {
+    throw new Error('Database interface error: createSandboxMutationStageReservation() must be implemented.');
+  }
+
+  /**
+   * Retrieves safe metadata for a staged Sandbox mutation by authorization ID.
+   * @param {string} authorizationId
+   * @returns {Promise<Object|null>}
+   */
+  async getSandboxMutationStageReservation(authorizationId) {
+    throw new Error('Database interface error: getSandboxMutationStageReservation() must be implemented.');
+  }
 }
 
 /**
