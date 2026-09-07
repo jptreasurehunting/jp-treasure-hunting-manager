@@ -28,6 +28,8 @@ export interface EbaySandboxMutationAuthorizationRecord {
   sellerAccountId: string;
   sku: string;
   previewId: string;
+  marketplaceId: string;
+  contentLanguage: string;
   requestFingerprint: string;
   planId: string;
   credentialRef: string;
@@ -163,6 +165,8 @@ export function evaluateEbaySandboxMutationApproval(
     if (preview.authenticationStatus !== 'NOT_ATTACHED') {
       blockingReasonsJa.push('Payload Previewへ認証情報を直接付与しないでください。');
     }
+    if (!normalize(preview.marketplaceId)) blockingReasonsJa.push('Payload PreviewのMarketplaceIdが未確定です。');
+    if (!normalize(preview.contentLanguage)) blockingReasonsJa.push('Payload PreviewのContent-Languageが未確定です。');
   }
 
   if (plan && preview && plan.sellerAccountId !== preview.sellerAccountIdExecutionContext) {
@@ -194,6 +198,7 @@ export function evaluateEbaySandboxMutationApproval(
   if (!input.confirmedMutationRisk) blockingReasonsJa.push('変更系APIであることと影響範囲の確認が必要です。');
 
   warningsJa.push('このゲートはSandbox変更操作への明示承認記録を作るだけで、API通信は実行しません。');
+  warningsJa.push('MarketplaceIdとContent-Languageも承認時に固定し、後から変わった場合は再承認が必要です。');
   warningsJa.push('承認記録は15分で失効し、Payload・OAuth接続計画・Sandbox検証記録・接続先が変われば再承認が必要です。');
   warningsJa.push('現段階で許可対象にできるのは最初のcreateOrReplaceInventoryItemだけです。createOffer / publishOfferは前工程成功記録の実装までBLOCKEDです。');
   warningsJa.push('承認記録は一度限りの実行を前提とし、Productionでは利用できません。');
@@ -234,6 +239,8 @@ export function recordEbaySandboxMutationAuthorization(
     sellerAccountId: preview.sellerAccountIdExecutionContext,
     sku: preview.sku,
     previewId: preview.previewId,
+    marketplaceId: normalize(preview.marketplaceId),
+    contentLanguage: normalize(preview.contentLanguage),
     requestFingerprint: preview.requestFingerprint,
     planId: plan.planId,
     credentialRef: plan.backendCredentialRef,
@@ -269,7 +276,7 @@ export function recordEbaySandboxMutationAuthorization(
     success: true,
     record,
     evaluation,
-    messageJa: 'Sandbox変更操作の実行許可を記録しました。API通信はまだ実行していません。'
+    messageJa: 'Sandbox変更操作の実行許可を記録しました。Marketplace Localeも固定しましたが、API通信はまだ実行していません。'
   };
 }
 
@@ -325,6 +332,8 @@ export function evaluateStoredEbaySandboxMutationAuthorization(
   if (record.backendStagingConsumed === true) reasonsJa.push('この承認記録はバックエンド実行予約で既に消費済みです。');
   if (!Number.isFinite(Date.parse(record.expiresAt)) || Date.parse(record.expiresAt) <= now) reasonsJa.push('Sandbox変更操作の実行許可が失効しています。');
   if (dependencyBlockingReason(record.operationId)) reasonsJa.push(dependencyBlockingReason(record.operationId)!);
+  if (!normalize(record.marketplaceId || '')) reasonsJa.push('承認記録にMarketplaceIdがありません。');
+  if (!normalize(record.contentLanguage || '')) reasonsJa.push('承認記録にContent-Languageがありません。');
 
   if (preview) {
     const step = preview.steps.find((candidate) => candidate.operationId === record.operationId);
@@ -332,6 +341,8 @@ export function evaluateStoredEbaySandboxMutationAuthorization(
     if (record.requestFingerprint !== preview.requestFingerprint) reasonsJa.push('送信予定内容が承認時から変更されています。');
     if (record.sellerAccountId !== preview.sellerAccountIdExecutionContext) reasonsJa.push('販売アカウントが承認時から変更されています。');
     if (record.sku !== preview.sku) reasonsJa.push('SKUが承認時から変更されています。');
+    if (record.marketplaceId !== preview.marketplaceId) reasonsJa.push('MarketplaceIdが承認時から変更されています。');
+    if (record.contentLanguage !== preview.contentLanguage) reasonsJa.push('Content-Languageが承認時から変更されています。');
     if (!step) reasonsJa.push('承認対象の操作が現在のPayload Previewにありません。');
     else if (record.stepFingerprint !== fingerprintEbaySandboxMutationStep(step)) reasonsJa.push('承認対象のAPI Step内容が承認時から変更されています。');
   }
