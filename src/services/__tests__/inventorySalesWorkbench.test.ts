@@ -27,7 +27,8 @@ function makeItem(
       }
     ],
     lastReconciledAt: overrides.lastReconciledAt ?? '2026-09-07T00:00:00.000Z',
-    isLockedForOversellingRisk: overrides.isLockedForOversellingRisk ?? false
+    isLockedForOversellingRisk: overrides.isLockedForOversellingRisk ?? false,
+    oversellingRiskReason: overrides.oversellingRiskReason
   };
 }
 
@@ -108,6 +109,29 @@ export function runInventorySalesWorkbenchTests(): { passed: number; failed: num
   });
   const unboundResult = buildInventorySalesWorkbench([unbound]);
   assert(unboundResult.rows[0].state === 'REVIEW_REQUIRED', 'Test 12: Sellable inventory with no sales channel binding requires review');
+
+  const pendingZero = makeItem({
+    sku: 'PENDING-ZERO',
+    itemTitle: 'Pending Zero',
+    physicalStock: 0,
+    availableToSell: 0,
+    channelBindings: [
+      {
+        channel: 'Shopee',
+        sellerAccountId: 'shopee-sg',
+        channelListingId: 'listing-pending-zero',
+        syncedStock: 1,
+        syncStatus: 'PENDING',
+        lastSyncedAt: '2026-09-07T00:00:00.000Z',
+        isAutoSyncEnabled: true
+      }
+    ]
+  });
+  const pendingResult = buildInventorySalesWorkbench([pendingZero]);
+  assert(
+    pendingResult.rows[0].state === 'REVIEW_REQUIRED' && pendingResult.rows[0].reasonsJa.some((reason) => reason.includes('反映待ち')),
+    'Test 13: Pending external zero-stock write stays visible as review required instead of silently appearing out-of-stock'
+  );
 
   return { passed, failed, log };
 }
