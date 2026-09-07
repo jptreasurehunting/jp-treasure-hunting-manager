@@ -50,6 +50,7 @@ import { runShippingDecisionEngineTests } from './shippingDecisionEngine.test';
 import { runShippingDecisionIntegrationTests } from './shippingDecisionIntegration.test';
 import { runPhotoQaTests } from './photoQa.test';
 import { runPhotoCaptureInputTests } from './photoCaptureInput.test';
+import { runPhotoCaptureSelfTestTests } from './photoCaptureSelfTest.test';
 
 export interface MasterTestSummary {
   totalPassed: number;
@@ -64,6 +65,7 @@ export interface MasterTestSummary {
 
 export function runAllAppTests(): MasterTestSummary {
   const suites = [
+    { name: 'Photo Capture Software Self-Test Tests', fn: runPhotoCaptureSelfTestTests },
     { name: 'Photo Capture Input Abstraction & Hardware-Ready Tests', fn: runPhotoCaptureInputTests },
     { name: 'Pedal-Assisted Photo Capture & Automated Photo QA Tests', fn: runPhotoQaTests },
     { name: 'Shipping Decision Engine Integration Tests', fn: runShippingDecisionIntegrationTests },
