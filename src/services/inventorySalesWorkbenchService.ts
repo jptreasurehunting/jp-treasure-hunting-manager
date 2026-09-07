@@ -50,22 +50,27 @@ function classifyItem(item: CentralInventoryItem): {
 } {
   const reasonsJa: string[] = [];
   const syncIssues = item.channelBindings.filter(
-    (binding) => binding.syncStatus === 'FAILED' || binding.syncStatus === 'OVERSELLING_RISK'
+    (binding) => binding.syncStatus === 'PENDING' || binding.syncStatus === 'FAILED' || binding.syncStatus === 'OVERSELLING_RISK'
   );
+  const pendingCount = syncIssues.filter((binding) => binding.syncStatus === 'PENDING').length;
+  const failedCount = syncIssues.length - pendingCount;
 
   if (item.isLockedForOversellingRisk) {
     reasonsJa.push('二重販売リスクで中央在庫がロックされています。');
+    if (failedCount > 0) reasonsJa.push(`外部販売先の同期失敗・要手動確認が${failedCount}件あります。`);
     return { state: 'BLOCKED', reasonsJa, syncIssueCount: syncIssues.length };
+  }
+
+  // Pending external writes must be visible even when Central ATS has already reached zero.
+  if (syncIssues.length > 0) {
+    if (pendingCount > 0) reasonsJa.push(`外部販売先への在庫反映待ちが${pendingCount}件あります。成功確認までは同期済み扱いにしません。`);
+    if (failedCount > 0) reasonsJa.push(`販売チャネル同期に${failedCount}件の失敗・要確認があります。`);
+    return { state: 'REVIEW_REQUIRED', reasonsJa, syncIssueCount: syncIssues.length };
   }
 
   if (item.availableToSell <= 0) {
     reasonsJa.push('現在の販売可能在庫が0です。');
-    return { state: 'OUT_OF_STOCK', reasonsJa, syncIssueCount: syncIssues.length };
-  }
-
-  if (syncIssues.length > 0) {
-    reasonsJa.push(`販売チャネル同期に${syncIssues.length}件の要確認があります。`);
-    return { state: 'REVIEW_REQUIRED', reasonsJa, syncIssueCount: syncIssues.length };
+    return { state: 'OUT_OF_STOCK', reasonsJa, syncIssueCount: 0 };
   }
 
   if (item.channelBindings.length === 0) {
@@ -73,7 +78,7 @@ function classifyItem(item: CentralInventoryItem): {
     return { state: 'REVIEW_REQUIRED', reasonsJa, syncIssueCount: 0 };
   }
 
-  reasonsJa.push('販売可能在庫があり、重大な在庫同期異常は検出されていません。');
+  reasonsJa.push('販売可能在庫があり、外部販売先まで確認済みの重大な在庫同期異常はありません。');
   return { state: 'READY', reasonsJa, syncIssueCount: 0 };
 }
 
@@ -83,7 +88,7 @@ export function buildInventorySalesWorkbench(
   const rows = items.map<InventorySalesWorkbenchRow>((item) => {
     const classification = classifyItem(item);
     const syncedChannelCount = item.channelBindings.filter(
-      (binding) => binding.syncStatus === 'SYNCED'
+      (binding) => binding.syncStatus === 'SYNCED' || binding.syncStatus === 'PAUSED'
     ).length;
 
     return {
