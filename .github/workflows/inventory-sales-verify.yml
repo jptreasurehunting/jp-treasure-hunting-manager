@@ -51,5 +51,11 @@ jobs:
         run: npx tsx -e "import { runEbaySandboxOAuthTests } from './src/services/__tests__/ebaySandboxOAuth.test.ts'; const r = runEbaySandboxOAuthTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
       - name: Full Test Suite
         run: npm run test:all
+      - name: Install backend dependencies
+        working-directory: server
+        run: npm ci
+      - name: Backend Security and eBay Sandbox OAuth Tests
+        working-directory: server
+        run: npm test
       - name: Production Build
         run: npm run build
