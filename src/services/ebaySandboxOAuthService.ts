@@ -62,6 +62,10 @@ function isValidDateTime(value: string): boolean {
   return normalize(value).length > 0 && Number.isFinite(Date.parse(value));
 }
 
+export function isValidEbaySandboxBackendCredentialRef(value: string): boolean {
+  return /^[A-Z][A-Z0-9_]{2,80}$/.test(normalize(value));
+}
+
 function containsLikelySecret(value: string): boolean {
   const normalized = value.toLowerCase();
   return normalized.includes('client_secret=') || normalized.includes('access_token=') || normalized.includes('refresh_token=');
@@ -104,7 +108,11 @@ export function evaluateEbaySandboxOAuthPlan(
   if (!normalize(input.clientId)) missingOrInvalidFieldsJa.push('Sandbox Client IDが未入力です。');
   if (!normalize(input.ruName)) missingOrInvalidFieldsJa.push('Sandbox OAuth RuNameが未入力です。');
   if (!normalize(input.sandboxUserAlias)) missingOrInvalidFieldsJa.push('Sandboxテストユーザー識別名が未入力です。');
-  if (!normalize(input.backendCredentialRef)) missingOrInvalidFieldsJa.push('バックエンド認証情報参照名が未入力です。');
+  if (!normalize(input.backendCredentialRef)) {
+    missingOrInvalidFieldsJa.push('バックエンド認証情報参照名が未入力です。');
+  } else if (!isValidEbaySandboxBackendCredentialRef(input.backendCredentialRef)) {
+    missingOrInvalidFieldsJa.push('バックエンド認証情報参照名は EBAY_SANDBOX_MAIN のような英大文字・数字・アンダースコア形式にしてください。');
+  }
   if (!isValidDateTime(input.checkedAt)) missingOrInvalidFieldsJa.push('確認日時が未入力または不正です。');
   if (!normalize(input.checkedBy)) missingOrInvalidFieldsJa.push('確認者が未入力です。');
   if (!normalize(input.verificationNote)) missingOrInvalidFieldsJa.push('確認メモが未入力です。');
@@ -199,6 +207,7 @@ export function evaluateStoredEbaySandboxOAuthPlan(
   if (plan.apiBaseUrl !== EBAY_SANDBOX_API_BASE_URL) reasonsJa.push('Sandbox API Base URLが変更されています。');
   if (!plan.requiredScopes.includes(EBAY_INVENTORY_SCOPE)) reasonsJa.push('Inventory API書込Scopeが不足しています。');
   if (plan.sellerAccountId !== normalize(sellerAccountId)) reasonsJa.push('販売アカウントがOAuth接続計画と一致しません。');
+  if (!isValidEbaySandboxBackendCredentialRef(plan.backendCredentialRef)) reasonsJa.push('バックエンド認証情報参照名が現在の接続形式と一致しません。');
   if (plan.networkAction !== 'NONE' || plan.sendAllowed !== false) reasonsJa.push('OAuth接続計画が安全な送信禁止状態ではありません。');
   if (plan.clientSecretStored || plan.authorizationCodeStored || plan.accessTokenStored || plan.refreshTokenStored) {
     reasonsJa.push('ブラウザ保存禁止の認証秘密情報がPlanへ含まれています。');
