@@ -1,10 +1,16 @@
 import { ListingPublishAdapterSimulation } from './listingPublishAdapterService';
+import {
+  EBAY_REST_REQUEST_HEADERS_SOURCE_URL,
+  evaluateEbayMarketplaceContentLanguage
+} from './ebayMarketplaceLocaleService';
 
 const EBAY_PUBLISH_PREREQUISITES_STORAGE_KEY = 'jp_ebay_publish_prerequisites_v1';
 export const EBAY_PUBLISH_PREREQUISITES_CHANGED_EVENT = 'jp-ebay-publish-prerequisites-changed';
 
 export interface EbayPublishPrerequisiteInput {
   marketplaceId: string;
+  contentLanguage: string;
+  contentLanguageReviewed: boolean;
   categoryId: string;
   condition: string;
   aspectsReviewed: boolean;
@@ -38,6 +44,7 @@ export interface EbayPublishPrerequisiteRecord extends EbayPublishPrerequisiteIn
   targetMarketplaceLabel: string;
   sellerAccountIdAtSave: string;
   requestFingerprintAtSave: string;
+  contentLanguageSourceUrl: string;
   savedAt: string;
   status: 'PREREQUISITES_VERIFIED';
   networkAction: 'NONE';
@@ -108,7 +115,11 @@ export function evaluateEbayPublishPrerequisites(
     blockingReasonsJa.push('入力Simulationが安全な送信禁止状態ではありません。');
   }
 
+  const localeEvaluation = evaluateEbayMarketplaceContentLanguage(input.marketplaceId, input.contentLanguage);
   if (!normalize(input.marketplaceId)) missingOrInvalidFieldsJa.push('eBay正式MarketplaceIdが未入力です。');
+  if (localeEvaluation.reasonsJa.length > 0) missingOrInvalidFieldsJa.push(...localeEvaluation.reasonsJa);
+  if (!input.contentLanguageReviewed) missingOrInvalidFieldsJa.push('MarketplaceIdとContent-Languageの公式対応表を確認した記録が必要です。');
+
   if (!normalize(input.categoryId)) missingOrInvalidFieldsJa.push('カテゴリIDが未入力です。');
   if (!normalize(input.condition)) missingOrInvalidFieldsJa.push('商品状態（Condition）が未入力です。');
   if (!input.aspectsReviewed) missingOrInvalidFieldsJa.push('カテゴリ別Item Specifics / aspectsの確認が未完了です。');
@@ -131,14 +142,17 @@ export function evaluateEbayPublishPrerequisites(
   if (!normalize(input.checkedBy)) missingOrInvalidFieldsJa.push('確認者の識別名・IDが未入力です。');
   if (!normalize(input.verificationNote)) missingOrInvalidFieldsJa.push('確認内容・根拠メモが未入力です。');
 
-  warningsJa.push('このレイヤーは入力済みID・条件の完全性を確認するだけで、eBay APIから値を取得・検証しません。');
+  if (localeEvaluation.requiresExplicitLocaleChoice) {
+    warningsJa.push(`${localeEvaluation.marketplaceId}は複数Localeを持つため、Content-Languageを明示選択してください。対応値: ${localeEvaluation.supportedLocales.join(', ')}`);
+  }
+  warningsJa.push(`Content-Languageの対応確認元: ${EBAY_REST_REQUEST_HEADERS_SOURCE_URL}`);
   warningsJa.push('カテゴリやBusiness Policy等の値を推測して自動補完しません。公式情報または実アカウントで確認した値を使用してください。');
   warningsJa.push('APIトークン・OAuth Secret・パスワード等の認証秘密情報はここへ保存しないでください。');
   warningsJa.push('前提条件がそろっても外部通信・出品は行いません。');
 
   return {
     canSaveVerifiedPrerequisites: missingOrInvalidFieldsJa.length === 0 && blockingReasonsJa.length === 0,
-    missingOrInvalidFieldsJa,
+    missingOrInvalidFieldsJa: Array.from(new Set(missingOrInvalidFieldsJa)),
     blockingReasonsJa: Array.from(new Set(blockingReasonsJa)),
     warningsJa
   };
@@ -158,6 +172,7 @@ export function recordEbayPublishPrerequisites(
     };
   }
 
+  const localeEvaluation = evaluateEbayMarketplaceContentLanguage(input.marketplaceId, input.contentLanguage);
   const now = new Date().toISOString();
   const record: EbayPublishPrerequisiteRecord = {
     recordId: `ebay_prereq_${simulation.draftId}_${Date.now()}`,
@@ -168,7 +183,10 @@ export function recordEbayPublishPrerequisites(
     targetMarketplaceLabel: simulation.targetMarketplace,
     sellerAccountIdAtSave: simulation.sellerAccountId,
     requestFingerprintAtSave: simulation.requestFingerprint,
-    marketplaceId: normalize(input.marketplaceId),
+    marketplaceId: localeEvaluation.marketplaceId,
+    contentLanguage: localeEvaluation.contentLanguage,
+    contentLanguageReviewed: true,
+    contentLanguageSourceUrl: EBAY_REST_REQUEST_HEADERS_SOURCE_URL,
     categoryId: normalize(input.categoryId),
     condition: normalize(input.condition),
     aspectsReviewed: true,
@@ -198,7 +216,7 @@ export function recordEbayPublishPrerequisites(
     success: true,
     record,
     evaluation,
-    messageJa: 'eBay公開前提条件を確認済みとして保存しました。外部通信・出品は行っていません。'
+    messageJa: 'eBay公開前提条件とContent-Languageを確認済みとして保存しました。外部通信・出品は行っていません。'
   };
 }
 
@@ -211,26 +229,19 @@ export function evaluateStoredEbayPublishPrerequisites(
   if (!simulation) {
     reasonsJa.push('対応する公開アダプターSimulationが見つかりません。');
   } else {
-    if (simulation.simulationId !== record.simulationId) {
-      reasonsJa.push('公開アダプターSimulationが再生成されています。前提条件を再確認してください。');
-    }
-    if (simulation.dryRunId !== record.dryRunId) {
-      reasonsJa.push('対応するDry Runが変更されています。前提条件を再確認してください。');
-    }
-    if (simulation.requestFingerprint !== record.requestFingerprintAtSave) {
-      reasonsJa.push('送信予定内容が前提条件確認時から変更されています。');
-    }
-    if (simulation.sellerAccountId !== record.sellerAccountIdAtSave) {
-      reasonsJa.push('販売アカウントが前提条件確認時から変更されています。');
-    }
-    if (simulation.targetChannel !== 'eBay') {
-      reasonsJa.push('対象チャネルがeBayではありません。');
-    }
+    if (simulation.simulationId !== record.simulationId) reasonsJa.push('公開アダプターSimulationが再生成されています。前提条件を再確認してください。');
+    if (simulation.dryRunId !== record.dryRunId) reasonsJa.push('対応するDry Runが変更されています。前提条件を再確認してください。');
+    if (simulation.requestFingerprint !== record.requestFingerprintAtSave) reasonsJa.push('送信予定内容が前提条件確認時から変更されています。');
+    if (simulation.sellerAccountId !== record.sellerAccountIdAtSave) reasonsJa.push('販売アカウントが前提条件確認時から変更されています。');
+    if (simulation.targetChannel !== 'eBay') reasonsJa.push('対象チャネルがeBayではありません。');
   }
 
-  if (record.networkAction !== 'NONE' || record.sendAllowed !== false) {
-    reasonsJa.push('保存済み前提条件が安全な送信禁止状態ではありません。');
-  }
+  const localeEvaluation = evaluateEbayMarketplaceContentLanguage(record.marketplaceId || '', record.contentLanguage || '');
+  reasonsJa.push(...localeEvaluation.reasonsJa);
+  if (record.contentLanguageReviewed !== true) reasonsJa.push('保存済み前提条件にContent-Language確認記録がありません。');
+  if (record.contentLanguageSourceUrl !== EBAY_REST_REQUEST_HEADERS_SOURCE_URL) reasonsJa.push('Content-Languageの公式確認元が現在の登録元と一致しません。再確認してください。');
+
+  if (record.networkAction !== 'NONE' || record.sendAllowed !== false) reasonsJa.push('保存済み前提条件が安全な送信禁止状態ではありません。');
 
   return { valid: reasonsJa.length === 0, reasonsJa: Array.from(new Set(reasonsJa)) };
 }
