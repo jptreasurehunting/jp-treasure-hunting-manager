@@ -5,6 +5,7 @@ import {
   InventorySalesState
 } from '../../services/inventorySalesWorkbenchService';
 import { InventoryImportPanel } from './InventoryImportPanel';
+import { CrossChannelInventorySyncQueuePanel } from './CrossChannelInventorySyncQueuePanel';
 import { InventorySalesPriorityPanel } from './InventorySalesPriorityPanel';
 import { ListingPreparationPanel } from './ListingPreparationPanel';
 import { ListingDraftReviewPanel } from './ListingDraftReviewPanel';
@@ -96,6 +97,7 @@ export function InventorySalesWorkbenchCard() {
       )}
 
       <InventoryImportPanel onInventoryChanged={reloadInventory} />
+      <CrossChannelInventorySyncQueuePanel />
       <InventorySalesPriorityPanel items={items} />
       <ListingPreparationPanel items={items} />
       <ListingDraftReviewPanel items={items} />
@@ -169,8 +171,8 @@ export function InventorySalesWorkbenchCard() {
                 <td style={{ padding: '12px 10px', textAlign: 'right' }}>{formatJpy(row.unitCostJpy)}</td>
                 <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 800 }}>{formatJpy(row.sellableCostBasisJpy)}</td>
                 <td style={{ padding: '12px 10px' }}>
-                  {row.syncedChannelCount}/{row.totalChannelCount} 正常
-                  {row.syncIssueCount > 0 && <div style={{ color: '#fbbf24', fontSize: 12 }}>{row.syncIssueCount}件 要確認</div>}
+                  {row.syncedChannelCount}/{row.totalChannelCount} 外部反映確認済み
+                  {row.syncIssueCount > 0 && <div style={{ color: '#fbbf24', fontSize: 12 }}>{row.syncIssueCount}件 同期待ち/要確認</div>}
                 </td>
                 <td style={{ padding: '12px 10px', color: '#cbd5e1', fontSize: 13 }}>
                   {row.reasonsJa.map((reason) => <div key={reason}>{reason}</div>)}
@@ -183,7 +185,7 @@ export function InventorySalesWorkbenchCard() {
       </div>
 
       <p style={{ color: '#64748b', fontSize: 12, marginTop: 12 }}>
-        在庫のCSV取込は確認・承認後のみ反映します。Dry Run、公開アダプター確認、API対応表、eBay公開前提条件、正式Payload Preview、Sandbox OAuth接続計画を作成しても外部サイトへの自動出品・通信は行いません。
+        販売発生時の中央在庫引当と販売先別の同期要求は記録しますが、eBay / Shopee等の外部サイトはAPI成功応答を確認するまで同期済みとみなしません。出品系のDry Run・Sandbox準備も本番公開は行いません。
       </p>
     </section>
   );
