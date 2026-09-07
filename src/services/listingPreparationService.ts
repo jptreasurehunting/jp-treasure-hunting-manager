@@ -80,7 +80,7 @@ function getExistingChannels(item: CentralInventoryItem): SalesChannel[] {
 
 function hasBlockingSyncIssue(item: CentralInventoryItem): boolean {
   return item.channelBindings.some(
-    (binding) => binding.syncStatus === 'FAILED' || binding.syncStatus === 'OVERSELLING_RISK'
+    (binding) => binding.syncStatus === 'PENDING' || binding.syncStatus === 'FAILED' || binding.syncStatus === 'OVERSELLING_RISK'
   );
 }
 
@@ -104,7 +104,7 @@ export function evaluateListingPreparation(
   }
 
   if (hasBlockingSyncIssue(item)) {
-    blockedReasonsJa.push('既存販売チャネルの在庫同期に要確認があります。先に同期異常を解消してください。');
+    blockedReasonsJa.push('既存販売チャネルの在庫同期が未完了または要確認です。外部販売先への反映成功を確認してから出品準備を開始してください。');
   }
 
   const availableTargetChannels = MVP_LISTING_CHANNELS.filter(
