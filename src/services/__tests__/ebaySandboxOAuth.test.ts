@@ -8,6 +8,7 @@ import {
   evaluateEbaySandboxExecutionReadiness,
   evaluateEbaySandboxOAuthPlan,
   evaluateStoredEbaySandboxOAuthPlan,
+  isValidEbaySandboxBackendCredentialRef,
   loadEbaySandboxOAuthPlans,
   recordEbaySandboxOAuthPlan
 } from '../ebaySandboxOAuthService';
@@ -28,7 +29,7 @@ function makeInput(overrides: Partial<EbaySandboxOAuthPlanInput> = {}): EbaySand
     clientId: overrides.clientId ?? 'sandbox-client-id',
     ruName: overrides.ruName ?? 'JP_Treasure_Hunting-Sandbox-RuName',
     sandboxUserAlias: overrides.sandboxUserAlias ?? 'sandbox-seller-01',
-    backendCredentialRef: overrides.backendCredentialRef ?? 'secret-store:ebay-sandbox-main',
+    backendCredentialRef: overrides.backendCredentialRef ?? 'EBAY_SANDBOX_MAIN',
     checkedAt: overrides.checkedAt ?? '2026-09-08T06:30:00+09:00',
     checkedBy: overrides.checkedBy ?? 'owner',
     verificationNote: overrides.verificationNote ?? 'Sandbox application keys and RuName confirmed in eBay Developer Program.'
@@ -109,6 +110,10 @@ export function runEbaySandboxOAuthTests(): { passed: number; failed: number; lo
   (unsafePreview as any).sendAllowed = true;
   const unsafeReadiness = evaluateEbaySandboxExecutionReadiness(unsafePreview, plan);
   assert(!unsafeReadiness.canStartUserConsent, 'Test 15: Unsafe payload preview blocks Sandbox consent readiness');
+
+  const invalidCredentialRef = evaluateEbaySandboxOAuthPlan('ebay-main', makeInput({ backendCredentialRef: 'secret-store:ebay-sandbox-main' }));
+  assert(!invalidCredentialRef.canSavePlan && invalidCredentialRef.missingOrInvalidFieldsJa.some((reason) => reason.includes('EBAY_SANDBOX_MAIN')), 'Test 16: Free-form secret references are rejected before saving a backend-bound plan');
+  assert(isValidEbaySandboxBackendCredentialRef('EBAY_SANDBOX_MAIN') && !isValidEbaySandboxBackendCredentialRef('bad-ref'), 'Test 17: Backend credential reference format matches the backend contract');
 
   localStorage.clear();
   return { passed, failed, log };
