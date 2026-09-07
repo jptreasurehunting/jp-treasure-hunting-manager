@@ -41,6 +41,8 @@ jobs:
         run: npx tsx -e "import { runListingPublishDryRunTests } from './src/services/__tests__/listingPublishDryRun.test.ts'; const r = runListingPublishDryRunTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
       - name: Listing Publish Adapter Simulation Tests
         run: npx tsx -e "import { runListingPublishAdapterTests } from './src/services/__tests__/listingPublishAdapter.test.ts'; const r = runListingPublishAdapterTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
+      - name: Marketplace API Mapping Verification Tests
+        run: npx tsx -e "import { runMarketplaceApiMappingTests } from './src/services/__tests__/marketplaceApiMapping.test.ts'; const r = runMarketplaceApiMappingTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
       - name: Full Test Suite
         run: npm run test:all
       - name: Production Build
