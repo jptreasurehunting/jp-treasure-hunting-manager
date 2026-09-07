@@ -55,6 +55,7 @@ import { runEbayPublishPrerequisiteTests } from './ebayPublishPrerequisite.test'
 import { runEbayOfficialPayloadPreviewTests } from './ebayOfficialPayloadPreview.test';
 import { runEbaySandboxOAuthTests } from './ebaySandboxOAuth.test';
 import { runEbaySandboxVerificationTests } from './ebaySandboxVerification.test';
+import { runEbaySandboxMutationGateTests } from './ebaySandboxMutationGate.test';
 import { runShopeeAutomationTests } from './shopeeAutomation.test';
 import { runI18nTests } from './i18n.test';
 import { runZonosAugust13ReadinessTests } from './zonosAugust13Readiness.test';
@@ -76,6 +77,7 @@ export interface MasterTestSummary {
 
 export function runAllAppTests(): MasterTestSummary {
   const suites = [
+    { name: 'eBay Sandbox Mutation Authorization Gate Tests', fn: runEbaySandboxMutationGateTests },
     { name: 'eBay Sandbox Connection Verification Tests', fn: runEbaySandboxVerificationTests },
     { name: 'eBay Sandbox OAuth Safety Tests', fn: runEbaySandboxOAuthTests },
     { name: 'eBay Official Payload Preview Safety Tests', fn: runEbayOfficialPayloadPreviewTests },
