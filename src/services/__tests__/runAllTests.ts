@@ -41,6 +41,7 @@ import { runShippingRouterTests } from './shippingRouter.test';
 import { runEnvelopeLayoutTests } from './envelopeLayout.test';
 import { runConsolidationTests } from './consolidation.test';
 import { runCentralInventoryTests } from './centralInventory.test';
+import { runInventorySalesWorkbenchTests } from './inventorySalesWorkbench.test';
 import { runShopeeAutomationTests } from './shopeeAutomation.test';
 import { runI18nTests } from './i18n.test';
 import { runZonosAugust13ReadinessTests } from './zonosAugust13Readiness.test';
@@ -62,6 +63,7 @@ export interface MasterTestSummary {
 
 export function runAllAppTests(): MasterTestSummary {
   const suites = [
+    { name: 'Inventory Sales Workbench Tests', fn: runInventorySalesWorkbenchTests },
     { name: 'Shipping Decision Engine Integration Tests', fn: runShippingDecisionIntegrationTests },
     { name: 'Shipping Decision Engine Foundation Tests', fn: runShippingDecisionEngineTests },
     { name: 'Zonos Prepay August 13 Production-Readiness Tests', fn: runZonosAugust13ReadinessTests },
