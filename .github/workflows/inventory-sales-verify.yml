@@ -43,6 +43,8 @@ jobs:
         run: npx tsx -e "import { runListingPublishAdapterTests } from './src/services/__tests__/listingPublishAdapter.test.ts'; const r = runListingPublishAdapterTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
       - name: Marketplace API Mapping Verification Tests
         run: npx tsx -e "import { runMarketplaceApiMappingTests } from './src/services/__tests__/marketplaceApiMapping.test.ts'; const r = runMarketplaceApiMappingTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
+      - name: eBay Publish Prerequisite Safety Tests
+        run: npx tsx -e "import { runEbayPublishPrerequisiteTests } from './src/services/__tests__/ebayPublishPrerequisite.test.ts'; const r = runEbayPublishPrerequisiteTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
       - name: Full Test Suite
         run: npm run test:all
       - name: Production Build
