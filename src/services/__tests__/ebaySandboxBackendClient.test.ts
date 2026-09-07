@@ -2,7 +2,9 @@ import {
   describeBackendError,
   fetchBackendHealth,
   fetchEbaySandboxConnectionStatus,
+  fetchEbaySandboxMutationStageStatus,
   isValidEbaySandboxCredentialRef,
+  stageEbaySandboxMutationAuthorization,
   startEbaySandboxOAuth,
   verifyEbaySandboxInventoryVersion
 } from '../ebaySandboxBackendClient';
@@ -104,6 +106,92 @@ export async function runEbaySandboxBackendClientAsyncTests(): Promise<{ passed:
   } catch (error) {
     assert(describeBackendError(error).includes('SANDBOX_NETWORK_DISABLED'), 'Test 11: Disabled-network error is preserved');
   }
+
+  const authorization: any = {
+    authorizationId: 'auth-stage-client-1',
+    environment: 'SANDBOX',
+    sellerAccountId: 'ebay-main',
+    sku: 'SKU-001',
+    previewId: 'preview-001',
+    requestFingerprint: 'request-fingerprint-001',
+    planId: 'plan-001',
+    credentialRef: 'EBAY_SANDBOX_MAIN',
+    verificationId: 'verification-001',
+    backendBaseUrl: baseUrl,
+    operationId: 'createOrReplaceInventoryItem',
+    operationOrder: 1,
+    method: 'PUT',
+    pathTemplate: '/sell/inventory/v1/inventory_item/{sku}',
+    stepFingerprint: 'step-fingerprint-001',
+    approvedBy: 'owner',
+    approvalReason: 'Sandbox staging test',
+    confirmedSandboxOnly: true,
+    confirmedSellerAccountAndSku: true,
+    confirmedPayloadPreview: true,
+    confirmedMutationRisk: true,
+    approvedAt: '2026-09-08T00:00:00.000Z',
+    expiresAt: '2026-09-08T00:15:00.000Z',
+    oneTimeUse: true,
+    executionTriggered: false,
+    networkAction: 'NONE',
+    status: 'SANDBOX_MUTATION_AUTHORIZED_NOT_EXECUTED'
+  };
+  const step: any = {
+    order: 1,
+    operationId: 'createOrReplaceInventoryItem',
+    method: 'PUT',
+    pathTemplate: '/sell/inventory/v1/inventory_item/{sku}',
+    pathParameters: { sku: 'SKU-001' },
+    requestBody: { availability: { shipToLocationAvailability: { quantity: 1 } } }
+  };
+
+  let stageRequest: { url?: string; init?: RequestInit } = {};
+  const staged = await stageEbaySandboxMutationAuthorization(authorization, step, baseUrl, async (input, init) => {
+    stageRequest = { url: String(input), init };
+    return jsonResponse({
+      success: true,
+      environment: 'Sandbox',
+      authorizationId: authorization.authorizationId,
+      sellerAccountId: 'ebay-main',
+      sku: 'SKU-001',
+      operationId: 'createOrReplaceInventoryItem',
+      stagedAt: '2026-09-08T00:05:00.000Z',
+      expiresAt: authorization.expiresAt,
+      status: 'STAGED_NOT_SENT',
+      networkAction: 'NONE',
+      externalWritePerformed: false,
+      tokenReturnedToBrowser: false,
+      message: 'No eBay API request was sent.'
+    });
+  });
+  const stageBody = JSON.parse(String(stageRequest.init?.body || '{}'));
+  assert(stageRequest.url === `${baseUrl}/api/ebay/sandbox/mutation/stage` && stageRequest.init?.method === 'POST', 'Test 12: Sandbox mutation staging uses dedicated backend endpoint');
+  assert(stageBody.authorization.authorizationId === authorization.authorizationId && stageBody.step.operationId === 'createOrReplaceInventoryItem', 'Test 13: Staging sends approved authorization and exact step');
+  assert(staged.status === 'STAGED_NOT_SENT' && staged.externalWritePerformed === false && staged.tokenReturnedToBrowser === false, 'Test 14: Staging response confirms no external write or token exposure');
+
+  let stageStatusUrl = '';
+  const stagedStatus = await fetchEbaySandboxMutationStageStatus(authorization.authorizationId, baseUrl, async (input) => {
+    stageStatusUrl = String(input);
+    return jsonResponse({
+      success: true,
+      environment: 'Sandbox',
+      authorizationId: authorization.authorizationId,
+      sellerAccountId: 'ebay-main',
+      sku: 'SKU-001',
+      previewId: 'preview-001',
+      operationId: 'createOrReplaceInventoryItem',
+      method: 'PUT',
+      pathTemplate: '/sell/inventory/v1/inventory_item/{sku}',
+      stagedAt: '2026-09-08T00:05:00.000Z',
+      expiresAt: authorization.expiresAt,
+      status: 'STAGED_NOT_SENT',
+      networkAction: 'NONE',
+      externalWritePerformed: false,
+      tokenReturnedToBrowser: false
+    });
+  });
+  assert(stageStatusUrl.endsWith(`/api/ebay/sandbox/mutation/stage/${authorization.authorizationId}`), 'Test 15: Staging status endpoint is authorization-scoped');
+  assert(stagedStatus.status === 'STAGED_NOT_SENT' && stagedStatus.networkAction === 'NONE', 'Test 16: Backend staging status remains explicitly unsent');
 
   return { passed, failed, log };
 }
