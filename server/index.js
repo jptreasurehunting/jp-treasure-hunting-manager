@@ -10,7 +10,8 @@ const {
 } = require('./integrations/ebaySandboxOAuthBackend');
 const {
   stageSandboxMutationExecution,
-  getSandboxMutationStageStatus
+  getSandboxMutationStageStatus,
+  buildSandboxMutationExecutionPreview
 } = require('./integrations/ebaySandboxMutationExecutionBackend');
 
 dotenv.config();
@@ -80,8 +81,12 @@ function mutationStageErrorStatus(error) {
     case 'AUTHORIZATION_EXPIRED':
     case 'AUTHORIZATION_TTL_TOO_LONG':
     case 'AUTHORIZATION_ALREADY_CONSUMED':
+    case 'STAGED_MUTATION_UNSAFE_STATE':
+    case 'STAGED_MUTATION_EXPIRED':
+    case 'SANDBOX_ACCESS_TOKEN_EXPIRED':
       return 409;
     case 'SANDBOX_TOKEN_NOT_FOUND':
+    case 'SANDBOX_ACCESS_TOKEN_MISSING':
     case 'STAGED_MUTATION_NOT_FOUND':
       return 404;
     default:
@@ -212,6 +217,20 @@ app.post('/api/ebay/sandbox/mutation/stage', async (req, res) => {
 app.get('/api/ebay/sandbox/mutation/stage/:authorizationId', async (req, res) => {
   try {
     const result = await getSandboxMutationStageStatus(req.params.authorizationId);
+    res.json(result);
+  } catch (err) {
+    return sendSafeMutationStageError(res, err);
+  }
+});
+
+/**
+ * Builds the final Sandbox HTTP request shape from backend staging without sending it.
+ * Access tokens remain in TokenVault and are represented only by a redacted placeholder.
+ * Content-Language remains a blocking REVIEW_REQUIRED field until the target locale is resolved.
+ */
+app.get('/api/ebay/sandbox/mutation/stage/:authorizationId/execution-preview', async (req, res) => {
+  try {
+    const result = await buildSandboxMutationExecutionPreview(req.params.authorizationId);
     res.json(result);
   } catch (err) {
     return sendSafeMutationStageError(res, err);
