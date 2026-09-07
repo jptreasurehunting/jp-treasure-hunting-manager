@@ -73,6 +73,42 @@ export interface EbaySandboxMutationStageStatusResponse {
   tokenReturnedToBrowser: false;
 }
 
+export interface EbaySandboxMutationExecutionPreviewResponse {
+  success: true;
+  environment: 'Sandbox';
+  authorizationId: string;
+  sellerAccountId: string;
+  sku: string;
+  operationId: 'createOrReplaceInventoryItem';
+  stageStatus: 'STAGED_NOT_SENT';
+  stagedAt: string;
+  stageExpiresAt: string;
+  generatedAt: string;
+  httpRequest: {
+    method: 'PUT';
+    url: string;
+    headers: Record<string, string>;
+    conditionalHeaders: {
+      'Content-Language': {
+        status: 'REVIEW_REQUIRED';
+        value: null;
+        note: string;
+      };
+    };
+    body: Record<string, unknown>;
+  };
+  accessTokenState: {
+    presentInBackendVault: true;
+    expiresAt: string;
+  };
+  readyForExternalNetwork: false;
+  blockingReasons: string[];
+  networkAction: 'NONE';
+  externalWritePerformed: false;
+  tokenReturnedToBrowser: false;
+  message: string;
+}
+
 export interface BackendSafeError {
   success: false;
   errorCode?: string;
@@ -229,6 +265,24 @@ export async function fetchEbaySandboxMutationStageStatus(
     { method: 'GET', headers: { Accept: 'application/json' } }
   );
   return parseJsonResponse<EbaySandboxMutationStageStatusResponse>(response);
+}
+
+export async function fetchEbaySandboxMutationExecutionPreview(
+  authorizationId: string,
+  baseUrl = getConfiguredBackendBaseUrl(),
+  fetchImpl?: FetchLike
+): Promise<EbaySandboxMutationExecutionPreviewResponse> {
+  const normalizedAuthorizationId = authorizationId.trim();
+  if (!normalizedAuthorizationId) {
+    throw <BackendSafeError>{ success: false, errorCode: 'MISSING_AUTHORIZATION_ID', error: 'Sandbox変更操作のAuthorization IDが未指定です。' };
+  }
+
+  const fetcher = requireFetch(fetchImpl);
+  const response = await fetcher(
+    `${trimTrailingSlash(baseUrl)}/api/ebay/sandbox/mutation/stage/${encodeURIComponent(normalizedAuthorizationId)}/execution-preview`,
+    { method: 'GET', headers: { Accept: 'application/json' } }
+  );
+  return parseJsonResponse<EbaySandboxMutationExecutionPreviewResponse>(response);
 }
 
 export function describeBackendError(error: unknown): string {
