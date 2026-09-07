@@ -8,6 +8,7 @@ import {
   evaluateEbaySandboxMutationApproval,
   evaluateStoredEbaySandboxMutationAuthorization,
   loadEbaySandboxMutationAuthorizations,
+  markEbaySandboxMutationAuthorizationBackendStaged,
   recordEbaySandboxMutationAuthorization
 } from '../ebaySandboxMutationGateService';
 
@@ -258,6 +259,22 @@ export function runEbaySandboxMutationGateTests(): { passed: number; failed: num
     now + 1000
   );
   assert(!stalePlan.validForExecution, 'Test 12: OAuth plan change invalidates stored authorization');
+
+  const staged = markEbaySandboxMutationAuthorizationBackendStaged(
+    recorded.record!.authorizationId,
+    '2026-09-08T00:11:00.000Z'
+  );
+  const stagedStored = evaluateStoredEbaySandboxMutationAuthorization(
+    staged.record,
+    preview,
+    plan,
+    verification,
+    connection,
+    backendBaseUrl,
+    now + 2 * 60 * 1000
+  );
+  assert(staged.success && staged.record?.backendStagingConsumed === true, 'Test 13: Backend staging acknowledgement marks local authorization consumed');
+  assert(!stagedStored.validForExecution && stagedStored.reasonsJa.some((reason) => reason.includes('消費済み')), 'Test 14: Consumed authorization cannot be executed again locally');
 
   localStorage.clear();
   return { passed, failed, log };
