@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   EbaySandboxConnectionStatus,
+  EbaySandboxMutationExecutionPreviewResponse,
   EbaySandboxMutationStageResponse,
   describeBackendError,
   fetchEbaySandboxConnectionStatus,
+  fetchEbaySandboxMutationExecutionPreview,
   getConfiguredBackendBaseUrl,
   stageEbaySandboxMutationAuthorization
 } from '../../services/ebaySandboxBackendClient';
@@ -82,6 +84,7 @@ export function EbaySandboxMutationGatePanel() {
   const [selectedPreviewId, setSelectedPreviewId] = useState(() => previews[0]?.previewId ?? '');
   const [connection, setConnection] = useState<EbaySandboxConnectionStatus | undefined>();
   const [stageResult, setStageResult] = useState<EbaySandboxMutationStageResponse | undefined>();
+  const [executionPreview, setExecutionPreview] = useState<EbaySandboxMutationExecutionPreviewResponse | undefined>();
   const [input, setInput] = useState<EbaySandboxMutationApprovalInput>(initialInput);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
@@ -148,6 +151,7 @@ export function EbaySandboxMutationGatePanel() {
   useEffect(() => {
     setConnection(undefined);
     setStageResult(undefined);
+    setExecutionPreview(undefined);
     setInput(initialInput);
     setMessage('');
     if (!selectedPreview) return;
@@ -161,6 +165,7 @@ export function EbaySandboxMutationGatePanel() {
   }, [selectedPreview?.previewId]);
 
   const setField = <K extends keyof EbaySandboxMutationApprovalInput>(key: K, value: EbaySandboxMutationApprovalInput[K]) => {
+    setExecutionPreview(undefined);
     setInput((current) => ({ ...current, [key]: value }));
   };
 
@@ -192,6 +197,7 @@ export function EbaySandboxMutationGatePanel() {
     setMessage(result.messageJa);
     if (result.success) {
       setStageResult(undefined);
+      setExecutionPreview(undefined);
       setAuthorizations(loadEbaySandboxMutationAuthorizations());
     }
   };
@@ -221,6 +227,7 @@ export function EbaySandboxMutationGatePanel() {
         loadEbaySandboxMutationAuthorizations()
       );
       setStageResult(result);
+      setExecutionPreview(undefined);
       setAuthorizations(loadEbaySandboxMutationAuthorizations());
       setMessage(localUpdate.success
         ? 'バックエンドへ1回限りの実行予約を保存し、ローカル承認も消費済みにしました。eBay APIへの送信は行っていません。'
@@ -233,11 +240,39 @@ export function EbaySandboxMutationGatePanel() {
     }
   };
 
+  const loadExecutionPreview = async () => {
+    if (!storedAuthorization?.backendStagingConsumed) return;
+    setBusy(true);
+    setMessage('');
+    try {
+      const result = await fetchEbaySandboxMutationExecutionPreview(
+        storedAuthorization.authorizationId,
+        backendBaseUrl
+      );
+      if (
+        result.networkAction !== 'NONE' ||
+        result.externalWritePerformed !== false ||
+        result.tokenReturnedToBrowser !== false ||
+        result.httpRequest.headers.Authorization !== 'Bearer <TOKENVAULT_REDACTED>'
+      ) {
+        setMessage('HTTP Request Previewが安全な非送信・Token秘匿状態と一致しないため表示していません。');
+        return;
+      }
+      setExecutionPreview(result);
+      setMessage('バックエンドのHTTP Request Previewを取得しました。eBay APIへの通信は行っていません。');
+    } catch (error) {
+      setExecutionPreview(undefined);
+      setMessage(describeBackendError(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section style={panelStyle}>
       <h3 style={{ margin: 0, color: '#f8fafc', fontSize: 20 }}>eBay Sandbox 変更操作 実行許可ゲート</h3>
       <p style={{ margin: '6px 0 14px', color: '#94a3b8', fontSize: 13, lineHeight: 1.65 }}>
-        Sandboxで変更系APIを実行する前の明示承認を記録します。承認後はバックエンドへ「実行予約」だけを1回保存できますが、eBay API通信・商品作成・Offer作成・公開はまだ実行しません。
+        Sandboxで変更系APIを実行する前の明示承認を記録します。承認後はバックエンドへ「実行予約」を1回保存し、その予約からHTTP Request Previewを確認できますが、eBay API通信・商品作成・Offer作成・公開はまだ実行しません。
       </p>
 
       {previews.length === 0 ? (
@@ -313,6 +348,9 @@ export function EbaySandboxMutationGatePanel() {
             <button type="button" style={{ ...buttonStyle, background: 'rgba(180, 83, 9, 0.62)', borderColor: 'rgba(251, 191, 36, 0.55)', color: '#fef3c7', opacity: storedEvaluation.validForExecution ? 1 : 0.45 }} disabled={!storedEvaluation.validForExecution || !storedAuthorization || !selectedStep || busy} onClick={stageOnBackend}>
               バックエンドへ実行予約（eBay送信なし）
             </button>
+            <button type="button" style={{ ...buttonStyle, background: 'rgba(30, 64, 175, 0.62)', borderColor: 'rgba(96, 165, 250, 0.55)', color: '#dbeafe', opacity: storedAuthorization?.backendStagingConsumed ? 1 : 0.45 }} disabled={!storedAuthorization?.backendStagingConsumed || busy} onClick={loadExecutionPreview}>
+              HTTP Request Previewを確認（送信なし）
+            </button>
             <button type="button" style={{ ...buttonStyle, background: 'rgba(30, 41, 59, 0.95)', borderColor: 'rgba(148, 163, 184, 0.35)', color: '#f8fafc' }} disabled={busy} onClick={refreshConnection}>
               Sandbox接続を再確認
             </button>
@@ -337,6 +375,27 @@ export function EbaySandboxMutationGatePanel() {
           {stageResult && (
             <div style={{ padding: 11, borderRadius: 8, background: 'rgba(30, 64, 175, 0.2)', color: '#bfdbfe', marginBottom: 10, fontSize: 12, lineHeight: 1.65 }}>
               Backend status: {stageResult.status} / networkAction: {stageResult.networkAction} / externalWritePerformed: {String(stageResult.externalWritePerformed)}
+            </div>
+          )}
+
+          {executionPreview && (
+            <div style={{ padding: 12, borderRadius: 8, background: 'rgba(2, 6, 23, 0.82)', border: '1px solid rgba(96, 165, 250, 0.28)', marginBottom: 10 }}>
+              <div style={{ color: '#bfdbfe', fontSize: 13, fontWeight: 800, marginBottom: 8 }}>
+                HTTP Execution Preview — {executionPreview.readyForExternalNetwork ? '実行可能' : 'まだ送信不可'}
+              </div>
+              <div style={{ color: '#cbd5e1', fontSize: 12, lineHeight: 1.7, marginBottom: 8 }}>
+                {executionPreview.httpRequest.method} {executionPreview.httpRequest.url}<br />
+                Authorization: {executionPreview.httpRequest.headers.Authorization}<br />
+                Content-Type: {executionPreview.httpRequest.headers['Content-Type']}<br />
+                Content-Language: {executionPreview.httpRequest.conditionalHeaders['Content-Language'].status}<br />
+                networkAction: {executionPreview.networkAction} / externalWritePerformed: {String(executionPreview.externalWritePerformed)}
+              </div>
+              {executionPreview.blockingReasons.map((reason) => (
+                <div key={reason} style={{ color: '#fde68a', fontSize: 12, marginBottom: 5 }}>・{reason}</div>
+              ))}
+              <pre style={{ margin: '10px 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#cbd5e1', fontSize: 11, maxHeight: 360, overflow: 'auto' }}>
+                {JSON.stringify(executionPreview.httpRequest.body, null, 2)}
+              </pre>
             </div>
           )}
 
