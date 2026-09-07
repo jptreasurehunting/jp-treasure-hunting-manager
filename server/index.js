@@ -73,6 +73,8 @@ function mutationStageErrorStatus(error) {
     case 'SKU_MISMATCH':
     case 'STEP_AUTHORIZATION_MISMATCH':
     case 'STEP_FINGERPRINT_MISMATCH':
+    case 'MARKETPLACE_ID_MISSING':
+    case 'CONTENT_LANGUAGE_MISSING':
       return 400;
     case 'PRODUCTION_NOT_ALLOWED':
     case 'OPERATION_NOT_ALLOWED':
@@ -105,25 +107,21 @@ function sendSafeMutationStageError(res, error) {
 }
 
 app.get('/health', async (req, res) => {
-  res.json({
-    status: 'UP',
-    database: dbReady ? 'READY' : 'NOT_READY',
-    timestamp: new Date().toISOString()
-  });
+  res.json({ status: 'UP', database: dbReady ? 'READY' : 'NOT_READY', timestamp: new Date().toISOString() });
 });
 
 app.get('/api/accounts/status', async (req, res) => {
   try {
-    const db = getDB();
-    const rows = await db.getConnectedAccountsMetadata();
-    const metadata = rows.map((row) => ({
-      accountId: row.account_id,
-      environment: row.environment,
-      connectionStatus: 'connected',
-      lastAuthDate: row.last_auth_date
-    }));
-
-    res.json({ success: true, accounts: metadata });
+    const rows = await getDB().getConnectedAccountsMetadata();
+    res.json({
+      success: true,
+      accounts: rows.map((row) => ({
+        accountId: row.account_id,
+        environment: row.environment,
+        connectionStatus: 'connected',
+        lastAuthDate: row.last_auth_date
+      }))
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Failed to retrieve connection statuses.' });
   }
@@ -131,16 +129,10 @@ app.get('/api/accounts/status', async (req, res) => {
 
 app.post('/api/accounts/disconnect', async (req, res) => {
   const { accountId, environment } = req.body;
-  if (!accountId || !environment) {
-    return res.status(400).json({ success: false, error: 'Missing required parameters: accountId, environment.' });
-  }
-
+  if (!accountId || !environment) return res.status(400).json({ success: false, error: 'Missing required parameters: accountId, environment.' });
   try {
     await TokenVault.deleteTokens(accountId, environment);
-    res.json({
-      success: true,
-      message: `Successfully disconnected account ${accountId} in ${environment} environment.`
-    });
+    res.json({ success: true, message: `Successfully disconnected account ${accountId} in ${environment} environment.` });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message || 'Failed to disconnect account.' });
   }
@@ -148,19 +140,11 @@ app.post('/api/accounts/disconnect', async (req, res) => {
 
 app.post('/api/auth/mock-connect', async (req, res) => {
   const { accountId, environment } = req.body;
-  if (process.env.NODE_ENV !== 'development') {
-    return res.status(403).json({ success: false, error: 'Forbidden: Mock connections are restricted to development mode.' });
-  }
-  if (!accountId || !environment) {
-    return res.status(400).json({ success: false, error: 'Missing required parameters: accountId, environment.' });
-  }
-
+  if (process.env.NODE_ENV !== 'development') return res.status(403).json({ success: false, error: 'Forbidden: Mock connections are restricted to development mode.' });
+  if (!accountId || !environment) return res.status(400).json({ success: false, error: 'Missing required parameters: accountId, environment.' });
   try {
     await TokenVault.mockConnect(accountId, environment);
-    res.json({
-      success: true,
-      message: `Mock connection registered successfully for ${accountId} in ${environment} environment.`
-    });
+    res.json({ success: true, message: `Mock connection registered successfully for ${accountId} in ${environment} environment.` });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message || 'Failed to seed mock connection.' });
   }
@@ -179,8 +163,7 @@ app.post('/api/ebay/sandbox/oauth/start', (req, res) => {
 app.get('/api/ebay/sandbox/oauth/callback', async (req, res) => {
   const { code, state } = req.query || {};
   try {
-    const result = await completeSandboxAuthorizationCallback({ code, state });
-    res.json(result);
+    res.json(await completeSandboxAuthorizationCallback({ code, state }));
   } catch (err) {
     return sendSafeOAuthError(res, err);
   }
@@ -189,35 +172,26 @@ app.get('/api/ebay/sandbox/oauth/callback', async (req, res) => {
 app.get('/api/ebay/sandbox/inventory/version', async (req, res) => {
   const { accountId } = req.query || {};
   try {
-    const result = await verifySandboxInventoryVersion(accountId);
-    res.json(result);
+    res.json(await verifySandboxInventoryVersion(accountId));
   } catch (err) {
     return sendSafeOAuthError(res, err);
   }
 });
 
-/**
- * eBay Sandbox Mutation Staging
- * Consumes an approved one-time createOrReplaceInventoryItem authorization into backend
- * persistent staging. This endpoint NEVER calls eBay and never performs an external write.
- */
+/** Consumes one approved Sandbox authorization into persistent staging. Never calls eBay. */
 app.post('/api/ebay/sandbox/mutation/stage', async (req, res) => {
   const { authorization, step } = req.body || {};
   try {
-    const result = await stageSandboxMutationExecution({ authorization, step });
-    res.json(result);
+    res.json(await stageSandboxMutationExecution({ authorization, step }));
   } catch (err) {
     return sendSafeMutationStageError(res, err);
   }
 });
 
-/**
- * Returns safe staging metadata only. The request body is intentionally not returned here.
- */
+/** Returns safe staged metadata only; request body and tokens are not returned. */
 app.get('/api/ebay/sandbox/mutation/stage/:authorizationId', async (req, res) => {
   try {
-    const result = await getSandboxMutationStageStatus(req.params.authorizationId);
-    res.json(result);
+    res.json(await getSandboxMutationStageStatus(req.params.authorizationId));
   } catch (err) {
     return sendSafeMutationStageError(res, err);
   }
@@ -226,12 +200,11 @@ app.get('/api/ebay/sandbox/mutation/stage/:authorizationId', async (req, res) =>
 /**
  * Builds the final Sandbox HTTP request shape from backend staging without sending it.
  * Access tokens remain in TokenVault and are represented only by a redacted placeholder.
- * Content-Language remains a blocking REVIEW_REQUIRED field until the target locale is resolved.
+ * MarketplaceId and Content-Language must already be bound by the approved prerequisite flow.
  */
 app.get('/api/ebay/sandbox/mutation/stage/:authorizationId/execution-preview', async (req, res) => {
   try {
-    const result = await buildSandboxMutationExecutionPreview(req.params.authorizationId);
-    res.json(result);
+    res.json(await buildSandboxMutationExecutionPreview(req.params.authorizationId));
   } catch (err) {
     return sendSafeMutationStageError(res, err);
   }
