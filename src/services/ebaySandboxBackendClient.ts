@@ -1,3 +1,4 @@
+import type { CrossChannelInventorySyncRequest } from './crossChannelInventorySyncService';
 import type { EbayOfficialPayloadPreviewStep } from './ebayOfficialPayloadPreviewService';
 import type { EbaySandboxMutationAuthorizationRecord } from './ebaySandboxMutationGateService';
 
@@ -14,6 +15,23 @@ export interface EbaySandboxOAuthStartResponse {
 export interface EbaySandboxVersionResponse {
   success: true; environment: 'Sandbox'; accountId: string; endpoint: '/sell/inventory/v1/getVersion';
   version: string | null; checkedAt: string; mutatingOperation: false; tokenReturnedToBrowser: false;
+}
+
+export interface EbaySandboxInventorySyncResponse {
+  success: true;
+  environment: 'Sandbox';
+  requestId: string;
+  sellerAccountId: string;
+  sku: string;
+  targetStock: number;
+  updatedOfferIds: string[];
+  operation: 'bulkUpdatePriceQuantity';
+  endpoint: '/sell/inventory/v1/bulk_update_price_quantity';
+  externalWritePerformed: true;
+  verifiedByEbayResponse: true;
+  tokenReturnedToBrowser: false;
+  completedAt: string;
+  message: string;
 }
 
 export interface EbaySandboxMutationStageResponse {
@@ -82,7 +100,13 @@ export interface EbaySandboxMutationExecutionPreviewResponse {
   message: string;
 }
 
-export interface BackendSafeError { success: false; errorCode?: string; error: string; httpStatus?: number; }
+export interface BackendSafeError {
+  success: false;
+  errorCode?: string;
+  error: string;
+  httpStatus?: number;
+  externalWritePerformed?: boolean;
+}
 export interface EbaySandboxConnectionStatus { connected: boolean; account?: BackendAccountMetadata; }
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -103,7 +127,8 @@ async function parseJsonResponse<T>(response: Response): Promise<T> {
       success: false,
       errorCode: typeof payload.errorCode === 'string' ? payload.errorCode : undefined,
       error: typeof payload.error === 'string' ? payload.error : `Backend request failed with HTTP ${response.status}.`,
-      httpStatus: response.status
+      httpStatus: response.status,
+      externalWritePerformed: payload.externalWritePerformed === true
     };
     throw error;
   }
@@ -149,6 +174,25 @@ export async function verifyEbaySandboxInventoryVersion(accountId: string, baseU
   url.searchParams.set('accountId', normalizedAccountId);
   const response = await requireFetch(fetchImpl)(url, { method: 'GET', headers: { Accept: 'application/json' } });
   return parseJsonResponse<EbaySandboxVersionResponse>(response);
+}
+
+export async function executeEbaySandboxInventorySync(
+  request: CrossChannelInventorySyncRequest,
+  baseUrl = getConfiguredBackendBaseUrl(),
+  fetchImpl?: FetchLike
+): Promise<EbaySandboxInventorySyncResponse> {
+  if (request.targetChannel !== 'eBay') {
+    throw <BackendSafeError>{ success: false, errorCode: 'UNSUPPORTED_SYNC_CHANNEL', error: 'eBay Sandbox在庫同期ではeBay向け要求だけを実行できます。' };
+  }
+  if (!Number.isInteger(request.targetStock) || request.targetStock < 0) {
+    throw <BackendSafeError>{ success: false, errorCode: 'INVALID_TARGET_STOCK', error: '反映予定在庫は0以上の整数である必要があります。' };
+  }
+  const response = await requireFetch(fetchImpl)(`${trimTrailingSlash(baseUrl)}/api/ebay/sandbox/inventory/sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ request })
+  });
+  return parseJsonResponse<EbaySandboxInventorySyncResponse>(response);
 }
 
 export async function stageEbaySandboxMutationAuthorization(
