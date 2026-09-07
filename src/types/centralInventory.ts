@@ -1,9 +1,9 @@
 import { SalesChannel } from './shippingRouter';
 
 export type ChannelSyncStatus =
-  | 'SYNCED'            // 正常同期済み
-  | 'PENDING'           // 同期待ち
-  | 'FAILED'            // 同期失敗
+  | 'SYNCED'            // 外部販売先まで反映確認済み
+  | 'PENDING'           // 外部販売先への同期待ち
+  | 'FAILED'            // 外部販売先への同期失敗
   | 'OVERSELLING_RISK'  // 二重販売リスク (要確認)
   | 'PAUSED';           // 在庫切れ/手動による休止
 
@@ -58,8 +58,10 @@ export interface InventorySyncEvent {
   afterPhysicalStock: number;
   beforeAvailableToSell: number;
   afterAvailableToSell: number;
-  syncedChannels: SalesChannel[];
+  syncedChannels: SalesChannel[];       // 外部販売先まで反映確認済み
+  pendingChannels?: SalesChannel[];     // 同期要求を発行済みだが外部反映未確認
   failedChannels: SalesChannel[];
+  blockedChannels?: SalesChannel[];     // 自動同期無効等で同期要求を実行できない
   isIdempotentReplay: boolean;
   timestamp: string;
 }
