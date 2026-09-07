@@ -1,3 +1,6 @@
+import type { EbayOfficialPayloadPreviewStep } from './ebayOfficialPayloadPreviewService';
+import type { EbaySandboxMutationAuthorizationRecord } from './ebaySandboxMutationGateService';
+
 export const DEFAULT_BACKEND_BASE_URL = 'http://localhost:3001';
 
 export interface BackendHealthStatus {
@@ -33,6 +36,40 @@ export interface EbaySandboxVersionResponse {
   version: string | null;
   checkedAt: string;
   mutatingOperation: false;
+  tokenReturnedToBrowser: false;
+}
+
+export interface EbaySandboxMutationStageResponse {
+  success: true;
+  environment: 'Sandbox';
+  authorizationId: string;
+  sellerAccountId: string;
+  sku: string;
+  operationId: 'createOrReplaceInventoryItem';
+  stagedAt: string;
+  expiresAt: string;
+  status: 'STAGED_NOT_SENT';
+  networkAction: 'NONE';
+  externalWritePerformed: false;
+  tokenReturnedToBrowser: false;
+  message: string;
+}
+
+export interface EbaySandboxMutationStageStatusResponse {
+  success: true;
+  environment: 'Sandbox';
+  authorizationId: string;
+  sellerAccountId: string;
+  sku: string;
+  previewId: string;
+  operationId: 'createOrReplaceInventoryItem';
+  method: 'PUT';
+  pathTemplate: '/sell/inventory/v1/inventory_item/{sku}';
+  stagedAt: string;
+  expiresAt: string;
+  status: 'STAGED_NOT_SENT';
+  networkAction: 'NONE';
+  externalWritePerformed: false;
   tokenReturnedToBrowser: false;
 }
 
@@ -159,6 +196,39 @@ export async function verifyEbaySandboxInventoryVersion(
   url.searchParams.set('accountId', normalizedAccountId);
   const response = await fetcher(url, { method: 'GET', headers: { Accept: 'application/json' } });
   return parseJsonResponse<EbaySandboxVersionResponse>(response);
+}
+
+export async function stageEbaySandboxMutationAuthorization(
+  authorization: EbaySandboxMutationAuthorizationRecord,
+  step: EbayOfficialPayloadPreviewStep,
+  baseUrl = getConfiguredBackendBaseUrl(),
+  fetchImpl?: FetchLike
+): Promise<EbaySandboxMutationStageResponse> {
+  const fetcher = requireFetch(fetchImpl);
+  const response = await fetcher(`${trimTrailingSlash(baseUrl)}/api/ebay/sandbox/mutation/stage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ authorization, step })
+  });
+  return parseJsonResponse<EbaySandboxMutationStageResponse>(response);
+}
+
+export async function fetchEbaySandboxMutationStageStatus(
+  authorizationId: string,
+  baseUrl = getConfiguredBackendBaseUrl(),
+  fetchImpl?: FetchLike
+): Promise<EbaySandboxMutationStageStatusResponse> {
+  const normalizedAuthorizationId = authorizationId.trim();
+  if (!normalizedAuthorizationId) {
+    throw <BackendSafeError>{ success: false, errorCode: 'MISSING_AUTHORIZATION_ID', error: 'Sandbox変更操作のAuthorization IDが未指定です。' };
+  }
+
+  const fetcher = requireFetch(fetchImpl);
+  const response = await fetcher(
+    `${trimTrailingSlash(baseUrl)}/api/ebay/sandbox/mutation/stage/${encodeURIComponent(normalizedAuthorizationId)}`,
+    { method: 'GET', headers: { Accept: 'application/json' } }
+  );
+  return parseJsonResponse<EbaySandboxMutationStageStatusResponse>(response);
 }
 
 export function describeBackendError(error: unknown): string {
