@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   EbaySandboxConnectionStatus,
+  EbaySandboxMutationStageResponse,
   describeBackendError,
   fetchEbaySandboxConnectionStatus,
-  getConfiguredBackendBaseUrl
+  getConfiguredBackendBaseUrl,
+  stageEbaySandboxMutationAuthorization
 } from '../../services/ebaySandboxBackendClient';
 import {
   EBAY_OFFICIAL_PAYLOAD_PREVIEW_CHANGED_EVENT,
@@ -19,6 +21,7 @@ import {
   evaluateStoredEbaySandboxMutationAuthorization,
   findEbaySandboxMutationAuthorization,
   loadEbaySandboxMutationAuthorizations,
+  markEbaySandboxMutationAuthorizationBackendStaged,
   recordEbaySandboxMutationAuthorization
 } from '../../services/ebaySandboxMutationGateService';
 import {
@@ -78,6 +81,7 @@ export function EbaySandboxMutationGatePanel() {
   const [authorizations, setAuthorizations] = useState<EbaySandboxMutationAuthorizationRecord[]>(() => loadEbaySandboxMutationAuthorizations());
   const [selectedPreviewId, setSelectedPreviewId] = useState(() => previews[0]?.previewId ?? '');
   const [connection, setConnection] = useState<EbaySandboxConnectionStatus | undefined>();
+  const [stageResult, setStageResult] = useState<EbaySandboxMutationStageResponse | undefined>();
   const [input, setInput] = useState<EbaySandboxMutationApprovalInput>(initialInput);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
@@ -143,6 +147,7 @@ export function EbaySandboxMutationGatePanel() {
 
   useEffect(() => {
     setConnection(undefined);
+    setStageResult(undefined);
     setInput(initialInput);
     setMessage('');
     if (!selectedPreview) return;
@@ -186,17 +191,53 @@ export function EbaySandboxMutationGatePanel() {
     );
     setMessage(result.messageJa);
     if (result.success) {
+      setStageResult(undefined);
       setAuthorizations(loadEbaySandboxMutationAuthorizations());
     }
   };
 
   const selectedStep = selectedPreview?.steps.find((step) => step.operationId === input.operationId);
 
+  const stageOnBackend = async () => {
+    if (!storedAuthorization || !selectedStep || !storedEvaluation.validForExecution) return;
+    setBusy(true);
+    setMessage('');
+    try {
+      const result = await stageEbaySandboxMutationAuthorization(storedAuthorization, selectedStep, backendBaseUrl);
+      if (
+        result.authorizationId !== storedAuthorization.authorizationId ||
+        result.status !== 'STAGED_NOT_SENT' ||
+        result.networkAction !== 'NONE' ||
+        result.externalWritePerformed !== false ||
+        result.tokenReturnedToBrowser !== false
+      ) {
+        setMessage('バックエンド応答が安全な実行予約状態と一致しないため、ローカル承認を消費済みにしていません。');
+        return;
+      }
+
+      const localUpdate = markEbaySandboxMutationAuthorizationBackendStaged(
+        storedAuthorization.authorizationId,
+        result.stagedAt,
+        loadEbaySandboxMutationAuthorizations()
+      );
+      setStageResult(result);
+      setAuthorizations(loadEbaySandboxMutationAuthorizations());
+      setMessage(localUpdate.success
+        ? 'バックエンドへ1回限りの実行予約を保存し、ローカル承認も消費済みにしました。eBay APIへの送信は行っていません。'
+        : `バックエンド予約は成功しましたが、ローカル表示更新に失敗しました: ${localUpdate.messageJa}`
+      );
+    } catch (error) {
+      setMessage(describeBackendError(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section style={panelStyle}>
       <h3 style={{ margin: 0, color: '#f8fafc', fontSize: 20 }}>eBay Sandbox 変更操作 実行許可ゲート</h3>
       <p style={{ margin: '6px 0 14px', color: '#94a3b8', fontSize: 13, lineHeight: 1.65 }}>
-        Sandboxで変更系APIを実行する前の明示承認を記録します。この画面は承認記録だけを作成し、eBay API通信・商品作成・Offer作成・公開は実行しません。
+        Sandboxで変更系APIを実行する前の明示承認を記録します。承認後はバックエンドへ「実行予約」だけを1回保存できますが、eBay API通信・商品作成・Offer作成・公開はまだ実行しません。
       </p>
 
       {previews.length === 0 ? (
@@ -269,17 +310,33 @@ export function EbaySandboxMutationGatePanel() {
             <button type="button" style={{ ...buttonStyle, opacity: evaluation.canApprove ? 1 : 0.45 }} disabled={!evaluation.canApprove || busy} onClick={approve}>
               Sandbox変更操作を15分間・1回だけ承認（通信なし）
             </button>
+            <button type="button" style={{ ...buttonStyle, background: 'rgba(180, 83, 9, 0.62)', borderColor: 'rgba(251, 191, 36, 0.55)', color: '#fef3c7', opacity: storedEvaluation.validForExecution ? 1 : 0.45 }} disabled={!storedEvaluation.validForExecution || !storedAuthorization || !selectedStep || busy} onClick={stageOnBackend}>
+              バックエンドへ実行予約（eBay送信なし）
+            </button>
             <button type="button" style={{ ...buttonStyle, background: 'rgba(30, 41, 59, 0.95)', borderColor: 'rgba(148, 163, 184, 0.35)', color: '#f8fafc' }} disabled={busy} onClick={refreshConnection}>
               Sandbox接続を再確認
             </button>
           </div>
 
           {storedAuthorization && (
-            <div style={{ padding: 11, borderRadius: 8, background: storedEvaluation.validForExecution ? 'rgba(6, 78, 59, 0.25)' : 'rgba(120, 53, 15, 0.25)', color: storedEvaluation.validForExecution ? '#a7f3d0' : '#fde68a', marginBottom: 10, fontSize: 12, lineHeight: 1.65 }}>
-              <strong>{storedEvaluation.validForExecution ? '実行許可記録: 有効（ただし未実行）' : '実行許可記録: 再承認必要'}</strong><br />
+            <div style={{ padding: 11, borderRadius: 8, background: storedAuthorization.backendStagingConsumed ? 'rgba(30, 64, 175, 0.25)' : storedEvaluation.validForExecution ? 'rgba(6, 78, 59, 0.25)' : 'rgba(120, 53, 15, 0.25)', color: storedAuthorization.backendStagingConsumed ? '#bfdbfe' : storedEvaluation.validForExecution ? '#a7f3d0' : '#fde68a', marginBottom: 10, fontSize: 12, lineHeight: 1.65 }}>
+              <strong>
+                {storedAuthorization.backendStagingConsumed
+                  ? '実行許可記録: バックエンド予約で消費済み（eBay未送信）'
+                  : storedEvaluation.validForExecution
+                    ? '実行許可記録: 有効（ただし未実行）'
+                    : '実行許可記録: 再承認必要'}
+              </strong><br />
               Authorization ID: {storedAuthorization.authorizationId}<br />
               有効期限: {new Date(storedAuthorization.expiresAt).toLocaleString()}<br />
+              {storedAuthorization.backendStagedAt && <>バックエンド予約: {new Date(storedAuthorization.backendStagedAt).toLocaleString()}<br /></>}
               {storedEvaluation.reasonsJa.map((reason) => <div key={reason}>・{reason}</div>)}
+            </div>
+          )}
+
+          {stageResult && (
+            <div style={{ padding: 11, borderRadius: 8, background: 'rgba(30, 64, 175, 0.2)', color: '#bfdbfe', marginBottom: 10, fontSize: 12, lineHeight: 1.65 }}>
+              Backend status: {stageResult.status} / networkAction: {stageResult.networkAction} / externalWritePerformed: {String(stageResult.externalWritePerformed)}
             </div>
           )}
 
