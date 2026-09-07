@@ -4,6 +4,7 @@ const { getDB } = require('../db/database');
 const ALLOWED_OPERATION = 'createOrReplaceInventoryItem';
 const EXPECTED_METHOD = 'PUT';
 const EXPECTED_PATH_TEMPLATE = '/sell/inventory/v1/inventory_item/{sku}';
+const SANDBOX_API_BASE_URL = 'https://api.sandbox.ebay.com';
 const MAX_AUTHORIZATION_LIFETIME_MS = 15 * 60 * 1000;
 
 function backendError(code, message) {
@@ -229,13 +230,109 @@ async function getSandboxMutationStageStatus(authorizationId) {
   };
 }
 
+function validateStagedReservationForExecutionPreview(row, nowMs) {
+  if (!row) {
+    throw backendError('STAGED_MUTATION_NOT_FOUND', 'No staged Sandbox mutation exists for this authorization ID.');
+  }
+  if (row.operation_id !== ALLOWED_OPERATION || row.operation_order !== 1) {
+    throw backendError('OPERATION_NOT_ALLOWED', 'Only staged createOrReplaceInventoryItem step 1 can be previewed.');
+  }
+  if (row.method !== EXPECTED_METHOD || row.path_template !== EXPECTED_PATH_TEMPLATE) {
+    throw backendError('INVALID_MUTATION_TARGET', 'Staged mutation target does not match the approved Sandbox inventory-item endpoint.');
+  }
+  if (row.status !== 'STAGED_NOT_SENT' || row.network_action !== 'NONE' || Boolean(row.external_write_performed)) {
+    throw backendError('STAGED_MUTATION_UNSAFE_STATE', 'Staged mutation is not in the safe not-sent state.');
+  }
+  const expiresAtMs = Date.parse(row.expires_at);
+  if (!Number.isFinite(expiresAtMs) || expiresAtMs <= nowMs) {
+    throw backendError('STAGED_MUTATION_EXPIRED', 'Staged Sandbox mutation has expired and must be re-approved.');
+  }
+  if (!row.request_body || typeof row.request_body !== 'object' || Array.isArray(row.request_body)) {
+    throw backendError('INVALID_REQUEST_BODY', 'Staged inventory-item request body is missing or invalid.');
+  }
+  const stagedSku = normalize(row.path_parameters && row.path_parameters.sku);
+  if (!stagedSku || stagedSku !== normalize(row.sku)) {
+    throw backendError('SKU_MISMATCH', 'Staged path SKU does not match the reserved SKU.');
+  }
+}
+
+async function buildSandboxMutationExecutionPreview(authorizationId, now = Date.now()) {
+  const normalizedAuthorizationId = normalize(authorizationId);
+  if (!normalizedAuthorizationId) {
+    throw backendError('MISSING_AUTHORIZATION_ID', 'Sandbox mutation authorization ID is required.');
+  }
+
+  const row = await getDB().getSandboxMutationStageReservation(normalizedAuthorizationId);
+  validateStagedReservationForExecutionPreview(row, now);
+
+  const sandboxTokens = await TokenVault.getDecryptedTokens(row.seller_account_id, 'Sandbox');
+  if (!sandboxTokens) {
+    throw backendError('SANDBOX_TOKEN_NOT_FOUND', 'No connected eBay Sandbox token exists for the staged seller account.');
+  }
+  if (!normalize(sandboxTokens.accessToken)) {
+    throw backendError('SANDBOX_ACCESS_TOKEN_MISSING', 'Connected Sandbox account has no usable access token.');
+  }
+  const accessTokenExpiresAtMs = Date.parse(sandboxTokens.accessTokenExpiresAt || '');
+  if (!Number.isFinite(accessTokenExpiresAtMs) || accessTokenExpiresAtMs <= now) {
+    throw backendError('SANDBOX_ACCESS_TOKEN_EXPIRED', 'Connected Sandbox access token is expired or has no valid expiry time.');
+  }
+
+  const encodedSku = encodeURIComponent(normalize(row.sku));
+  const requestUrl = `${SANDBOX_API_BASE_URL}/sell/inventory/v1/inventory_item/${encodedSku}`;
+  const blockingReasons = [
+    'Content-Language is conditionally required by eBay REST APIs and has not yet been resolved for the target marketplace locale.'
+  ];
+
+  return {
+    success: true,
+    environment: 'Sandbox',
+    authorizationId: row.authorization_id,
+    sellerAccountId: row.seller_account_id,
+    sku: row.sku,
+    operationId: row.operation_id,
+    stageStatus: row.status,
+    stagedAt: row.staged_at,
+    stageExpiresAt: row.expires_at,
+    generatedAt: new Date(now).toISOString(),
+    httpRequest: {
+      method: EXPECTED_METHOD,
+      url: requestUrl,
+      headers: {
+        Authorization: 'Bearer <TOKENVAULT_REDACTED>',
+        Accept: 'application/json',
+        'Content-Type': 'application/json'
+      },
+      conditionalHeaders: {
+        'Content-Language': {
+          status: 'REVIEW_REQUIRED',
+          value: null,
+          note: 'Resolve the target marketplace locale before any external network execution.'
+        }
+      },
+      body: row.request_body
+    },
+    accessTokenState: {
+      presentInBackendVault: true,
+      expiresAt: sandboxTokens.accessTokenExpiresAt
+    },
+    readyForExternalNetwork: false,
+    blockingReasons,
+    networkAction: 'NONE',
+    externalWritePerformed: false,
+    tokenReturnedToBrowser: false,
+    message: 'HTTP execution preview generated from backend staging. No eBay API request was sent.'
+  };
+}
+
 module.exports = {
   ALLOWED_OPERATION,
   EXPECTED_METHOD,
   EXPECTED_PATH_TEMPLATE,
+  SANDBOX_API_BASE_URL,
   MAX_AUTHORIZATION_LIFETIME_MS,
   fingerprintStep,
   validateAuthorizationShape,
   stageSandboxMutationExecution,
-  getSandboxMutationStageStatus
+  getSandboxMutationStageStatus,
+  buildSandboxMutationExecutionPreview
 };
