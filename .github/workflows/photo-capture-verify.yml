@@ -30,6 +30,8 @@ jobs:
         run: npx tsx -e "import { runPhotoCaptureInputTests } from './src/services/__tests__/photoCaptureInput.test.ts'; const r = runPhotoCaptureInputTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
       - name: Photo QA Tests
         run: npx tsx -e "import { runPhotoQaTests } from './src/services/__tests__/photoQa.test.ts'; const r = runPhotoQaTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
+      - name: Photo Capture Software Self-Test Tests
+        run: npx tsx -e "import { runPhotoCaptureSelfTestTests } from './src/services/__tests__/photoCaptureSelfTest.test.ts'; const r = runPhotoCaptureSelfTestTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
       - name: Full Test Suite
         run: npm run test:all
       - name: Production Build
