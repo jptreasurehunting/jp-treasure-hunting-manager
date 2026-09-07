@@ -37,6 +37,8 @@ jobs:
         run: npx tsx -e "import { runListingPublishGateTests } from './src/services/__tests__/listingPublishGate.test.ts'; const r = runListingPublishGateTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
       - name: Listing Pre-Publish Safety Tests
         run: npx tsx -e "import { runListingPrePublishCheckTests } from './src/services/__tests__/listingPrePublishCheck.test.ts'; const r = runListingPrePublishCheckTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
+      - name: Listing Publish Dry Run Safety Tests
+        run: npx tsx -e "import { runListingPublishDryRunTests } from './src/services/__tests__/listingPublishDryRun.test.ts'; const r = runListingPublishDryRunTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
       - name: Full Test Suite
         run: npm run test:all
       - name: Production Build
