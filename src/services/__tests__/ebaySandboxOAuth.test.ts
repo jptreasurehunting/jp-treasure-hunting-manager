@@ -52,6 +52,8 @@ function makePreview(overrides: Partial<EbayOfficialPayloadPreview> = {}): EbayO
     draftId: overrides.draftId ?? 'draft-001',
     sku: overrides.sku ?? 'SKU-001',
     sellerAccountIdExecutionContext: overrides.sellerAccountIdExecutionContext ?? 'ebay-main',
+    marketplaceId: overrides.marketplaceId ?? 'EBAY_US',
+    contentLanguage: overrides.contentLanguage ?? 'en-US',
     requestFingerprint: overrides.requestFingerprint ?? 'abcd1234',
     generatedAt: overrides.generatedAt ?? '2026-09-08T00:00:00.000Z',
     steps: overrides.steps ?? [],
