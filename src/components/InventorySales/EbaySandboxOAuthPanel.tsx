@@ -190,7 +190,7 @@ export function EbaySandboxOAuthPanel() {
               <input
                 style={inputStyle}
                 value={form.backendCredentialRef}
-                placeholder="例: secret-store:ebay-sandbox-main"
+                placeholder="例: EBAY_SANDBOX_MAIN"
                 onChange={(event) => setField('backendCredentialRef', event.target.value)}
               />
             </div>
@@ -275,7 +275,7 @@ export function EbaySandboxOAuthPanel() {
       )}
 
       <p style={{ color: '#64748b', fontSize: 11, margin: '12px 0 0' }}>
-        現段階ではOAuth Planのみです。ユーザー同意後の認可コード交換、Token保存、Sandbox API呼び出しはバックエンド実装が必要で、ブラウザ側からは実行しません。
+        OAuth接続の実行は下の「eBay Sandbox バックエンド接続」から行います。認可コード交換とToken保存はバックエンドだけで処理し、通常はSandbox外部通信を禁止した状態です。
       </p>
     </section>
   );
