@@ -5,6 +5,7 @@ import {
   InventorySalesState
 } from '../../services/inventorySalesWorkbenchService';
 import { InventoryImportPanel } from './InventoryImportPanel';
+import { InventorySalesPriorityPanel } from './InventorySalesPriorityPanel';
 
 const STATE_LABELS: Record<InventorySalesState, string> = {
   READY: '販売準備OK',
@@ -85,6 +86,7 @@ export function InventorySalesWorkbenchCard() {
       )}
 
       <InventoryImportPanel onInventoryChanged={reloadInventory} />
+      <InventorySalesPriorityPanel items={items} />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
         <div style={panelStyle}><div style={{ color: '#94a3b8', fontSize: 13 }}>販売準備OK SKU</div><strong style={{ fontSize: 26, color: '#34d399' }}>{snapshot.summary.readySkus}</strong></div>
