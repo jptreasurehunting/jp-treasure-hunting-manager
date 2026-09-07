@@ -51,6 +51,7 @@ import { runListingPrePublishCheckTests } from './listingPrePublishCheck.test';
 import { runListingPublishDryRunTests } from './listingPublishDryRun.test';
 import { runListingPublishAdapterTests } from './listingPublishAdapter.test';
 import { runMarketplaceApiMappingTests } from './marketplaceApiMapping.test';
+import { runEbayPublishPrerequisiteTests } from './ebayPublishPrerequisite.test';
 import { runShopeeAutomationTests } from './shopeeAutomation.test';
 import { runI18nTests } from './i18n.test';
 import { runZonosAugust13ReadinessTests } from './zonosAugust13Readiness.test';
@@ -72,6 +73,7 @@ export interface MasterTestSummary {
 
 export function runAllAppTests(): MasterTestSummary {
   const suites = [
+    { name: 'eBay Publish Prerequisite Safety Tests', fn: runEbayPublishPrerequisiteTests },
     { name: 'Marketplace API Mapping Verification Tests', fn: runMarketplaceApiMappingTests },
     { name: 'Listing Publish Adapter Simulation Tests', fn: runListingPublishAdapterTests },
     { name: 'Listing Publish Dry Run Safety Tests', fn: runListingPublishDryRunTests },
