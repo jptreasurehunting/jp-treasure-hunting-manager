@@ -17,6 +17,14 @@ import {
   EbaySandboxOAuthPlanRecord,
   loadEbaySandboxOAuthPlans
 } from '../../services/ebaySandboxOAuthService';
+import {
+  EBAY_SANDBOX_VERIFICATION_CHANGED_EVENT,
+  EbaySandboxVerificationRecord,
+  evaluateStoredEbaySandboxVerification,
+  findEbaySandboxVerificationForAccount,
+  loadEbaySandboxVerificationRecords,
+  recordEbaySandboxVerification
+} from '../../services/ebaySandboxVerificationService';
 
 const panelStyle: React.CSSProperties = {
   background: 'rgba(15, 23, 42, 0.94)',
@@ -54,6 +62,7 @@ const inputStyle: React.CSSProperties = {
 
 export function EbaySandboxBackendConnectionPanel() {
   const [plans, setPlans] = useState<EbaySandboxOAuthPlanRecord[]>(() => loadEbaySandboxOAuthPlans());
+  const [verificationRecords, setVerificationRecords] = useState<EbaySandboxVerificationRecord[]>(() => loadEbaySandboxVerificationRecords());
   const [selectedPlanId, setSelectedPlanId] = useState(() => plans[0]?.planId ?? '');
   const [health, setHealth] = useState<BackendHealthStatus | undefined>();
   const [connection, setConnection] = useState<EbaySandboxConnectionStatus | undefined>();
@@ -68,6 +77,13 @@ export function EbaySandboxBackendConnectionPanel() {
   );
   const backendBaseUrl = getConfiguredBackendBaseUrl();
   const credentialRefValid = selectedPlan ? isValidEbaySandboxCredentialRef(selectedPlan.backendCredentialRef) : false;
+  const storedVerification = selectedPlan
+    ? findEbaySandboxVerificationForAccount(selectedPlan.sellerAccountId, verificationRecords)
+    : undefined;
+  const verificationEvaluation = useMemo(
+    () => evaluateStoredEbaySandboxVerification(storedVerification, selectedPlan, connection, backendBaseUrl),
+    [storedVerification, selectedPlan, connection, backendBaseUrl]
+  );
 
   const reloadPlans = () => {
     const nextPlans = loadEbaySandboxOAuthPlans();
@@ -75,10 +91,17 @@ export function EbaySandboxBackendConnectionPanel() {
     setSelectedPlanId((current) => nextPlans.some((plan) => plan.planId === current) ? current : (nextPlans[0]?.planId ?? ''));
   };
 
+  const reloadVerificationRecords = () => setVerificationRecords(loadEbaySandboxVerificationRecords());
+
   useEffect(() => {
-    const handler = () => reloadPlans();
-    window.addEventListener(EBAY_SANDBOX_OAUTH_CHANGED_EVENT, handler);
-    return () => window.removeEventListener(EBAY_SANDBOX_OAUTH_CHANGED_EVENT, handler);
+    const planHandler = () => reloadPlans();
+    const verificationHandler = () => reloadVerificationRecords();
+    window.addEventListener(EBAY_SANDBOX_OAUTH_CHANGED_EVENT, planHandler);
+    window.addEventListener(EBAY_SANDBOX_VERIFICATION_CHANGED_EVENT, verificationHandler);
+    return () => {
+      window.removeEventListener(EBAY_SANDBOX_OAUTH_CHANGED_EVENT, planHandler);
+      window.removeEventListener(EBAY_SANDBOX_VERIFICATION_CHANGED_EVENT, verificationHandler);
+    };
   }, []);
 
   useEffect(() => {
@@ -88,7 +111,55 @@ export function EbaySandboxBackendConnectionPanel() {
     setMessage('');
   }, [selectedPlan?.planId]);
 
-  const run = async <T,>(action: 'HEALTH' | 'START' | 'STATUS' | 'VERSION', work: () => Promise<T>, onSuccess: (value: T) => void, successMessage: string) => {
+  useEffect(() => {
+    if (!selectedPlan) return;
+    let active = true;
+    fetchEbaySandboxConnectionStatus(selectedPlan.sellerAccountId)
+      .then((value) => { if (active) setConnection(value); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [selectedPlan?.planId]);
+
+  useEffect(() => {
+    if (!selectedPlan) return;
+    const refreshOnFocus = () => {
+      fetchEbaySandboxConnectionStatus(selectedPlan.sellerAccountId)
+        .then((value) => setConnection(value))
+        .catch(() => undefined);
+    };
+    window.addEventListener('focus', refreshOnFocus);
+    return () => window.removeEventListener('focus', refreshOnFocus);
+  }, [selectedPlan?.planId]);
+
+  useEffect(() => {
+    if (!selectedPlan || !oauthStart || connection?.connected) return;
+    const expiresAtMs = Date.parse(oauthStart.expiresAt);
+    if (!Number.isFinite(expiresAtMs)) return;
+
+    let active = true;
+    const refresh = async () => {
+      if (!active || Date.now() >= expiresAtMs) return;
+      try {
+        const next = await fetchEbaySandboxConnectionStatus(selectedPlan.sellerAccountId);
+        if (!active) return;
+        setConnection(next);
+        if (next.connected) {
+          setMessage('Sandbox OAuth完了を自動検出しました。次にgetVersionで非破壊確認してください。');
+        }
+      } catch {
+        // OAuth consent may still be in progress. Keep the current UI state and retry until the one-time URL expires.
+      }
+    };
+
+    const timer = window.setInterval(refresh, 3000);
+    void refresh();
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [selectedPlan?.planId, oauthStart?.expiresAt, connection?.connected]);
+
+  const run = async <T,>(action: 'HEALTH' | 'START' | 'STATUS', work: () => Promise<T>, onSuccess: (value: T) => void, successMessage: string) => {
     setBusyAction(action);
     setMessage('');
     try {
@@ -115,7 +186,7 @@ export function EbaySandboxBackendConnectionPanel() {
       'START',
       () => startEbaySandboxOAuth(selectedPlan.sellerAccountId, selectedPlan.backendCredentialRef),
       setOauthStart,
-      'バックエンドが一度限りのstate付きSandbox認可URLを発行しました。まだeBayでの同意は完了していません。'
+      'バックエンドが一度限りのstate付きSandbox認可URLを発行しました。eBayで同意すると接続状態を自動確認します。'
     );
   };
 
@@ -129,14 +200,31 @@ export function EbaySandboxBackendConnectionPanel() {
     );
   };
 
-  const checkVersion = () => {
-    if (!selectedPlan) return;
-    return run(
-      'VERSION',
-      () => verifyEbaySandboxInventoryVersion(selectedPlan.sellerAccountId),
-      setVersionResult,
-      'eBay Sandbox Inventory APIのgetVersion非破壊確認に成功しました。'
-    );
+  const checkVersion = async () => {
+    if (!selectedPlan || !connection?.connected) return;
+    setBusyAction('VERSION');
+    setMessage('');
+    try {
+      const value = await verifyEbaySandboxInventoryVersion(selectedPlan.sellerAccountId);
+      setVersionResult(value);
+      const result = recordEbaySandboxVerification(
+        selectedPlan,
+        connection,
+        value,
+        backendBaseUrl,
+        verificationRecords
+      );
+      if (!result.success) {
+        setMessage(`getVersionは成功しましたが検証記録を保存できませんでした: ${result.reasonsJa.join(' / ')}`);
+      } else {
+        reloadVerificationRecords();
+        setMessage('eBay Sandbox Inventory APIのgetVersion非破壊確認に成功し、「Sandbox接続検証済み」として保存しました。');
+      }
+    } catch (error) {
+      setMessage(describeBackendError(error));
+    } finally {
+      setBusyAction(undefined);
+    }
   };
 
   const openAuthorizationWindow = () => {
@@ -144,11 +232,13 @@ export function EbaySandboxBackendConnectionPanel() {
     window.open(oauthStart.authorizationUrl, '_blank', 'noopener,noreferrer');
   };
 
+  const displayedVersion = versionResult?.version ?? storedVerification?.inventoryApiVersion ?? undefined;
+
   return (
     <section style={panelStyle}>
       <h3 style={{ margin: 0, color: '#f8fafc', fontSize: 20 }}>eBay Sandbox バックエンド接続</h3>
       <p style={{ margin: '6px 0 14px', color: '#94a3b8', fontSize: 13, lineHeight: 1.65 }}>
-        ブラウザには秘密情報を置かず、バックエンド経由でSandbox OAuthを開始します。認可URLはバックエンドが発行した一度限りのstate付きURLだけを使用します。
+        ブラウザには秘密情報を置かず、バックエンド経由でSandbox OAuthを開始します。認可後はToken Vault接続を自動確認し、getVersion成功だけを安全な検証記録として保存します。
       </p>
 
       {plans.length === 0 ? (
@@ -164,7 +254,7 @@ export function EbaySandboxBackendConnectionPanel() {
             </select>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10, marginBottom: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10, marginBottom: 12 }}>
             <div style={{ padding: 11, borderRadius: 8, background: 'rgba(30, 41, 59, 0.62)' }}>
               <div style={{ color: '#94a3b8', fontSize: 11 }}>Backend</div>
               <strong style={{ color: '#f8fafc', wordBreak: 'break-all' }}>{backendBaseUrl}</strong>
@@ -175,11 +265,17 @@ export function EbaySandboxBackendConnectionPanel() {
             </div>
             <div style={{ padding: 11, borderRadius: 8, background: 'rgba(30, 41, 59, 0.62)' }}>
               <div style={{ color: '#94a3b8', fontSize: 11 }}>Sandbox OAuth</div>
-              <strong style={{ color: connection?.connected ? '#a7f3d0' : '#fde68a' }}>{connection ? (connection.connected ? '接続済み' : '未接続') : '未確認'}</strong>
+              <strong style={{ color: connection?.connected ? '#a7f3d0' : '#fde68a' }}>{connection ? (connection.connected ? '接続済み' : '未接続') : '確認中 / 未確認'}</strong>
             </div>
             <div style={{ padding: 11, borderRadius: 8, background: 'rgba(30, 41, 59, 0.62)' }}>
               <div style={{ color: '#94a3b8', fontSize: 11 }}>getVersion</div>
-              <strong style={{ color: versionResult?.success ? '#a7f3d0' : '#fde68a' }}>{versionResult?.version ?? '未実行'}</strong>
+              <strong style={{ color: displayedVersion !== undefined ? '#a7f3d0' : '#fde68a' }}>{displayedVersion ?? '未実行'}</strong>
+            </div>
+            <div style={{ padding: 11, borderRadius: 8, background: verificationEvaluation.valid ? 'rgba(6, 78, 59, 0.28)' : 'rgba(120, 53, 15, 0.26)' }}>
+              <div style={{ color: '#94a3b8', fontSize: 11 }}>Sandbox検証</div>
+              <strong style={{ color: verificationEvaluation.valid ? '#a7f3d0' : '#fde68a' }}>
+                {storedVerification ? (verificationEvaluation.valid ? '接続検証済み' : '再検証必要') : '未検証'}
+              </strong>
             </div>
           </div>
 
@@ -203,7 +299,7 @@ export function EbaySandboxBackendConnectionPanel() {
               {busyAction === 'STATUS' ? '確認中…' : 'Sandbox接続状態を確認'}
             </button>
             <button type="button" style={secondaryButtonStyle} onClick={checkVersion} disabled={Boolean(busyAction) || !connection?.connected}>
-              {busyAction === 'VERSION' ? '確認中…' : 'getVersionを実行（非破壊）'}
+              {busyAction === 'VERSION' ? '確認中…' : verificationEvaluation.valid ? 'getVersionを再検証（非破壊）' : 'getVersionを実行（非破壊）'}
             </button>
           </div>
 
@@ -212,6 +308,7 @@ export function EbaySandboxBackendConnectionPanel() {
               <div style={{ color: '#f8fafc', fontWeight: 800 }}>バックエンド発行の一時認可URL</div>
               <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 5 }}>有効期限: {new Date(oauthStart.expiresAt).toLocaleString()}</div>
               <div style={{ color: '#64748b', fontSize: 11, marginTop: 5, wordBreak: 'break-all' }}>{oauthStart.authorizationUrl}</div>
+              {!connection?.connected && <div style={{ color: '#93c5fd', fontSize: 11, marginTop: 6 }}>認可完了を数秒間隔で自動確認します。eBayの画面から戻った際にも再確認します。</div>}
             </div>
           )}
 
@@ -221,16 +318,24 @@ export function EbaySandboxBackendConnectionPanel() {
             </div>
           )}
 
-          {versionResult && (
-            <div style={{ padding: 11, borderRadius: 8, background: 'rgba(6, 78, 59, 0.22)', color: '#a7f3d0', marginBottom: 10 }}>
-              Inventory API Version: {versionResult.version ?? '応答あり（version値なし）'} / 変更操作: なし / Tokenブラウザ返却: なし
+          {storedVerification && (
+            <div style={{ padding: 11, borderRadius: 8, background: verificationEvaluation.valid ? 'rgba(6, 78, 59, 0.22)' : 'rgba(120, 53, 15, 0.24)', color: verificationEvaluation.valid ? '#a7f3d0' : '#fde68a', marginBottom: 10 }}>
+              <strong>{verificationEvaluation.valid ? 'Sandbox接続検証済み' : '保存済み検証は再確認が必要です'}</strong><br />
+              検証日時: {new Date(storedVerification.verifiedAt).toLocaleString()} / Inventory API Version: {storedVerification.inventoryApiVersion ?? 'version値なし'}<br />
+              {verificationEvaluation.reasonsJa.map((reason) => <div key={reason}>・{reason}</div>)}
             </div>
           )}
 
-          {message && <div aria-live="polite" style={{ color: message.includes('DISABLED') || message.includes('ERROR') ? '#fecaca' : '#bfdbfe', fontSize: 13, marginBottom: 10 }}>{message}</div>}
+          {versionResult && (
+            <div style={{ padding: 11, borderRadius: 8, background: 'rgba(6, 78, 59, 0.22)', color: '#a7f3d0', marginBottom: 10 }}>
+              今回のgetVersion応答: {versionResult.version ?? '応答あり（version値なし）'} / 変更操作: なし / Tokenブラウザ返却: なし
+            </div>
+          )}
+
+          {message && <div aria-live="polite" style={{ color: message.includes('DISABLED') || message.includes('ERROR') || message.includes('できません') ? '#fecaca' : '#bfdbfe', fontSize: 13, marginBottom: 10 }}>{message}</div>}
 
           <div style={{ padding: 11, borderRadius: 8, background: 'rgba(120, 53, 15, 0.22)', color: '#fde68a', fontSize: 12, lineHeight: 1.65 }}>
-            SandboxのToken交換とgetVersion通信は、バックエンドで `EBAY_SANDBOX_NETWORK_ENABLED=true` を明示した場合だけ実行できます。通常状態は通信禁止です。ここからProduction出品は実行できません。
+            SandboxのToken交換とgetVersion通信は、バックエンドで `EBAY_SANDBOX_NETWORK_ENABLED=true` を明示した場合だけ実行できます。通常状態は通信禁止です。検証記録にはTokenやClient Secretを保存しません。ここからProduction出品は実行できません。
           </div>
         </>
       )}
