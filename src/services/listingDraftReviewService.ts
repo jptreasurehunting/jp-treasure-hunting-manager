@@ -38,14 +38,12 @@ function normalizeCurrency(value: string): string {
 
 function validateReviewFields(input: ListingDraftReviewInput): string[] {
   const issues: string[] = [];
-
   if (!normalizeText(input.sellerAccountId)) issues.push('販売アカウントIDが未入力です。');
   if (!normalizeText(input.listingTitle)) issues.push('出品タイトルが未入力です。');
   if (!normalizeText(input.listingDescription)) issues.push('商品説明が未入力です。');
   if (!Number.isFinite(input.priceAmount) || input.priceAmount <= 0) issues.push('販売価格は0より大きい数値で入力してください。');
   if (!/^[A-Z]{3}$/.test(normalizeCurrency(input.priceCurrency))) issues.push('通貨コードはUSD・JPYなど3文字で入力してください。');
   if (!normalizeText(input.shippingTerms)) issues.push('配送条件が未入力です。');
-
   return issues;
 }
 
@@ -60,9 +58,9 @@ function getInventoryBlockingReasons(
   if (item.isLockedForOversellingRisk) reasons.push('二重販売リスクで中央在庫がロックされています。');
 
   const hasSyncIssue = item.channelBindings.some(
-    (binding) => binding.syncStatus === 'FAILED' || binding.syncStatus === 'OVERSELLING_RISK'
+    (binding) => binding.syncStatus === 'PENDING' || binding.syncStatus === 'FAILED' || binding.syncStatus === 'OVERSELLING_RISK'
   );
-  if (hasSyncIssue) reasons.push('既存販売チャネルに在庫同期の要確認があります。');
+  if (hasSyncIssue) reasons.push('既存販売チャネルの在庫同期が未完了または要確認です。外部反映の成功確認後に進めてください。');
 
   const targetAlreadyExists = item.channelBindings.some(
     (binding) => binding.channel === draft.targetChannel
