@@ -48,6 +48,7 @@ import { runListingPreparationTests } from './listingPreparation.test';
 import { runListingDraftReviewTests } from './listingDraftReview.test';
 import { runListingPublishGateTests } from './listingPublishGate.test';
 import { runListingPrePublishCheckTests } from './listingPrePublishCheck.test';
+import { runListingPublishDryRunTests } from './listingPublishDryRun.test';
 import { runShopeeAutomationTests } from './shopeeAutomation.test';
 import { runI18nTests } from './i18n.test';
 import { runZonosAugust13ReadinessTests } from './zonosAugust13Readiness.test';
@@ -69,6 +70,7 @@ export interface MasterTestSummary {
 
 export function runAllAppTests(): MasterTestSummary {
   const suites = [
+    { name: 'Listing Publish Dry Run Safety Tests', fn: runListingPublishDryRunTests },
     { name: 'Listing Pre-Publish Safety Tests', fn: runListingPrePublishCheckTests },
     { name: 'Listing Publish Gate Safety Tests', fn: runListingPublishGateTests },
     { name: 'Listing Draft Final Review Safety Tests', fn: runListingDraftReviewTests },
