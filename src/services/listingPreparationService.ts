@@ -2,6 +2,7 @@ import { CentralInventoryItem } from '../types/centralInventory';
 import { SalesChannel } from '../types/shippingRouter';
 
 const LISTING_PREPARATION_STORAGE_KEY = 'jp_listing_preparation_drafts_v1';
+export const LISTING_DRAFTS_CHANGED_EVENT = 'jp-listing-drafts-changed';
 
 export const MVP_LISTING_CHANNELS: SalesChannel[] = ['eBay', 'Shopee'];
 
@@ -68,6 +69,9 @@ export function loadListingPreparationDrafts(): ListingPreparationDraft[] {
 
 export function saveListingPreparationDrafts(drafts: ListingPreparationDraft[]): void {
   localStorage.setItem(LISTING_PREPARATION_STORAGE_KEY, JSON.stringify(drafts));
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(LISTING_DRAFTS_CHANGED_EVENT));
+  }
 }
 
 function getExistingChannels(item: CentralInventoryItem): SalesChannel[] {
