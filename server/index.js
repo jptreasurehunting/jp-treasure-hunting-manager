@@ -13,6 +13,9 @@ const {
   getSandboxMutationStageStatus,
   buildSandboxMutationExecutionPreview
 } = require('./integrations/ebaySandboxMutationExecutionBackend');
+const {
+  executeEbaySandboxInventorySync
+} = require('./integrations/ebaySandboxInventorySyncBackend');
 
 dotenv.config();
 
@@ -106,6 +109,43 @@ function sendSafeMutationStageError(res, error) {
   });
 }
 
+function inventorySyncErrorStatus(error) {
+  switch (error && error.code) {
+    case 'MISSING_SYNC_REQUEST':
+    case 'MISSING_SYNC_REQUEST_ID':
+    case 'MISSING_ACCOUNT_ID':
+    case 'MISSING_SKU':
+    case 'INVALID_TARGET_STOCK':
+    case 'INVALID_SYNC_REQUEST_STATE':
+    case 'UNSUPPORTED_SYNC_CHANNEL':
+      return 400;
+    case 'SANDBOX_ACCESS_TOKEN_EXPIRED':
+      return 409;
+    case 'SANDBOX_TOKEN_NOT_FOUND':
+    case 'EBAY_PUBLISHED_OFFER_NOT_FOUND':
+      return 404;
+    case 'SANDBOX_NETWORK_DISABLED':
+    case 'SANDBOX_INVENTORY_SYNC_WRITE_DISABLED':
+      return 503;
+    case 'EBAY_GET_OFFERS_FAILED':
+    case 'EBAY_BULK_UPDATE_FAILED':
+    case 'EBAY_BULK_UPDATE_PARTIAL_FAILURE':
+      return 502;
+    default:
+      return 500;
+  }
+}
+
+function sendSafeInventorySyncError(res, error) {
+  return res.status(inventorySyncErrorStatus(error)).json({
+    success: false,
+    errorCode: error && error.code ? error.code : 'EBAY_SANDBOX_INVENTORY_SYNC_ERROR',
+    error: error && error.message ? error.message : 'eBay Sandbox inventory synchronization failed.',
+    externalWritePerformed: Boolean(error && error.externalWritePerformed),
+    tokenReturnedToBrowser: false
+  });
+}
+
 app.get('/health', async (req, res) => {
   res.json({ status: 'UP', database: dbReady ? 'READY' : 'NOT_READY', timestamp: new Date().toISOString() });
 });
@@ -175,6 +215,19 @@ app.get('/api/ebay/sandbox/inventory/version', async (req, res) => {
     res.json(await verifySandboxInventoryVersion(accountId));
   } catch (err) {
     return sendSafeOAuthError(res, err);
+  }
+});
+
+/**
+ * Executes one absolute-stock synchronization against eBay Sandbox only.
+ * The backend discovers published offers by SKU, then updates inventory-level and offer-level quantity together.
+ * Production endpoints are never selected here.
+ */
+app.post('/api/ebay/sandbox/inventory/sync', async (req, res) => {
+  try {
+    res.json(await executeEbaySandboxInventorySync(req.body && req.body.request));
+  } catch (err) {
+    return sendSafeInventorySyncError(res, err);
   }
 });
 
