@@ -64,6 +64,8 @@ describe('eBay Sandbox Mutation Staging Backend Safety', () => {
       sellerAccountId: overrides.sellerAccountId ?? accountId,
       sku: overrides.sku ?? 'SKU-STAGE-001',
       previewId: overrides.previewId ?? 'preview-stage-001',
+      marketplaceId: overrides.marketplaceId ?? 'EBAY_US',
+      contentLanguage: overrides.contentLanguage ?? 'en-US',
       requestFingerprint: overrides.requestFingerprint ?? 'request-fingerprint-001',
       planId: overrides.planId ?? 'plan-stage-001',
       credentialRef: overrides.credentialRef ?? 'EBAY_SANDBOX_MAIN',
@@ -99,12 +101,16 @@ describe('eBay Sandbox Mutation Staging Backend Safety', () => {
     expect(result.networkAction).toBe('NONE');
     expect(result.externalWritePerformed).toBe(false);
     expect(result.tokenReturnedToBrowser).toBe(false);
+    expect(result.marketplaceId).toBe('EBAY_US');
+    expect(result.contentLanguage).toBe('en-US');
     expect(result).not.toHaveProperty('accessToken');
     expect(result).not.toHaveProperty('refreshToken');
 
     const stored = await getSandboxMutationStageStatus(authorization.authorizationId);
     expect(stored.authorizationId).toBe(authorization.authorizationId);
     expect(stored.sku).toBe('SKU-STAGE-001');
+    expect(stored.marketplaceId).toBe('EBAY_US');
+    expect(stored.contentLanguage).toBe('en-US');
     expect(stored.operationId).toBe('createOrReplaceInventoryItem');
     expect(stored.externalWritePerformed).toBe(false);
   });
@@ -208,9 +214,12 @@ describe('eBay Sandbox Mutation Staging Backend Safety', () => {
     expect(preview.httpRequest.method).toBe('PUT');
     expect(preview.httpRequest.url).toBe('https://api.sandbox.ebay.com/sell/inventory/v1/inventory_item/SKU%20STAGE%2FHTTP');
     expect(preview.httpRequest.headers.Authorization).toBe('Bearer <TOKENVAULT_REDACTED>');
+    expect(preview.httpRequest.headers['Content-Language']).toBe('en-US');
+    expect(preview.marketplaceId).toBe('EBAY_US');
+    expect(preview.contentLanguage).toBe('en-US');
     expect(preview.httpRequest.body.product.title).toBe('Sandbox Test Item');
-    expect(preview.httpRequest.conditionalHeaders['Content-Language'].status).toBe('REVIEW_REQUIRED');
-    expect(preview.readyForExternalNetwork).toBe(false);
+    expect(preview.readyForExternalNetwork).toBe(true);
+    expect(preview.blockingReasons).toEqual([]);
     expect(preview.networkAction).toBe('NONE');
     expect(preview.externalWritePerformed).toBe(false);
     expect(preview.tokenReturnedToBrowser).toBe(false);
