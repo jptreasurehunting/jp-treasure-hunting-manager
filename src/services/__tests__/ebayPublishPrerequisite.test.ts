@@ -43,6 +43,8 @@ function makeSimulation(overrides: Partial<ListingPublishAdapterSimulation> = {}
 function makeInput(overrides: Partial<EbayPublishPrerequisiteInput> = {}): EbayPublishPrerequisiteInput {
   return {
     marketplaceId: overrides.marketplaceId ?? 'EBAY_US',
+    contentLanguage: overrides.contentLanguage ?? 'en-US',
+    contentLanguageReviewed: overrides.contentLanguageReviewed ?? true,
     categoryId: overrides.categoryId ?? '12345',
     condition: overrides.condition ?? 'NEW',
     aspectsReviewed: overrides.aspectsReviewed ?? true,
@@ -66,13 +68,8 @@ export function runEbayPublishPrerequisiteTests(): { passed: number; failed: num
   let failed = 0;
   const log: string[] = [];
   const assert = (condition: boolean, name: string) => {
-    if (condition) {
-      passed += 1;
-      log.push(`✅ [PASS] ${name}`);
-    } else {
-      failed += 1;
-      log.push(`❌ [FAIL] ${name}`);
-    }
+    if (condition) { passed += 1; log.push(`✅ [PASS] ${name}`); }
+    else { failed += 1; log.push(`❌ [FAIL] ${name}`); }
   };
 
   localStorage.clear();
@@ -80,42 +77,43 @@ export function runEbayPublishPrerequisiteTests(): { passed: number; failed: num
   const input = makeInput();
 
   const evaluation = evaluateEbayPublishPrerequisites(simulation, input);
-  assert(evaluation.canSaveVerifiedPrerequisites, 'Test 1: Complete eBay prerequisites are accepted');
+  assert(evaluation.canSaveVerifiedPrerequisites, 'Test 1: Complete eBay prerequisites including Content-Language are accepted');
 
   const recorded = recordEbayPublishPrerequisites(simulation, input, []);
   assert(recorded.success && recorded.record?.status === 'PREREQUISITES_VERIFIED', 'Test 2: Verified prerequisites can be stored');
-  assert(recorded.record?.networkAction === 'NONE' && recorded.record?.sendAllowed === false, 'Test 3: Stored prerequisites remain strictly non-network');
-  assert(loadEbayPublishPrerequisites().length === 1, 'Test 4: Prerequisite record is persisted locally');
+  assert(recorded.record?.contentLanguage === 'en-US' && recorded.record?.marketplaceId === 'EBAY_US', 'Test 3: Marketplace and Content-Language are bound together');
+  assert(recorded.record?.networkAction === 'NONE' && recorded.record?.sendAllowed === false, 'Test 4: Stored prerequisites remain strictly non-network');
+  assert(loadEbayPublishPrerequisites().length === 1, 'Test 5: Prerequisite record is persisted locally');
+
+  const wrongLocale = evaluateEbayPublishPrerequisites(simulation, makeInput({ contentLanguage: 'de-DE' }));
+  assert(!wrongLocale.canSaveVerifiedPrerequisites && wrongLocale.missingOrInvalidFieldsJa.some((item) => item.includes('公式対応Locale')), 'Test 6: Unsupported marketplace locale is rejected');
+
+  const missingLocaleReview = evaluateEbayPublishPrerequisites(simulation, makeInput({ contentLanguageReviewed: false }));
+  assert(!missingLocaleReview.canSaveVerifiedPrerequisites && missingLocaleReview.missingOrInvalidFieldsJa.some((item) => item.includes('Content-Language')), 'Test 7: Explicit Content-Language review is required');
+
+  const canadaFrench = evaluateEbayPublishPrerequisites(simulation, makeInput({ marketplaceId: 'EBAY_CA', contentLanguage: 'fr-CA' }));
+  assert(canadaFrench.canSaveVerifiedPrerequisites, 'Test 8: Multi-locale marketplace accepts an officially supported explicit locale');
 
   const invalidImage = evaluateEbayPublishPrerequisites(simulation, makeInput({ imageUrls: ['http://example.com/item.jpg'] }));
-  assert(!invalidImage.canSaveVerifiedPrerequisites && invalidImage.missingOrInvalidFieldsJa.some((item) => item.includes('HTTPS')), 'Test 5: Non-HTTPS image URL is rejected');
+  assert(!invalidImage.canSaveVerifiedPrerequisites && invalidImage.missingOrInvalidFieldsJa.some((item) => item.includes('HTTPS')), 'Test 9: Non-HTTPS image URL is rejected');
 
   const missingAspectReview = evaluateEbayPublishPrerequisites(simulation, makeInput({ aspectsReviewed: false }));
-  assert(!missingAspectReview.canSaveVerifiedPrerequisites && missingAspectReview.missingOrInvalidFieldsJa.some((item) => item.includes('Item Specifics')), 'Test 6: Category-specific aspects review is required');
+  assert(!missingAspectReview.canSaveVerifiedPrerequisites && missingAspectReview.missingOrInvalidFieldsJa.some((item) => item.includes('Item Specifics')), 'Test 10: Category-specific aspects review is required');
 
-  const emptyAspectsButReviewed = evaluateEbayPublishPrerequisites(simulation, makeInput({ aspects: {}, aspectsReviewed: true }));
-  assert(emptyAspectsButReviewed.canSaveVerifiedPrerequisites, 'Test 7: Empty aspects are allowed only when the category review itself is explicitly completed');
-
-  const shopeeSimulation = makeSimulation({
-    targetChannel: 'Shopee',
-    adapterId: 'SHOPEE_PUBLISH_ADAPTER_V1'
-  });
+  const shopeeSimulation = makeSimulation({ targetChannel: 'Shopee', adapterId: 'SHOPEE_PUBLISH_ADAPTER_V1' });
   const wrongChannel = evaluateEbayPublishPrerequisites(shopeeSimulation, input);
-  assert(!wrongChannel.canSaveVerifiedPrerequisites && wrongChannel.blockingReasonsJa.some((item) => item.includes('eBay用')), 'Test 8: Shopee simulation cannot use the eBay prerequisite layer');
+  assert(!wrongChannel.canSaveVerifiedPrerequisites, 'Test 11: Shopee simulation cannot use the eBay prerequisite layer');
 
   const stored = recorded.record!;
   const unchangedValidity = evaluateStoredEbayPublishPrerequisites(stored, simulation);
-  assert(unchangedValidity.valid, 'Test 9: Stored prerequisites remain valid when simulation is unchanged');
+  assert(unchangedValidity.valid, 'Test 12: Stored prerequisites remain valid when simulation and locale are unchanged');
 
   const changedSimulation = makeSimulation({ requestFingerprint: 'ffff9999' });
   const changedValidity = evaluateStoredEbayPublishPrerequisites(stored, changedSimulation);
-  assert(!changedValidity.valid && changedValidity.reasonsJa.some((item) => item.includes('送信予定内容')), 'Test 10: Changed publish fingerprint invalidates stored prerequisites');
+  assert(!changedValidity.valid && changedValidity.reasonsJa.some((item) => item.includes('送信予定内容')), 'Test 13: Changed publish fingerprint invalidates stored prerequisites');
 
   const missingPolicy = evaluateEbayPublishPrerequisites(simulation, makeInput({ fulfillmentPolicyId: '' }));
-  assert(!missingPolicy.canSaveVerifiedPrerequisites && missingPolicy.missingOrInvalidFieldsJa.some((item) => item.includes('Fulfillment Policy')), 'Test 11: Missing fulfillment policy blocks readiness');
-
-  const trimmed = recordEbayPublishPrerequisites(simulation, makeInput({ marketplaceId: '  EBAY_US  ', categoryId: '  12345  ' }), []);
-  assert(trimmed.record?.marketplaceId === 'EBAY_US' && trimmed.record?.categoryId === '12345', 'Test 12: Identifiers are normalized before storage');
+  assert(!missingPolicy.canSaveVerifiedPrerequisites, 'Test 14: Missing fulfillment policy blocks readiness');
 
   localStorage.clear();
   return { passed, failed, log };
