@@ -50,6 +50,8 @@ export interface EbaySandboxMutationAuthorizationRecord {
   executionTriggered: false;
   networkAction: 'NONE';
   status: 'SANDBOX_MUTATION_AUTHORIZED_NOT_EXECUTED';
+  backendStagingConsumed?: boolean;
+  backendStagedAt?: string;
 }
 
 export interface EbaySandboxMutationGateEvaluation {
@@ -253,7 +255,8 @@ export function recordEbaySandboxMutationAuthorization(
     oneTimeUse: true,
     executionTriggered: false,
     networkAction: 'NONE',
-    status: 'SANDBOX_MUTATION_AUTHORIZED_NOT_EXECUTED'
+    status: 'SANDBOX_MUTATION_AUTHORIZED_NOT_EXECUTED',
+    backendStagingConsumed: false
   };
 
   const next = records.filter(
@@ -267,6 +270,35 @@ export function recordEbaySandboxMutationAuthorization(
     record,
     evaluation,
     messageJa: 'Sandbox変更操作の実行許可を記録しました。API通信はまだ実行していません。'
+  };
+}
+
+export function markEbaySandboxMutationAuthorizationBackendStaged(
+  authorizationId: string,
+  stagedAt: string,
+  records: EbaySandboxMutationAuthorizationRecord[] = loadEbaySandboxMutationAuthorizations()
+): { success: boolean; record?: EbaySandboxMutationAuthorizationRecord; messageJa: string } {
+  const normalizedAuthorizationId = normalize(authorizationId);
+  const index = records.findIndex((record) => record.authorizationId === normalizedAuthorizationId);
+  if (index < 0) {
+    return { success: false, messageJa: '対応するSandbox変更操作の承認記録が見つかりません。' };
+  }
+  if (!Number.isFinite(Date.parse(stagedAt))) {
+    return { success: false, messageJa: 'バックエンド実行予約日時が不正です。' };
+  }
+
+  const updated: EbaySandboxMutationAuthorizationRecord = {
+    ...records[index],
+    backendStagingConsumed: true,
+    backendStagedAt: new Date(stagedAt).toISOString()
+  };
+  const next = [...records];
+  next[index] = updated;
+  saveEbaySandboxMutationAuthorizations(next);
+  return {
+    success: true,
+    record: updated,
+    messageJa: '承認記録をバックエンド実行予約で消費済みとして更新しました。eBay API通信はまだ行っていません。'
   };
 }
 
@@ -290,6 +322,7 @@ export function evaluateStoredEbaySandboxMutationAuthorization(
   if (record.status !== 'SANDBOX_MUTATION_AUTHORIZED_NOT_EXECUTED') reasonsJa.push('実行待ち状態の承認記録ではありません。');
   if (record.networkAction !== 'NONE' || record.executionTriggered !== false) reasonsJa.push('承認記録が未実行の安全状態ではありません。');
   if (record.oneTimeUse !== true) reasonsJa.push('一度限り実行の承認記録ではありません。');
+  if (record.backendStagingConsumed === true) reasonsJa.push('この承認記録はバックエンド実行予約で既に消費済みです。');
   if (!Number.isFinite(Date.parse(record.expiresAt)) || Date.parse(record.expiresAt) <= now) reasonsJa.push('Sandbox変更操作の実行許可が失効しています。');
   if (dependencyBlockingReason(record.operationId)) reasonsJa.push(dependencyBlockingReason(record.operationId)!);
 
