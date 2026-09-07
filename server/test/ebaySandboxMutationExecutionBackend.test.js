@@ -5,7 +5,8 @@ const TokenVault = require('../security/tokenVault');
 const {
   fingerprintStep,
   stageSandboxMutationExecution,
-  getSandboxMutationStageStatus
+  getSandboxMutationStageStatus,
+  buildSandboxMutationExecutionPreview
 } = require('../integrations/ebaySandboxMutationExecutionBackend');
 
 describe('eBay Sandbox Mutation Staging Backend Safety', () => {
@@ -191,5 +192,43 @@ describe('eBay Sandbox Mutation Staging Backend Safety', () => {
 
     await expect(stageSandboxMutationExecution({ authorization, step }))
       .rejects.toMatchObject({ code: 'PRODUCTION_NOT_ALLOWED' });
+  });
+
+  test('HTTP execution preview is built from staged data without exposing token or sending network request', async () => {
+    const step = buildStep({ pathParameters: { sku: 'SKU STAGE/HTTP' } });
+    const authorization = buildAuthorization(step, {
+      authorizationId: 'auth-http-preview-stage-1',
+      sku: 'SKU STAGE/HTTP'
+    });
+
+    await stageSandboxMutationExecution({ authorization, step });
+    const preview = await buildSandboxMutationExecutionPreview(authorization.authorizationId);
+
+    expect(preview.success).toBe(true);
+    expect(preview.httpRequest.method).toBe('PUT');
+    expect(preview.httpRequest.url).toBe('https://api.sandbox.ebay.com/sell/inventory/v1/inventory_item/SKU%20STAGE%2FHTTP');
+    expect(preview.httpRequest.headers.Authorization).toBe('Bearer <TOKENVAULT_REDACTED>');
+    expect(preview.httpRequest.body.product.title).toBe('Sandbox Test Item');
+    expect(preview.httpRequest.conditionalHeaders['Content-Language'].status).toBe('REVIEW_REQUIRED');
+    expect(preview.readyForExternalNetwork).toBe(false);
+    expect(preview.networkAction).toBe('NONE');
+    expect(preview.externalWritePerformed).toBe(false);
+    expect(preview.tokenReturnedToBrowser).toBe(false);
+    expect(JSON.stringify(preview)).not.toContain('sandbox-access-token');
+  });
+
+  test('expired staged reservation cannot produce an execution preview', async () => {
+    const now = Date.now();
+    const step = buildStep();
+    const authorization = buildAuthorization(step, {
+      authorizationId: 'auth-http-preview-expired-1',
+      now,
+      approvedAt: new Date(now - 1000).toISOString(),
+      expiresAt: new Date(now + 1000).toISOString()
+    });
+
+    await stageSandboxMutationExecution({ authorization, step, now });
+    await expect(buildSandboxMutationExecutionPreview(authorization.authorizationId, now + 2000))
+      .rejects.toMatchObject({ code: 'STAGED_MUTATION_EXPIRED' });
   });
 });
