@@ -45,10 +45,14 @@ const ACTION_ORDER: Record<InventorySalesActionKind, number> = {
   NO_SALE_ACTION: 4
 };
 
-function classifyAction(item: CentralInventoryItem): Omit<InventorySalesPriorityRow, 'sku' | 'itemTitle' | 'availableToSell' | 'unitCostJpy' | 'tiedCostJpy' | 'channelCount' | 'syncIssueCount'> {
-  const syncIssueCount = item.channelBindings.filter(
-    (binding) => binding.syncStatus === 'FAILED' || binding.syncStatus === 'OVERSELLING_RISK'
+function countSyncIssues(item: CentralInventoryItem): number {
+  return item.channelBindings.filter(
+    (binding) => binding.syncStatus === 'PENDING' || binding.syncStatus === 'FAILED' || binding.syncStatus === 'OVERSELLING_RISK'
   ).length;
+}
+
+function classifyAction(item: CentralInventoryItem): Omit<InventorySalesPriorityRow, 'sku' | 'itemTitle' | 'availableToSell' | 'unitCostJpy' | 'tiedCostJpy' | 'channelCount' | 'syncIssueCount'> {
+  const syncIssueCount = countSyncIssues(item);
 
   if (item.isLockedForOversellingRisk) {
     return {
@@ -59,21 +63,22 @@ function classifyAction(item: CentralInventoryItem): Omit<InventorySalesPriority
     };
   }
 
+  // Even with Central ATS=0, a pending external zero-stock write is urgent because the marketplace may still show stock.
+  if (syncIssueCount > 0) {
+    return {
+      actionKind: 'FIX_SYNC',
+      priority: 'P1',
+      nextActionJa: '外部販売先の在庫反映状況を確認し、PENDING/FAILEDの同期を解消する。',
+      reasonsJa: [`チャネル在庫の同期待ち・要確認が${syncIssueCount}件あります。外部成功確認までは販売先在庫が一致したとみなしません。`]
+    };
+  }
+
   if (item.availableToSell <= 0) {
     return {
       actionKind: 'NO_SALE_ACTION',
       priority: 'P4',
       nextActionJa: '現在は販売対象外。入荷・引当解除など在庫変化後に再評価する。',
-      reasonsJa: ['販売可能在庫が0のため、現時点では現金化対象にしません。']
-    };
-  }
-
-  if (syncIssueCount > 0) {
-    return {
-      actionKind: 'FIX_SYNC',
-      priority: 'P1',
-      nextActionJa: '販売チャネルの在庫同期異常を確認し、安全に再同期する。',
-      reasonsJa: [`販売可能在庫はありますが、チャネル同期に${syncIssueCount}件の要確認があります。`]
+      reasonsJa: ['販売可能在庫が0で、外部販売先にも未解決の同期要求はありません。']
     };
   }
 
@@ -99,9 +104,7 @@ export function buildInventorySalesPriorityQueue(
 ): InventorySalesPriorityQueue {
   const rows: InventorySalesPriorityRow[] = items.map((item) => {
     const classification = classifyAction(item);
-    const syncIssueCount = item.channelBindings.filter(
-      (binding) => binding.syncStatus === 'FAILED' || binding.syncStatus === 'OVERSELLING_RISK'
-    ).length;
+    const syncIssueCount = countSyncIssues(item);
     const tiedCostJpy = Math.max(0, item.availableToSell) * Math.max(0, item.unitCostJpy);
 
     return {
