@@ -38,6 +38,8 @@ function makePreview(): EbayOfficialPayloadPreview {
     draftId: 'draft-001',
     sku: 'SKU-001',
     sellerAccountIdExecutionContext: 'ebay-main',
+    marketplaceId: 'EBAY_US',
+    contentLanguage: 'en-US',
     requestFingerprint: 'request-fingerprint-001',
     generatedAt: '2026-09-08T00:00:00.000Z',
     steps: [
