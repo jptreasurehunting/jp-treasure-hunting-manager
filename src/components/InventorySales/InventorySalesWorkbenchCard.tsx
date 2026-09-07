@@ -4,6 +4,7 @@ import {
   buildInventorySalesWorkbench,
   InventorySalesState
 } from '../../services/inventorySalesWorkbenchService';
+import { InventoryImportPanel } from './InventoryImportPanel';
 
 const STATE_LABELS: Record<InventorySalesState, string> = {
   READY: '販売準備OK',
@@ -54,6 +55,7 @@ export function InventorySalesWorkbenchCard() {
   const [items, setItems] = useState(() => loadCentralInventory());
   const [filter, setFilter] = useState<'ALL' | InventorySalesState>('ALL');
 
+  const reloadInventory = () => setItems(loadCentralInventory());
   const snapshot = useMemo(() => buildInventorySalesWorkbench(items), [items]);
   const visibleRows = useMemo(
     () => filter === 'ALL' ? snapshot.rows : snapshot.rows.filter((row) => row.state === filter),
@@ -71,16 +73,18 @@ export function InventorySalesWorkbenchCard() {
             販売可能在庫・在庫同期リスク・仕入原価ベースの在庫資金を一画面で確認します。
           </p>
         </div>
-        <button type="button" style={buttonStyle} onClick={() => setItems(loadCentralInventory())}>
+        <button type="button" style={buttonStyle} onClick={reloadInventory}>
           中央在庫を再読込
         </button>
       </div>
 
       {isLikelyDemoData && (
         <div style={{ marginBottom: 16, padding: 13, borderRadius: 10, background: 'rgba(120, 53, 15, 0.38)', border: '1px solid rgba(251, 191, 36, 0.45)', color: '#fde68a' }}>
-          <strong>現在はサンプル在庫です。</strong> 実在庫として販売判断しないでください。次工程で安全な実在庫取込を追加します。
+          <strong>現在はサンプル在庫です。</strong> 実在庫として販売判断しないでください。下のCSV取込で実在庫を確認してから反映できます。
         </div>
       )}
+
+      <InventoryImportPanel onInventoryChanged={reloadInventory} />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
         <div style={panelStyle}><div style={{ color: '#94a3b8', fontSize: 13 }}>販売準備OK SKU</div><strong style={{ fontSize: 26, color: '#34d399' }}>{snapshot.summary.readySkus}</strong></div>
@@ -157,7 +161,7 @@ export function InventorySalesWorkbenchCard() {
       </div>
 
       <p style={{ color: '#64748b', fontSize: 12, marginTop: 12 }}>
-        この画面は読み取り専用です。自動値下げ・自動出品・在庫数変更は行いません。
+        在庫のCSV取込は確認・承認後のみ反映します。自動値下げ・自動出品は行いません。
       </p>
     </section>
   );
