@@ -2,6 +2,7 @@ import {
   describeBackendError,
   fetchBackendHealth,
   fetchEbaySandboxConnectionStatus,
+  fetchEbaySandboxMutationExecutionPreview,
   fetchEbaySandboxMutationStageStatus,
   isValidEbaySandboxCredentialRef,
   stageEbaySandboxMutationAuthorization,
@@ -192,6 +193,59 @@ export async function runEbaySandboxBackendClientAsyncTests(): Promise<{ passed:
   });
   assert(stageStatusUrl.endsWith(`/api/ebay/sandbox/mutation/stage/${authorization.authorizationId}`), 'Test 15: Staging status endpoint is authorization-scoped');
   assert(stagedStatus.status === 'STAGED_NOT_SENT' && stagedStatus.networkAction === 'NONE', 'Test 16: Backend staging status remains explicitly unsent');
+
+  let executionPreviewUrl = '';
+  const executionPreview = await fetchEbaySandboxMutationExecutionPreview(authorization.authorizationId, baseUrl, async (input) => {
+    executionPreviewUrl = String(input);
+    return jsonResponse({
+      success: true,
+      environment: 'Sandbox',
+      authorizationId: authorization.authorizationId,
+      sellerAccountId: 'ebay-main',
+      sku: 'SKU-001',
+      operationId: 'createOrReplaceInventoryItem',
+      stageStatus: 'STAGED_NOT_SENT',
+      stagedAt: '2026-09-08T00:05:00.000Z',
+      stageExpiresAt: authorization.expiresAt,
+      generatedAt: '2026-09-08T00:06:00.000Z',
+      httpRequest: {
+        method: 'PUT',
+        url: 'https://api.sandbox.ebay.com/sell/inventory/v1/inventory_item/SKU-001',
+        headers: {
+          Authorization: 'Bearer <TOKENVAULT_REDACTED>',
+          Accept: 'application/json',
+          'Content-Type': 'application/json'
+        },
+        conditionalHeaders: {
+          'Content-Language': {
+            status: 'REVIEW_REQUIRED',
+            value: null,
+            note: 'Resolve locale before send.'
+          }
+        },
+        body: step.requestBody
+      },
+      accessTokenState: {
+        presentInBackendVault: true,
+        expiresAt: '2026-09-08T01:00:00.000Z'
+      },
+      readyForExternalNetwork: false,
+      blockingReasons: ['Content-Language is unresolved.'],
+      networkAction: 'NONE',
+      externalWritePerformed: false,
+      tokenReturnedToBrowser: false,
+      message: 'No eBay API request was sent.'
+    });
+  });
+  assert(executionPreviewUrl.endsWith(`/api/ebay/sandbox/mutation/stage/${authorization.authorizationId}/execution-preview`), 'Test 17: Execution preview endpoint is authorization-scoped');
+  assert(
+    executionPreview.httpRequest.headers.Authorization === 'Bearer <TOKENVAULT_REDACTED>' &&
+    executionPreview.readyForExternalNetwork === false &&
+    executionPreview.networkAction === 'NONE' &&
+    executionPreview.externalWritePerformed === false &&
+    executionPreview.tokenReturnedToBrowser === false,
+    'Test 18: Execution preview remains redacted, blocked, and non-mutating'
+  );
 
   return { passed, failed, log };
 }
