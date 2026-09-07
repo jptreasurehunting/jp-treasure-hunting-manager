@@ -18,6 +18,11 @@ export interface ChannelInventoryBinding {
   isAutoSyncEnabled: boolean;
 }
 
+export type OversellingRiskReason =
+  | 'INSUFFICIENT_ATS'
+  | 'EXTERNAL_SYNC_FAILURE'
+  | 'AUTO_SYNC_DISABLED';
+
 export interface CentralInventoryItem {
   sku: string;
   itemTitle: string;
@@ -32,6 +37,7 @@ export interface CentralInventoryItem {
   channelBindings: ChannelInventoryBinding[];
   lastReconciledAt: string;
   isLockedForOversellingRisk: boolean;
+  oversellingRiskReason?: OversellingRiskReason;
 }
 
 export interface InventoryReservation {
