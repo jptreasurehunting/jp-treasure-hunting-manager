@@ -13,6 +13,7 @@ import { ListingPrePublishCheckPanel } from './ListingPrePublishCheckPanel';
 import { ListingPublishDryRunPanel } from './ListingPublishDryRunPanel';
 import { ListingPublishAdapterSimulationPanel } from './ListingPublishAdapterSimulationPanel';
 import { MarketplaceApiMappingPanel } from './MarketplaceApiMappingPanel';
+import { EbayPublishPrerequisitePanel } from './EbayPublishPrerequisitePanel';
 
 const STATE_LABELS: Record<InventorySalesState, string> = {
   READY: '販売準備OK',
@@ -101,6 +102,7 @@ export function InventorySalesWorkbenchCard() {
       <ListingPublishDryRunPanel items={items} />
       <ListingPublishAdapterSimulationPanel items={items} />
       <MarketplaceApiMappingPanel />
+      <EbayPublishPrerequisitePanel />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
         <div style={panelStyle}><div style={{ color: '#94a3b8', fontSize: 13 }}>販売準備OK SKU</div><strong style={{ fontSize: 26, color: '#34d399' }}>{snapshot.summary.readySkus}</strong></div>
@@ -177,7 +179,7 @@ export function InventorySalesWorkbenchCard() {
       </div>
 
       <p style={{ color: '#64748b', fontSize: 12, marginTop: 12 }}>
-        在庫のCSV取込は確認・承認後のみ反映します。Dry Run、公開アダプター確認、API対応表を作成しても外部サイトへの自動出品・通信は行いません。
+        在庫のCSV取込は確認・承認後のみ反映します。Dry Run、公開アダプター確認、API対応表、eBay公開前提条件を作成しても外部サイトへの自動出品・通信は行いません。
       </p>
     </section>
   );
