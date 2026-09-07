@@ -3,6 +3,11 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const { getDB } = require('./db/database');
 const TokenVault = require('./security/tokenVault');
+const {
+  createSandboxAuthorizationStart,
+  completeSandboxAuthorizationCallback,
+  verifySandboxInventoryVersion
+} = require('./integrations/ebaySandboxOAuthBackend');
 
 // Load environment variables
 dotenv.config();
@@ -24,6 +29,34 @@ getDB().initialize()
   .catch((err) => {
     console.error('Database initialization failed:', err.message);
   });
+
+function oauthErrorStatus(error) {
+  switch (error && error.code) {
+    case 'MISSING_ACCOUNT_ID':
+    case 'INVALID_CREDENTIAL_REF':
+    case 'MISSING_AUTHORIZATION_CODE':
+    case 'MISSING_OAUTH_STATE':
+      return 400;
+    case 'INVALID_OAUTH_STATE':
+    case 'EXPIRED_OAUTH_STATE':
+      return 409;
+    case 'CREDENTIAL_NOT_CONFIGURED':
+    case 'SANDBOX_NETWORK_DISABLED':
+      return 503;
+    case 'SANDBOX_TOKEN_NOT_FOUND':
+      return 404;
+    default:
+      return 502;
+  }
+}
+
+function sendSafeOAuthError(res, error) {
+  return res.status(oauthErrorStatus(error)).json({
+    success: false,
+    errorCode: error && error.code ? error.code : 'EBAY_SANDBOX_BACKEND_ERROR',
+    error: error && error.message ? error.message : 'eBay Sandbox backend operation failed.'
+  });
+}
 
 /**
  * Health Check Endpoint
@@ -128,6 +161,51 @@ app.post('/api/auth/mock-connect', async (req, res) => {
       success: false,
       error: err.message || 'Failed to seed mock connection.'
     });
+  }
+});
+
+/**
+ * eBay Sandbox OAuth Start
+ * Creates a one-time CSRF state and returns the Sandbox user-consent URL.
+ * Client Secret and tokens remain backend-only.
+ */
+app.post('/api/ebay/sandbox/oauth/start', (req, res) => {
+  const { accountId, credentialRef } = req.body || {};
+  try {
+    const start = createSandboxAuthorizationStart(accountId, credentialRef);
+    res.json({ success: true, ...start });
+  } catch (err) {
+    return sendSafeOAuthError(res, err);
+  }
+});
+
+/**
+ * eBay Sandbox OAuth Callback
+ * Exchanges the one-time authorization code for user tokens only when Sandbox network
+ * execution has been explicitly enabled. Tokens are encrypted into TokenVault and are
+ * never returned to the browser.
+ */
+app.get('/api/ebay/sandbox/oauth/callback', async (req, res) => {
+  const { code, state } = req.query || {};
+  try {
+    const result = await completeSandboxAuthorizationCallback({ code, state });
+    res.json(result);
+  } catch (err) {
+    return sendSafeOAuthError(res, err);
+  }
+});
+
+/**
+ * eBay Sandbox Inventory API Non-Mutating Verification
+ * Calls getVersion using the encrypted Sandbox user token. No listing/inventory mutation.
+ */
+app.get('/api/ebay/sandbox/inventory/version', async (req, res) => {
+  const { accountId } = req.query || {};
+  try {
+    const result = await verifySandboxInventoryVersion(accountId);
+    res.json(result);
+  } catch (err) {
+    return sendSafeOAuthError(res, err);
   }
 });
 
