@@ -1,5 +1,5 @@
 /**
- * Unit Test Suite for Central Inventory SSOT & Cross-Channel Sync (Phase C)
+ * Unit Test Suite for Central Inventory SSOT & Cross-Channel Sync
  */
 
 import {
@@ -10,8 +10,10 @@ import {
   releaseReservation,
   reconcileCentralInventory,
   loadInventoryReservations,
-  getDefaultCentralInventory
+  getDefaultCentralInventory,
+  recordExternalChannelInventorySyncResult
 } from '../centralInventoryService';
+import { loadCrossChannelInventorySyncRequests } from '../crossChannelInventorySyncService';
 
 export function runCentralInventoryTests(): { passed: number; failed: number; log: string[] } {
   const log: string[] = [];
@@ -28,89 +30,141 @@ export function runCentralInventoryTests(): { passed: number; failed: number; lo
     }
   };
 
-  // Reset inventory to clean state
+  localStorage.clear();
   saveCentralInventory(getDefaultCentralInventory());
 
-  // Test 1: Load central inventory items
   const items = loadCentralInventory();
   assert(Boolean(items.length >= 3), 'Test 1: Central inventory loads seed catalog items (Single Source of Truth)');
 
-  // Test 2: ATS calculation accuracy
-  const strap = items.find((i) => i.sku === 'SKU-WATCH-STRAP-01')!;
+  const strap = items.find((item) => item.sku === 'SKU-WATCH-STRAP-01')!;
   assert(
-    Boolean(strap.availableToSell === strap.physicalStock - strap.reservedStock - strap.safetyBuffer),
+    strap.availableToSell === strap.physicalStock - strap.reservedStock - strap.safetyBuffer,
     'Test 2: Available to Sell (ATS) equals physicalStock - reservedStock - safetyBuffer'
   );
 
-  // Test 3: Successful inventory reservation
   const initialATS = strap.availableToSell;
-  const res1 = reserveInventory('SKU-WATCH-STRAP-01', 2, 'eBay', 'EBAY-ORD-TEST-9001', 'jp_treasure_main');
+  const initialShopeeStock = strap.channelBindings.find((binding) => binding.channel === 'Shopee')!.syncedStock;
+  const saleEventId = 'evt_test_ebay_sale_cross_channel_001';
+  const sale = reserveInventory(
+    'SKU-WATCH-STRAP-01',
+    2,
+    'eBay',
+    'EBAY-ORD-TEST-9001',
+    'jp_treasure_main',
+    saleEventId
+  );
   assert(
-    Boolean(res1.success && res1.updatedAvailableToSell === initialATS - 2),
-    'Test 3: Sale on eBay immediately reserves inventory and decreases Central ATS'
+    sale.success && sale.updatedAvailableToSell === initialATS - 2,
+    'Test 3: Sale on eBay immediately reserves Central ATS'
   );
 
-  // Test 4: Channel bindings updated in parallel
-  const updatedItems = loadCentralInventory();
-  const updatedStrap = updatedItems.find((i) => i.sku === 'SKU-WATCH-STRAP-01')!;
-  const shopeeBinding = updatedStrap.channelBindings.find((b) => b.channel === 'Shopee')!;
+  const afterSale = loadCentralInventory().find((item) => item.sku === 'SKU-WATCH-STRAP-01')!;
+  const shopeeAfterSale = afterSale.channelBindings.find((binding) => binding.channel === 'Shopee')!;
   assert(
-    Boolean(shopeeBinding.syncedStock === updatedStrap.availableToSell),
-    'Test 4: Shopee channel adapter inventory binding synced immediately upon eBay sale'
+    shopeeAfterSale.syncStatus === 'PENDING' && shopeeAfterSale.syncedStock === initialShopeeStock,
+    'Test 4: Shopee is marked PENDING and its last confirmed stock is not falsely overwritten before external success'
   );
 
-  // Test 5: Overselling prevention when demand exceeds ATS
-  const resOversell = reserveInventory('SKU-VINTAGE-SEIKO-01', 5, 'Shopee', 'SHOPEE-ORD-TEST-9002');
+  const queued = loadCrossChannelInventorySyncRequests();
+  const shopeeRequest = queued.find(
+    (request) => request.sourceEventId === saleEventId && request.targetChannel === 'Shopee'
+  );
   assert(
-    Boolean(!resOversell.success && resOversell.isOversellingRisk),
-    'Test 5: Overselling prevention halts sale and flags OVERSELLING_RISK when stock is insufficient'
+    Boolean(shopeeRequest && shopeeRequest.status === 'QUEUED' && shopeeRequest.targetStock === afterSale.availableToSell && !shopeeRequest.externalWritePerformed),
+    'Test 5: eBay sale creates a Shopee absolute-stock synchronization request without claiming an external write'
   );
 
-  // Test 6: Idempotency & duplicate event protection
+  const oversell = reserveInventory('SKU-VINTAGE-SEIKO-01', 5, 'Shopee', 'SHOPEE-ORD-TEST-9002');
+  assert(
+    !oversell.success && oversell.isOversellingRisk,
+    'Test 6: Overselling prevention halts sale when requested quantity exceeds ATS'
+  );
+
   const eventId = 'evt_unique_12345';
-  const resIdem1 = reserveInventory('SKU-CAMERA-LENS-01', 1, 'Shopify', 'SHOP-ORD-01', 'default', eventId);
-  const resIdem2 = reserveInventory('SKU-CAMERA-LENS-01', 1, 'Shopify', 'SHOP-ORD-01', 'default', eventId);
+  const idem1 = reserveInventory('SKU-CAMERA-LENS-01', 1, 'Shopify', 'SHOP-ORD-01', 'default', eventId);
+  const atsAfterFirst = loadCentralInventory().find((item) => item.sku === 'SKU-CAMERA-LENS-01')!.availableToSell;
+  const idem2 = reserveInventory('SKU-CAMERA-LENS-01', 1, 'Shopify', 'SHOP-ORD-01', 'default', eventId);
+  const atsAfterReplay = loadCentralInventory().find((item) => item.sku === 'SKU-CAMERA-LENS-01')!.availableToSell;
   assert(
-    Boolean(resIdem1.success && resIdem2.success && resIdem2.messageJa.includes('重複イベント')),
-    'Test 6: Idempotent replay protection prevents double inventory deductions from identical event IDs'
+    idem1.success && idem2.success && idem2.messageJa.includes('重複イベント') && atsAfterReplay === atsAfterFirst,
+    'Test 7: Idempotent replay protection prevents double inventory deduction'
   );
 
-  // Test 7: Commit sold inventory upon shipment finalization
   const reservations = loadInventoryReservations();
-  const activeRes = reservations.find((r) => r.status === 'ACTIVE' && r.sku === 'SKU-WATCH-STRAP-01')!;
-  const beforePhysical = updatedStrap.physicalStock;
-  const commitRes = commitSoldInventory(activeRes.reservationId);
-  const reloadedStrap = loadCentralInventory().find((i) => i.sku === 'SKU-WATCH-STRAP-01')!;
+  const activeStrapReservation = reservations.find(
+    (reservation) => reservation.status === 'ACTIVE' && reservation.sku === 'SKU-WATCH-STRAP-01'
+  )!;
+  const beforePhysical = afterSale.physicalStock;
+  const committed = commitSoldInventory(activeStrapReservation.reservationId);
+  const afterCommit = loadCentralInventory().find((item) => item.sku === 'SKU-WATCH-STRAP-01')!;
   assert(
-    Boolean(commitRes.success && reloadedStrap.physicalStock === beforePhysical - activeRes.quantity),
-    'Test 7: Shipment finalization commits sold inventory and decreases physical warehouse stock'
+    committed.success && afterCommit.physicalStock === beforePhysical - activeStrapReservation.quantity,
+    'Test 8: Shipment finalization commits sold inventory and decreases physical warehouse stock'
   );
 
-  // Test 8: Release reservation on order cancellation
-  const cancelRes = reserveInventory('SKU-CAMERA-LENS-01', 1, 'eBay', 'EBAY-ORD-CANCEL-01');
-  const atsBeforeCancel = loadCentralInventory().find((i) => i.sku === 'SKU-CAMERA-LENS-01')!.availableToSell;
-  const releaseResult = releaseReservation(cancelRes.reservationId!, true);
-  const atsAfterCancel = loadCentralInventory().find((i) => i.sku === 'SKU-CAMERA-LENS-01')!.availableToSell;
+  const successfulShopeeSync = recordExternalChannelInventorySyncResult(shopeeRequest!.requestId, {
+    success: true,
+    externalWritePerformed: true,
+    completedAt: '2026-09-08T12:00:00.000Z'
+  });
+  const afterShopeeSync = loadCentralInventory().find((item) => item.sku === 'SKU-WATCH-STRAP-01')!;
+  const confirmedShopee = afterShopeeSync.channelBindings.find((binding) => binding.channel === 'Shopee')!;
   assert(
-    Boolean(releaseResult.success && atsAfterCancel === atsBeforeCancel + 1),
-    'Test 8: Order cancellation releases reserved inventory and safely restores ATS across channels'
+    successfulShopeeSync.success && confirmedShopee.syncedStock === shopeeRequest!.targetStock && confirmedShopee.syncStatus === 'SYNCED',
+    'Test 9: Only confirmed external Shopee success updates syncedStock and SYNCED status'
   );
 
-  // Test 9: Reconciliation job detects and corrects channel discrepancies
-  const itemsForRec = loadCentralInventory();
-  itemsForRec[0].channelBindings[0].syncedStock = 999; // Artificially induce discrepancy
-  saveCentralInventory(itemsForRec);
-
-  const recSummary = reconcileCentralInventory();
+  const shopifyRequest = loadCrossChannelInventorySyncRequests().find(
+    (request) => request.sourceEventId === saleEventId && request.targetChannel === 'Shopify'
+  )!;
+  const failedShopifySync = recordExternalChannelInventorySyncResult(shopifyRequest.requestId, {
+    success: false,
+    externalWritePerformed: false,
+    errorMessage: 'Simulated marketplace write failure'
+  });
+  const afterFailure = loadCentralInventory().find((item) => item.sku === 'SKU-WATCH-STRAP-01')!;
+  const failedShopify = afterFailure.channelBindings.find((binding) => binding.channel === 'Shopify')!;
   assert(
-    Boolean(recSummary.discrepancyCount >= 1 && recSummary.discrepancies.some((d) => d.sku === itemsForRec[0].sku)),
-    'Test 9: Cross-channel reconciliation detects stock discrepancies and reconciles with Central SSOT'
+    !failedShopifySync.success && failedShopify.syncStatus === 'FAILED' && afterFailure.isLockedForOversellingRisk,
+    'Test 10: Failed external stock write marks channel FAILED and locks SKU for overselling safety'
   );
 
-  // Test 10: Complete isolation of Central Inventory from external Excel
+  saveCentralInventory(getDefaultCentralInventory());
+  const cancellationReservation = reserveInventory(
+    'SKU-CAMERA-LENS-01',
+    1,
+    'eBay',
+    'EBAY-ORD-CANCEL-01',
+    'default',
+    'evt_cancel_base_001'
+  );
+  const atsBeforeCancel = loadCentralInventory().find((item) => item.sku === 'SKU-CAMERA-LENS-01')!.availableToSell;
+  const released = releaseReservation(cancellationReservation.reservationId!, true);
+  const cameraAfterCancel = loadCentralInventory().find((item) => item.sku === 'SKU-CAMERA-LENS-01')!;
   assert(
-    Boolean(typeof localStorage !== 'undefined'),
-    'Test 10: Central inventory operations operate in application-owned isolated storage without touching 住所録.xlsx'
+    released.success && cameraAfterCancel.availableToSell === atsBeforeCancel + 1 && cameraAfterCancel.channelBindings[0].syncStatus === 'PENDING',
+    'Test 11: Cancellation restores Central ATS and queues external restock instead of claiming it already happened'
+  );
+
+  saveCentralInventory(getDefaultCentralInventory());
+  const beforeReconciliation = loadCentralInventory();
+  beforeReconciliation[0].channelBindings[0].syncedStock = 999;
+  saveCentralInventory(beforeReconciliation);
+  const reconciliation = reconcileCentralInventory();
+  const afterReconciliation = loadCentralInventory();
+  const reconciledBinding = afterReconciliation[0].channelBindings[0];
+  assert(
+    reconciliation.discrepancyCount >= 1 && reconciledBinding.syncedStock === 999 && reconciledBinding.syncStatus === 'PENDING',
+    'Test 12: Reconciliation queues external correction and preserves last confirmed external stock until success'
+  );
+  assert(
+    reconciliation.discrepancies.some((entry) => entry.actionTakenJa.includes('反映確認待ち')),
+    'Test 13: Reconciliation message truthfully reports pending external confirmation'
+  );
+
+  assert(
+    typeof localStorage !== 'undefined',
+    'Test 14: Central inventory operations remain isolated from external Excel files'
   );
 
   return { passed, failed, log };
