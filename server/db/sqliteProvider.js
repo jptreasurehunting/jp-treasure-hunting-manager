@@ -18,13 +18,11 @@ class SqliteProvider extends DBProvider {
    */
   async initialize() {
     return new Promise((resolve, reject) => {
-      // Setup database connection (use ':memory:' for tests if specified in constructor)
       this.db = new sqlite3.Database(this.dbPath, (err) => {
         if (err) {
           return reject(new Error(`Failed to open SQLite database: ${err.message}`));
         }
-        
-        // Execute schema initialization
+
         const schemaQuery = `
           CREATE TABLE IF NOT EXISTS ebay_tokens (
             account_id TEXT NOT NULL,
@@ -34,12 +32,38 @@ class SqliteProvider extends DBProvider {
             access_token_expires_at TEXT,
             last_auth_date TEXT,
             PRIMARY KEY (account_id, environment)
-          )
+          );
+
+          CREATE TABLE IF NOT EXISTS ebay_sandbox_mutation_stage (
+            authorization_id TEXT PRIMARY KEY,
+            seller_account_id TEXT NOT NULL,
+            sku TEXT NOT NULL,
+            preview_id TEXT NOT NULL,
+            request_fingerprint TEXT NOT NULL,
+            plan_id TEXT NOT NULL,
+            credential_ref TEXT NOT NULL,
+            verification_id TEXT NOT NULL,
+            operation_id TEXT NOT NULL,
+            operation_order INTEGER NOT NULL,
+            method TEXT NOT NULL,
+            path_template TEXT NOT NULL,
+            path_parameters_json TEXT NOT NULL,
+            request_body_json TEXT,
+            step_fingerprint TEXT NOT NULL,
+            approved_by TEXT NOT NULL,
+            approval_reason TEXT NOT NULL,
+            approved_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            staged_at TEXT NOT NULL,
+            status TEXT NOT NULL,
+            network_action TEXT NOT NULL,
+            external_write_performed INTEGER NOT NULL DEFAULT 0
+          );
         `;
 
-        this.db.run(schemaQuery, (err) => {
-          if (err) {
-            return reject(new Error(`Failed to initialize SQLite tables: ${err.message}`));
+        this.db.exec(schemaQuery, (schemaErr) => {
+          if (schemaErr) {
+            return reject(new Error(`Failed to initialize SQLite tables: ${schemaErr.message}`));
           }
           resolve();
         });
@@ -47,10 +71,6 @@ class SqliteProvider extends DBProvider {
     });
   }
 
-  /**
-   * Closes the active database connection.
-   * @returns {Promise<void>}
-   */
   async close() {
     return new Promise((resolve, reject) => {
       if (!this.db) return resolve();
@@ -62,18 +82,8 @@ class SqliteProvider extends DBProvider {
     });
   }
 
-  /**
-   * Inserts or replaces a token row for an account + environment.
-   * @param {string} accountId
-   * @param {string} environment
-   * @param {string} encryptedRefreshToken
-   * @param {string} encryptedAccessToken
-   * @param {string} accessTokenExpiresAt
-   */
   async saveTokens(accountId, environment, encryptedRefreshToken, encryptedAccessToken, accessTokenExpiresAt) {
-    if (!this.db) {
-      await this.initialize();
-    }
+    if (!this.db) await this.initialize();
 
     const query = `
       INSERT OR REPLACE INTO ebay_tokens (
@@ -85,7 +95,6 @@ class SqliteProvider extends DBProvider {
         last_auth_date
       ) VALUES (?, ?, ?, ?, ?, ?)
     `;
-
     const lastAuthDate = new Date().toISOString();
 
     return new Promise((resolve, reject) => {
@@ -93,86 +102,141 @@ class SqliteProvider extends DBProvider {
         query,
         [accountId, environment, encryptedRefreshToken, encryptedAccessToken, accessTokenExpiresAt, lastAuthDate],
         (err) => {
-          if (err) {
-            return reject(new Error(`Failed to save tokens in SQLite: ${err.message}`));
-          }
+          if (err) return reject(new Error(`Failed to save tokens in SQLite: ${err.message}`));
           resolve();
         }
       );
     });
   }
 
-  /**
-   * Retrieves account tokens strictly isolated by compound key.
-   * @param {string} accountId
-   * @param {string} environment
-   * @returns {Promise<Object|null>}
-   */
   async getTokens(accountId, environment) {
-    if (!this.db) {
-      await this.initialize();
-    }
-
-    const query = `
-      SELECT * FROM ebay_tokens 
-      WHERE account_id = ? AND environment = ?
-    `;
-
+    if (!this.db) await this.initialize();
+    const query = `SELECT * FROM ebay_tokens WHERE account_id = ? AND environment = ?`;
     return new Promise((resolve, reject) => {
       this.db.get(query, [accountId, environment], (err, row) => {
-        if (err) {
-          return reject(new Error(`Failed to fetch tokens from SQLite: ${err.message}`));
-        }
+        if (err) return reject(new Error(`Failed to fetch tokens from SQLite: ${err.message}`));
         resolve(row || null);
       });
     });
   }
 
-  /**
-   * Deletes tokens from database.
-   * @param {string} accountId
-   * @param {string} environment
-   */
   async deleteTokens(accountId, environment) {
-    if (!this.db) {
-      await this.initialize();
-    }
-
-    const query = `
-      DELETE FROM ebay_tokens 
-      WHERE account_id = ? AND environment = ?
-    `;
-
+    if (!this.db) await this.initialize();
+    const query = `DELETE FROM ebay_tokens WHERE account_id = ? AND environment = ?`;
     return new Promise((resolve, reject) => {
       this.db.run(query, [accountId, environment], (err) => {
+        if (err) return reject(new Error(`Failed to delete tokens from SQLite: ${err.message}`));
+        resolve();
+      });
+    });
+  }
+
+  async getConnectedAccountsMetadata() {
+    if (!this.db) await this.initialize();
+    const query = `SELECT account_id, environment, last_auth_date FROM ebay_tokens`;
+    return new Promise((resolve, reject) => {
+      this.db.all(query, [], (err, rows) => {
+        if (err) return reject(new Error(`Failed to query accounts metadata from SQLite: ${err.message}`));
+        resolve(rows || []);
+      });
+    });
+  }
+
+  async createSandboxMutationStageReservation(reservation) {
+    if (!this.db) await this.initialize();
+
+    const query = `
+      INSERT INTO ebay_sandbox_mutation_stage (
+        authorization_id,
+        seller_account_id,
+        sku,
+        preview_id,
+        request_fingerprint,
+        plan_id,
+        credential_ref,
+        verification_id,
+        operation_id,
+        operation_order,
+        method,
+        path_template,
+        path_parameters_json,
+        request_body_json,
+        step_fingerprint,
+        approved_by,
+        approval_reason,
+        approved_at,
+        expires_at,
+        staged_at,
+        status,
+        network_action,
+        external_write_performed
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+
+    const values = [
+      reservation.authorizationId,
+      reservation.sellerAccountId,
+      reservation.sku,
+      reservation.previewId,
+      reservation.requestFingerprint,
+      reservation.planId,
+      reservation.credentialRef,
+      reservation.verificationId,
+      reservation.operationId,
+      reservation.operationOrder,
+      reservation.method,
+      reservation.pathTemplate,
+      JSON.stringify(reservation.pathParameters || {}),
+      reservation.requestBody == null ? null : JSON.stringify(reservation.requestBody),
+      reservation.stepFingerprint,
+      reservation.approvedBy,
+      reservation.approvalReason,
+      reservation.approvedAt,
+      reservation.expiresAt,
+      reservation.stagedAt,
+      reservation.status,
+      reservation.networkAction,
+      reservation.externalWritePerformed ? 1 : 0
+    ];
+
+    return new Promise((resolve, reject) => {
+      this.db.run(query, values, (err) => {
         if (err) {
-          return reject(new Error(`Failed to delete tokens from SQLite: ${err.message}`));
+          const wrapped = new Error(
+            err.code === 'SQLITE_CONSTRAINT'
+              ? 'Sandbox mutation authorization has already been consumed.'
+              : `Failed to stage Sandbox mutation authorization: ${err.message}`
+          );
+          if (err.code === 'SQLITE_CONSTRAINT') wrapped.code = 'AUTHORIZATION_ALREADY_CONSUMED';
+          return reject(wrapped);
         }
         resolve();
       });
     });
   }
 
-  /**
-   * Returns list of connected accounts metadata (no secrets included).
-   * @returns {Promise<Array>} Safe account connection list
-   */
-  async getConnectedAccountsMetadata() {
-    if (!this.db) {
-      await this.initialize();
-    }
-
+  async getSandboxMutationStageReservation(authorizationId) {
+    if (!this.db) await this.initialize();
     const query = `
-      SELECT account_id, environment, last_auth_date 
-      FROM ebay_tokens
+      SELECT authorization_id, seller_account_id, sku, preview_id, request_fingerprint,
+             plan_id, credential_ref, verification_id, operation_id, operation_order,
+             method, path_template, path_parameters_json, request_body_json,
+             step_fingerprint, approved_by, approval_reason, approved_at, expires_at,
+             staged_at, status, network_action, external_write_performed
+      FROM ebay_sandbox_mutation_stage
+      WHERE authorization_id = ?
     `;
 
     return new Promise((resolve, reject) => {
-      this.db.all(query, [], (err, rows) => {
-        if (err) {
-          return reject(new Error(`Failed to query accounts metadata from SQLite: ${err.message}`));
-        }
-        resolve(rows || []);
+      this.db.get(query, [authorizationId], (err, row) => {
+        if (err) return reject(new Error(`Failed to fetch Sandbox mutation stage reservation: ${err.message}`));
+        if (!row) return resolve(null);
+        resolve({
+          ...row,
+          path_parameters: JSON.parse(row.path_parameters_json || '{}'),
+          request_body: row.request_body_json ? JSON.parse(row.request_body_json) : null,
+          external_write_performed: Boolean(row.external_write_performed)
+        });
       });
     });
   }
