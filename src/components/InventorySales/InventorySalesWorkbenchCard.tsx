@@ -6,6 +6,7 @@ import {
 } from '../../services/inventorySalesWorkbenchService';
 import { InventoryImportPanel } from './InventoryImportPanel';
 import { InventorySalesPriorityPanel } from './InventorySalesPriorityPanel';
+import { ListingPreparationPanel } from './ListingPreparationPanel';
 
 const STATE_LABELS: Record<InventorySalesState, string> = {
   READY: '販売準備OK',
@@ -87,6 +88,7 @@ export function InventorySalesWorkbenchCard() {
 
       <InventoryImportPanel onInventoryChanged={reloadInventory} />
       <InventorySalesPriorityPanel items={items} />
+      <ListingPreparationPanel items={items} />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
         <div style={panelStyle}><div style={{ color: '#94a3b8', fontSize: 13 }}>販売準備OK SKU</div><strong style={{ fontSize: 26, color: '#34d399' }}>{snapshot.summary.readySkus}</strong></div>
@@ -163,7 +165,7 @@ export function InventorySalesWorkbenchCard() {
       </div>
 
       <p style={{ color: '#64748b', fontSize: 12, marginTop: 12 }}>
-        在庫のCSV取込は確認・承認後のみ反映します。自動値下げ・自動出品は行いません。
+        在庫のCSV取込は確認・承認後のみ反映します。出品準備下書きも外部サイトへ自動公開しません。
       </p>
     </section>
   );
