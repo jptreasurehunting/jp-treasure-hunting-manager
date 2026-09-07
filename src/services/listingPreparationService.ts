@@ -5,7 +5,9 @@ const LISTING_PREPARATION_STORAGE_KEY = 'jp_listing_preparation_drafts_v1';
 
 export const MVP_LISTING_CHANNELS: SalesChannel[] = ['eBay', 'Shopee'];
 
-export type ListingPreparationDraftStatus = 'DRAFT_REVIEW_REQUIRED';
+export type ListingPreparationDraftStatus =
+  | 'DRAFT_REVIEW_REQUIRED'
+  | 'READY_FOR_FINAL_REVIEW';
 
 export interface ListingPreparationDraft {
   draftId: string;
@@ -13,6 +15,11 @@ export interface ListingPreparationDraft {
   itemTitle: string;
   targetChannel: SalesChannel;
   sellerAccountId?: string;
+  listingTitle?: string;
+  listingDescription?: string;
+  priceAmount?: number;
+  priceCurrency?: string;
+  shippingTerms?: string;
   status: ListingPreparationDraftStatus;
   availableToSellAtCreation: number;
   unitCostJpyAtCreation: number;
