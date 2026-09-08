@@ -6,6 +6,11 @@ export const SHOPEE_SG_STRUCTURED_AUTH_MAPPING_CHANGED_EVENT = 'jp-shopee-sg-str
 const MAPPING_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 
 export type ShopeeSgAuthorizationHttpMethod = 'GET' | 'POST';
+export type ShopeeSgAuthorizationQueryRole = 'PARTNER_ID' | 'TIMESTAMP' | 'SIGNATURE' | 'REDIRECT_URI';
+export const SHOPEE_SG_AUTHORIZATION_QUERY_ROLES: readonly ShopeeSgAuthorizationQueryRole[] = [
+  'PARTNER_ID', 'TIMESTAMP', 'SIGNATURE', 'REDIRECT_URI'
+] as const;
+
 export type ShopeeSgSignatureComponent =
   | 'PARTNER_ID'
   | 'API_PATH'
@@ -45,6 +50,7 @@ export interface ShopeeSgStructuredAuthMappingInput {
   authorizationEndpoint: string;
   authorizationHttpMethod: ShopeeSgAuthorizationHttpMethod;
   authorizationQueryFieldNames: ShopeeSgAuthorizationQueryFieldNames;
+  authorizationQueryOrder: ShopeeSgAuthorizationQueryRole[];
   signatureAlgorithm: string;
   signatureBaseComponents: ShopeeSgSignatureComponent[];
   callbackFieldNames: ShopeeSgAuthorizationCallbackFieldNames;
@@ -119,14 +125,26 @@ function containsLikelySecretValue(value: string): boolean {
   return /(partner[ _-]?key|access[ _-]?token|refresh[ _-]?token|client[ _-]?secret|secret)\s*[:=]\s*[A-Za-z0-9._~+\/-]{12,}/i.test(value);
 }
 
-function normalizeComponents(values: ShopeeSgSignatureComponent[]): ShopeeSgSignatureComponent[] {
+function normalizeSignatureComponents(values: ShopeeSgSignatureComponent[]): ShopeeSgSignatureComponent[] {
   return Array.isArray(values)
     ? values.map((value) => normalize(value).toUpperCase() as ShopeeSgSignatureComponent).filter(Boolean)
     : [];
 }
 
+function normalizeQueryRoles(values: ShopeeSgAuthorizationQueryRole[]): ShopeeSgAuthorizationQueryRole[] {
+  return Array.isArray(values)
+    ? values.map((value) => normalize(value).toUpperCase() as ShopeeSgAuthorizationQueryRole).filter(Boolean)
+    : [];
+}
+
 function hasDuplicate(values: string[]): boolean {
   return new Set(values).size !== values.length;
+}
+
+function hasExactAuthorizationQueryRoles(values: ShopeeSgAuthorizationQueryRole[]): boolean {
+  if (values.length !== SHOPEE_SG_AUTHORIZATION_QUERY_ROLES.length || hasDuplicate(values)) return false;
+  const allowed = new Set(SHOPEE_SG_AUTHORIZATION_QUERY_ROLES);
+  return values.every((value) => allowed.has(value));
 }
 
 export function loadShopeeSgStructuredAuthMappings(): ShopeeSgStructuredAuthMappingRecord[] {
@@ -161,8 +179,9 @@ export function evaluateShopeeSgStructuredAuthMapping(
       signature: normalize(input.authorizationQueryFieldNames?.signature),
       redirectUri: normalize(input.authorizationQueryFieldNames?.redirectUri)
     },
+    authorizationQueryOrder: normalizeQueryRoles(input.authorizationQueryOrder),
     signatureAlgorithm: normalize(input.signatureAlgorithm),
-    signatureBaseComponents: normalizeComponents(input.signatureBaseComponents),
+    signatureBaseComponents: normalizeSignatureComponents(input.signatureBaseComponents),
     callbackFieldNames: {
       authorizationCode: normalize(input.callbackFieldNames?.authorizationCode),
       shopId: normalize(input.callbackFieldNames?.shopId)
@@ -204,6 +223,9 @@ export function evaluateShopeeSgStructuredAuthMapping(
   }
   if (hasDuplicate(queryFields)) {
     blockingReasons.push('認証Queryの4つの役割に同じwire項目名を重複指定できません。');
+  }
+  if (!hasExactAuthorizationQueryRoles(normalized.authorizationQueryOrder)) {
+    blockingReasons.push('認証Query順序はPARTNER_ID / TIMESTAMP / SIGNATURE / REDIRECT_URIの4役割を各1回ずつ、公式本文で確認した順に指定してください。');
   }
 
   if (!normalized.signatureAlgorithm || normalized.signatureAlgorithm.length > 80) {
@@ -255,7 +277,7 @@ export function evaluateShopeeSgStructuredAuthMapping(
     blockingReasons.push('Partner Key、Access Token、Refresh Token等の秘密値らしき文字列をStructured Mappingへ保存しないでください。');
   }
 
-  warnings.push('このMappingはwire項目名と署名componentの構造を固定するだけで、Shopeeへの通信許可にはなりません。');
+  warnings.push('このMappingはwire項目名・Query順序・署名componentの構造を固定するだけで、Shopeeへの通信許可にはなりません。');
   warnings.push('Partner ID / Partner Key / Access Token等の実値は保存しません。');
   warnings.push('認証Schemaが更新された場合はverificationId不一致としてこのMappingを再確認対象にします。');
 
@@ -324,7 +346,8 @@ export function isShopeeSgStructuredAuthMappingFresh(
     record.currentSingaporeApplicabilityConfirmed !== true ||
     record.authSchemaVerificationId !== authSchema.verificationId ||
     normalizeEndpoint(record.authorizationEndpoint) !== normalizeEndpoint(authSchema.authorizationEndpoint) ||
-    !isShopeeSgAuthSchemaVerificationFresh(authSchema, now)
+    !isShopeeSgAuthSchemaVerificationFresh(authSchema, now) ||
+    !hasExactAuthorizationQueryRoles(record.authorizationQueryOrder)
   ) return false;
 
   const checkedAt = Date.parse(record.checkedAt);
