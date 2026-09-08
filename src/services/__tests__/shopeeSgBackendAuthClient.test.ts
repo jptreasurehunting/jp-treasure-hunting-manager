@@ -40,6 +40,32 @@ export async function runShopeeSgBackendAuthClientTests(): Promise<{ passed: num
     createdAt: '2026-09-08T01:00:00.000Z',
     updatedAt: '2026-09-08T01:00:00.000Z'
   };
+  const authSchemaVerification: any = {
+    verificationId: 'auth-schema-sg-1',
+    marketplaceRegion: 'SG',
+    officialSourceUrl: 'https://open.shopee.com/documents/v2/authentication',
+    authorizationEndpoint: 'https://partner.shopeemobile.com/api/v2/shop/auth_partner',
+    tokenEndpoint: 'https://partner.shopeemobile.com/api/v2/auth/token/get',
+    refreshTokenEndpoint: 'https://partner.shopeemobile.com/api/v2/auth/access_token/get',
+    signatureAlgorithm: 'verified algorithm',
+    authorizationSignBaseRule: 'verified names only',
+    authenticatedApiSignBaseRule: 'verified names only',
+    callbackFields: 'verified names only',
+    tokenRequestFields: 'verified names only',
+    authenticatedRequestFields: 'verified names only',
+    timestampValidityRule: 'verified rule',
+    checkedBy: 'owner',
+    checkedAt: '2026-09-08T01:10:00.000Z',
+    verificationNote: 'Current Singapore official documentation reviewed.',
+    officialDocumentationConfirmed: true,
+    currentSingaporeApplicabilityConfirmed: true,
+    status: 'OFFICIAL_AUTH_SCHEMA_VERIFIED',
+    externalNetworkAllowed: false,
+    externalWriteAllowed: false,
+    secretsStored: false,
+    createdAt: '2026-09-08T01:10:00.000Z',
+    updatedAt: '2026-09-08T01:10:00.000Z'
+  };
 
   let fetchCalled = false;
   try {
@@ -63,7 +89,8 @@ export async function runShopeeSgBackendAuthClientTests(): Promise<{ passed: num
     accountId: ' shopee_sg_main ',
     credentialRef: ' SHOPEE_SG_MAIN ',
     shopId: ' 123456789 ',
-    schemaVerification
+    schemaVerification,
+    authSchemaVerification
   }, 'http://localhost:3001/', async (input, init) => {
     requestUrl = String(input);
     requestInit = init;
@@ -82,7 +109,9 @@ export async function runShopeeSgBackendAuthClientTests(): Promise<{ passed: num
       inventorySchemaVerificationId: 'schema-sg-1',
       inventorySchemaStatus: 'OFFICIAL_SCHEMA_VERIFIED',
       inventorySchemaCheckedAt: '2026-09-08T01:00:00.000Z',
-      authSchemaStatus: 'OFFICIAL_AUTH_SCHEMA_REVIEW_REQUIRED',
+      authSchemaVerificationId: 'auth-schema-sg-1',
+      authSchemaStatus: 'OFFICIAL_AUTH_SCHEMA_VERIFIED',
+      authSchemaCheckedAt: '2026-09-08T01:10:00.000Z',
       networkFlagConfigured: false,
       canStartAuthorization: false,
       canExecuteApi: false,
@@ -90,7 +119,7 @@ export async function runShopeeSgBackendAuthClientTests(): Promise<{ passed: num
       networkAction: 'NONE',
       externalWritePerformed: false,
       secretValuesReturned: false,
-      blockingReasons: ['Official auth flow is not verified.']
+      blockingReasons: ['Shopee auth transport is not implemented.']
     });
   });
 
@@ -101,45 +130,82 @@ export async function runShopeeSgBackendAuthClientTests(): Promise<{ passed: num
     sent.accountId === 'shopee_sg_main' &&
     sent.credentialRef === 'SHOPEE_SG_MAIN' &&
     sent.shopId === '123456789' &&
-    sent.schemaVerification.verificationId === 'schema-sg-1',
-    'Test 5: Readiness sends only normalized safe identity/schema metadata'
+    sent.schemaVerification.verificationId === 'schema-sg-1' &&
+    sent.authSchemaVerification.verificationId === 'auth-schema-sg-1',
+    'Test 5: Readiness sends normalized safe identity plus both schema verification IDs'
+  );
+  assert(
+    Object.keys(sent.authSchemaVerification).sort().join(',') === [
+      'checkedAt',
+      'currentSingaporeApplicabilityConfirmed',
+      'externalNetworkAllowed',
+      'externalWriteAllowed',
+      'officialSourceUrl',
+      'secretsStored',
+      'status',
+      'verificationId'
+    ].sort().join(','),
+    'Test 6: Browser sends only the minimal safe auth-schema snapshot'
   );
   const sentText = JSON.stringify(sent).toLowerCase();
   assert(
     !sentText.includes('partnerkey') &&
     !sentText.includes('partner_key') &&
     !sentText.includes('access_token') &&
-    !sentText.includes('refreshtoken'),
-    'Test 6: Browser request contains no Partner Key or token values'
+    !sentText.includes('refreshtoken') &&
+    !sentText.includes('refresh_token'),
+    'Test 7: Browser request contains no Partner Key or token values'
   );
 
   assert(
+    result.authSchemaStatus === 'OFFICIAL_AUTH_SCHEMA_VERIFIED' &&
     result.canStartAuthorization === false &&
     result.canExecuteApi === false &&
     result.canWriteInventory === false &&
     result.networkAction === 'NONE' &&
     result.externalWritePerformed === false &&
     result.secretValuesReturned === false,
-    'Test 7: Backend readiness cannot authorize or execute Shopee API writes'
+    'Test 8: Verified auth schema still cannot authorize or execute Shopee API writes'
   );
+
+  let optionalBody: any = null;
+  await fetchShopeeSgAuthReadiness({
+    accountId: 'shopee_sg_main',
+    credentialRef: 'SHOPEE_SG_MAIN',
+    shopId: '123456789',
+    schemaVerification
+  }, 'http://localhost:3001', async (_input, init) => {
+    optionalBody = JSON.parse(String(init?.body || '{}'));
+    return jsonResponse({
+      success: true,
+      marketplace: 'Shopee', marketplaceRegion: 'SG', accountId: 'shopee_sg_main', shopId: '123456789', credentialRef: 'SHOPEE_SG_MAIN',
+      credentialState: { partnerIdConfigured: false, partnerKeyConfigured: false, credentialConfigured: false },
+      inventorySchemaVerificationId: 'schema-sg-1', inventorySchemaStatus: 'OFFICIAL_SCHEMA_VERIFIED', inventorySchemaCheckedAt: '2026-09-08T01:00:00.000Z',
+      authSchemaVerificationId: null, authSchemaStatus: 'OFFICIAL_AUTH_SCHEMA_REVIEW_REQUIRED', authSchemaCheckedAt: null,
+      networkFlagConfigured: false, canStartAuthorization: false, canExecuteApi: false, canWriteInventory: false,
+      networkAction: 'NONE', externalWritePerformed: false, secretValuesReturned: false, blockingReasons: ['Auth schema review required.']
+    });
+  });
+  assert(optionalBody.authSchemaVerification === undefined, 'Test 9: Missing auth verification is not fabricated by the browser');
 
   try {
     await fetchShopeeSgAuthReadiness({
       accountId: 'shopee_sg_main',
       credentialRef: 'SHOPEE_SG_MAIN',
       shopId: '123456789',
-      schemaVerification
+      schemaVerification,
+      authSchemaVerification
     }, 'http://localhost:3001', async () => jsonResponse({
       success: false,
-      errorCode: 'STALE_SHOPEE_SCHEMA_VERIFICATION',
-      error: 'Schema verification is stale.',
+      errorCode: 'STALE_SHOPEE_AUTH_SCHEMA_VERIFICATION',
+      error: 'Auth schema verification is stale.',
       networkAction: 'NONE',
       externalWritePerformed: false,
       secretValuesReturned: false
     }, 409));
-    assert(false, 'Test 8: Backend stale-schema response should fail');
+    assert(false, 'Test 10: Backend stale-auth-schema response should fail');
   } catch (error) {
-    assert(describeBackendError(error).includes('STALE_SHOPEE_SCHEMA_VERIFICATION'), 'Test 8: Safe backend error code is preserved');
+    assert(describeBackendError(error).includes('STALE_SHOPEE_AUTH_SCHEMA_VERIFICATION'), 'Test 10: Safe stale-auth-schema backend error code is preserved');
   }
 
   return { passed, failed, log };
