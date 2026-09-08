@@ -9,6 +9,16 @@ import {
 } from '../shopeeSgStructuredAuthMappingService';
 import type { ShopeeSgAuthSchemaVerificationRecord } from '../shopeeSgAuthSchemaVerificationService';
 
+if (typeof globalThis.localStorage === 'undefined') {
+  const store: Record<string, string> = {};
+  (globalThis as any).localStorage = {
+    getItem: (key: string) => store[key] || null,
+    setItem: (key: string, value: string) => { store[key] = String(value); },
+    removeItem: (key: string) => { delete store[key]; },
+    clear: () => { Object.keys(store).forEach((key) => delete store[key]); }
+  };
+}
+
 export function runShopeeSgStructuredAuthMappingTests(): { passed: number; failed: number; log: string[] } {
   let passed = 0;
   let failed = 0;
