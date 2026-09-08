@@ -44,6 +44,8 @@ export interface MarketplaceSaleEventRecord extends MarketplaceSaleEventInput {
   blockingReasons: string[];
   warnings: string[];
   replayOfEventId?: string;
+  replayCount?: number;
+  lastReplayAt?: string;
 }
 
 export interface MarketplaceSaleEventPreflight {
@@ -61,6 +63,8 @@ export interface ProcessMarketplaceSaleEventResult {
   record: MarketplaceSaleEventRecord;
   messageJa: string;
 }
+
+type ReserveInventoryFn = typeof reserveInventory;
 
 function normalize(value: string): string {
   return String(value || '').trim();
@@ -202,7 +206,8 @@ function upsertEventRecord(record: MarketplaceSaleEventRecord): void {
 
 export function processMarketplaceSaleEvent(
   input: MarketplaceSaleEventInput,
-  now = new Date().toISOString()
+  now = new Date().toISOString(),
+  reserveFn: ReserveInventoryFn = reserveInventory
 ): ProcessMarketplaceSaleEventResult {
   const inventoryBefore = loadCentralInventory();
   const recordsBefore = loadMarketplaceSaleEvents();
@@ -211,6 +216,14 @@ export function processMarketplaceSaleEvent(
 
   if (preflight.isReplay) {
     const previous = recordsBefore.find((record) => record.eventId === preflight.normalized.eventId && record.status === 'PROCESSED')!;
+    const updatedPrevious: MarketplaceSaleEventRecord = {
+      ...previous,
+      replayCount: (previous.replayCount || 0) + 1,
+      lastReplayAt: receivedAt,
+      warnings: Array.from(new Set([...previous.warnings, ...preflight.warnings]))
+    };
+    upsertEventRecord(updatedPrevious);
+
     const replayRecord: MarketplaceSaleEventRecord = {
       ...preflight.normalized,
       lines: preflight.aggregatedLines,
@@ -220,9 +233,10 @@ export function processMarketplaceSaleEvent(
       reservationIds: [],
       blockingReasons: [],
       warnings: preflight.warnings,
-      replayOfEventId: previous.eventId
+      replayOfEventId: previous.eventId,
+      replayCount: updatedPrevious.replayCount,
+      lastReplayAt: receivedAt
     };
-    // Keep the original PROCESSED record as source of truth; replay is returned but does not overwrite it.
     return {
       success: true,
       replaySkipped: true,
@@ -254,7 +268,7 @@ export function processMarketplaceSaleEvent(
   const reservationIds: string[] = [];
   try {
     for (const line of preflight.aggregatedLines) {
-      const result = reserveInventory(
+      const result = reserveFn(
         line.sku,
         line.quantity,
         preflight.normalized.channel,
@@ -297,7 +311,8 @@ export function processMarketplaceSaleEvent(
     processedAt: receivedAt,
     reservationIds,
     blockingReasons: [],
-    warnings: preflight.warnings
+    warnings: preflight.warnings,
+    replayCount: 0
   };
   upsertEventRecord(processedRecord);
 
