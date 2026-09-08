@@ -56,6 +56,7 @@ import { runEbayOfficialPayloadPreviewTests } from './ebayOfficialPayloadPreview
 import { runEbaySandboxOAuthTests } from './ebaySandboxOAuth.test';
 import { runEbaySandboxVerificationTests } from './ebaySandboxVerification.test';
 import { runEbaySandboxMutationGateTests } from './ebaySandboxMutationGate.test';
+import { runShopeeSgInventoryMappingTests } from './shopeeSgInventoryMapping.test';
 import { runShopeeAutomationTests } from './shopeeAutomation.test';
 import { runI18nTests } from './i18n.test';
 import { runZonosAugust13ReadinessTests } from './zonosAugust13Readiness.test';
@@ -99,6 +100,7 @@ export function runAllAppTests(): MasterTestSummary {
     { name: 'Pre-Release Opportunity Hunter Phase 2 Discovery & Lifecycle Tests', fn: runOpportunityHunterPhase2Tests },
     { name: 'Marketplace-Aware Shipment Consolidation Tests', fn: runConsolidationTests },
     { name: 'Central Inventory SSOT & Cross-Channel Sync Tests', fn: runCentralInventoryTests },
+    { name: 'Shopee SG Inventory Identity Mapping Safety Tests', fn: runShopeeSgInventoryMappingTests },
     { name: 'Shopee Automation & Optimization Scoring Tests', fn: runShopeeAutomationTests },
     { name: 'Internationalization (i18n) & Locale Formatter Tests', fn: runI18nTests },
     { name: 'Envelope Vector Layout & Safe Test Mode Tests', fn: runEnvelopeLayoutTests },
