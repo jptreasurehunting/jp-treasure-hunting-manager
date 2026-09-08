@@ -76,6 +76,47 @@ function validateSchemaVerification(schemaVerification, now = Date.now()) {
   };
 }
 
+function validateAuthSchemaVerification(authSchemaVerification, now = Date.now()) {
+  if (!authSchemaVerification) return null;
+  if (typeof authSchemaVerification !== 'object') {
+    throw createError('INVALID_SHOPEE_AUTH_SCHEMA_VERIFICATION', 'Shopee SG auth schema verification must be a structured record.');
+  }
+
+  const verificationId = normalize(authSchemaVerification.verificationId);
+  const status = normalize(authSchemaVerification.status);
+  const officialSourceUrl = normalize(authSchemaVerification.officialSourceUrl);
+  const checkedAt = normalize(authSchemaVerification.checkedAt);
+
+  if (!verificationId || status !== 'OFFICIAL_AUTH_SCHEMA_VERIFIED') {
+    throw createError('INVALID_SHOPEE_AUTH_SCHEMA_VERIFICATION', 'Shopee SG auth schema verification must be OFFICIAL_AUTH_SCHEMA_VERIFIED.');
+  }
+  if (!isOfficialShopeeHttpsUrl(officialSourceUrl)) {
+    throw createError('INVALID_SHOPEE_AUTH_SCHEMA_VERIFICATION', 'Shopee SG auth schema verification must reference an official Shopee HTTPS source.');
+  }
+  if (authSchemaVerification.currentSingaporeApplicabilityConfirmed !== true) {
+    throw createError('INVALID_SHOPEE_AUTH_SCHEMA_VERIFICATION', 'Shopee SG auth schema verification must confirm current Singapore applicability.');
+  }
+  if (authSchemaVerification.externalNetworkAllowed !== false || authSchemaVerification.externalWriteAllowed !== false) {
+    throw createError('INVALID_SHOPEE_AUTH_SCHEMA_VERIFICATION', 'Auth schema verification must not itself grant external network or write permission.');
+  }
+  if (authSchemaVerification.secretsStored !== false) {
+    throw createError('INVALID_SHOPEE_AUTH_SCHEMA_VERIFICATION', 'Auth schema verification must not contain or claim to store secret values.');
+  }
+
+  const checkedAtMs = Date.parse(checkedAt);
+  if (!Number.isFinite(checkedAtMs) || checkedAtMs > now || now - checkedAtMs > SCHEMA_MAX_AGE_MS) {
+    throw createError('STALE_SHOPEE_AUTH_SCHEMA_VERIFICATION', 'Shopee SG auth schema verification is missing, future-dated, or older than 90 days.');
+  }
+
+  return {
+    verificationId,
+    status: 'OFFICIAL_AUTH_SCHEMA_VERIFIED',
+    officialSourceUrl,
+    checkedAt: new Date(checkedAtMs).toISOString(),
+    currentSingaporeApplicabilityConfirmed: true
+  };
+}
+
 function getShopeeSgAuthReadiness(input, now = Date.now()) {
   const accountId = normalize(input && input.accountId);
   const shopId = normalize(input && input.shopId);
@@ -89,6 +130,7 @@ function getShopeeSgAuthReadiness(input, now = Date.now()) {
   }
 
   const schema = validateSchemaVerification(input && input.schemaVerification, now);
+  const authSchema = validateAuthSchemaVerification(input && input.authSchemaVerification, now);
   const credentialState = resolveShopeeSgCredentialMetadata(credentialRef);
   const networkFlagConfigured = process.env.SHOPEE_SG_NETWORK_ENABLED === 'true';
   const blockingReasons = [];
@@ -96,10 +138,12 @@ function getShopeeSgAuthReadiness(input, now = Date.now()) {
   if (!credentialState.credentialConfigured) {
     blockingReasons.push('Shopee SG backend Partner ID / Partner Key configuration is incomplete.');
   }
-  blockingReasons.push('Current Shopee Open Platform authorization, token, and request-signature flow has not yet been verified against accessible official documentation.');
-  blockingReasons.push('Shopee authorization start, callback/token exchange, and API request signing are not implemented in this foundation.');
+  if (!authSchema) {
+    blockingReasons.push('Current Singapore Shopee Open Platform authorization, token, and request-signature schema still requires official verification.');
+  }
+  blockingReasons.push('Shopee authorization start, callback/token exchange, token refresh, and API request signing transport are not implemented in this foundation.');
   if (networkFlagConfigured) {
-    blockingReasons.push('SHOPEE_SG_NETWORK_ENABLED is set, but network execution remains disabled because the official auth flow is not verified and no network transport exists.');
+    blockingReasons.push('SHOPEE_SG_NETWORK_ENABLED is set, but network execution remains disabled because no approved Shopee auth transport exists.');
   } else {
     blockingReasons.push('Shopee SG network execution is disabled.');
   }
@@ -119,7 +163,9 @@ function getShopeeSgAuthReadiness(input, now = Date.now()) {
     inventorySchemaVerificationId: schema.verificationId,
     inventorySchemaStatus: schema.status,
     inventorySchemaCheckedAt: schema.checkedAt,
-    authSchemaStatus: 'OFFICIAL_AUTH_SCHEMA_REVIEW_REQUIRED',
+    authSchemaVerificationId: authSchema ? authSchema.verificationId : null,
+    authSchemaStatus: authSchema ? authSchema.status : 'OFFICIAL_AUTH_SCHEMA_REVIEW_REQUIRED',
+    authSchemaCheckedAt: authSchema ? authSchema.checkedAt : null,
     networkFlagConfigured,
     canStartAuthorization: false,
     canExecuteApi: false,
@@ -136,5 +182,6 @@ module.exports = {
   validateShopeeSgCredentialRef,
   resolveShopeeSgCredentialMetadata,
   validateSchemaVerification,
+  validateAuthSchemaVerification,
   getShopeeSgAuthReadiness
 };
