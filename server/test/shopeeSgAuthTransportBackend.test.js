@@ -1,5 +1,6 @@
 const {
-  buildShopeeSgAuthTransportPlan
+  buildShopeeSgAuthTransportPlan,
+  buildShopeeSgAuthorizationRequestPreview
 } = require('../integrations/shopeeSgAuthTransportBackend');
 
 describe('Shopee SG Auth Transport Contract Safety', () => {
@@ -16,6 +17,7 @@ describe('Shopee SG Auth Transport Contract Safety', () => {
     verificationId: 'auth-schema-sg-transport-1',
     status: 'OFFICIAL_AUTH_SCHEMA_VERIFIED',
     officialSourceUrl: 'https://open.shopee.com/documents/v2/authentication',
+    authorizationEndpoint: 'https://partner.shopeemobile.com/example/verified-auth-endpoint',
     checkedAt: '2026-09-08T02:10:00.000Z',
     currentSingaporeApplicabilityConfirmed: true,
     externalNetworkAllowed: false,
@@ -127,5 +129,84 @@ describe('Shopee SG Auth Transport Contract Safety', () => {
     expect(result.credentialState.credentialConfigured).toBe(false);
     expect(result.blockingReasons.some((reason) => reason.includes('Partner ID / Partner Key configuration is incomplete'))).toBe(true);
     expect(result.networkAction).toBe('NONE');
+  });
+
+  test('authorization request preview exposes endpoint but never generates executable URL or signature', () => {
+    process.env[`${credentialRef}_PARTNER_ID`] = '123456';
+    process.env[`${credentialRef}_PARTNER_KEY`] = 'backend-only-secret';
+
+    const result = buildShopeeSgAuthorizationRequestPreview({
+      accountId: 'shopee_sg_main',
+      shopId: '99887766',
+      credentialRef,
+      schemaVerification,
+      authSchemaVerification
+    }, now);
+
+    expect(result.mode).toBe('AUTHORIZATION_REQUEST_PREVIEW_ONLY');
+    expect(result.previewStatus).toBe('STRUCTURED_MAPPING_REQUIRED');
+    expect(result.authorizationEndpoint).toBe(authSchemaVerification.authorizationEndpoint);
+    expect(result.requestMethod).toBe('UNVERIFIED');
+    expect(result.executableAuthorizationUrl).toBeNull();
+    expect(result.signatureValue).toBeNull();
+    expect(result.canGenerateAuthorizationRequest).toBe(false);
+    expect(result.canStartAuthorization).toBe(false);
+    expect(result.sendAllowed).toBe(false);
+    expect(result.networkAction).toBe('NONE');
+  });
+
+  test('authorization preview never returns Partner ID, Partner Key, or secret values', () => {
+    process.env[`${credentialRef}_PARTNER_ID`] = '123456';
+    process.env[`${credentialRef}_PARTNER_KEY`] = 'backend-only-secret';
+
+    const result = buildShopeeSgAuthorizationRequestPreview({
+      accountId: 'shopee_sg_main',
+      shopId: '99887766',
+      credentialRef,
+      schemaVerification,
+      authSchemaVerification
+    }, now);
+    const serialized = JSON.stringify(result);
+
+    expect(result.partnerIdValueReturned).toBe(false);
+    expect(result.partnerKeyValueReturned).toBe(false);
+    expect(result.secretValuesReturned).toBe(false);
+    expect(serialized).not.toContain('123456');
+    expect(serialized).not.toContain('backend-only-secret');
+  });
+
+  test('authorization preview keeps machine-structured query/sign/callback requirements blocked', () => {
+    const result = buildShopeeSgAuthorizationRequestPreview({
+      accountId: 'shopee_sg_main',
+      shopId: '99887766',
+      credentialRef,
+      schemaVerification,
+      authSchemaVerification
+    }, now);
+
+    const structuredRequirements = result.requirements.filter((requirement) =>
+      requirement.requirement.startsWith('STRUCTURED_') || requirement.requirement === 'CALLBACK_BINDING_CONTRACT'
+    );
+    expect(structuredRequirements).toHaveLength(3);
+    expect(structuredRequirements.every((requirement) => requirement.status === 'REVIEW_REQUIRED')).toBe(true);
+    expect(result.externalWritePerformed).toBe(false);
+  });
+
+  test('authorization preview rejects missing or non-Shopee authorization endpoint instead of guessing one', () => {
+    expect(() => buildShopeeSgAuthorizationRequestPreview({
+      accountId: 'shopee_sg_main',
+      shopId: '99887766',
+      credentialRef,
+      schemaVerification,
+      authSchemaVerification: { ...authSchemaVerification, authorizationEndpoint: '' }
+    }, now)).toThrow('verified Shopee HTTPS authorization endpoint');
+
+    expect(() => buildShopeeSgAuthorizationRequestPreview({
+      accountId: 'shopee_sg_main',
+      shopId: '99887766',
+      credentialRef,
+      schemaVerification,
+      authSchemaVerification: { ...authSchemaVerification, authorizationEndpoint: 'https://example.com/auth' }
+    }, now)).toThrow('verified Shopee HTTPS authorization endpoint');
   });
 });
