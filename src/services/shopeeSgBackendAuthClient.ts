@@ -1,4 +1,5 @@
 import type { ShopeeSgApiSchemaVerificationRecord } from './shopeeSgApiSchemaVerificationService';
+import type { ShopeeSgAuthSchemaVerificationRecord } from './shopeeSgAuthSchemaVerificationService';
 import {
   BackendSafeError,
   getConfiguredBackendBaseUrl
@@ -9,6 +10,7 @@ export interface ShopeeSgAuthReadinessInput {
   credentialRef: string;
   shopId: string;
   schemaVerification: ShopeeSgApiSchemaVerificationRecord;
+  authSchemaVerification?: ShopeeSgAuthSchemaVerificationRecord;
 }
 
 export interface ShopeeSgAuthReadinessResponse {
@@ -26,7 +28,9 @@ export interface ShopeeSgAuthReadinessResponse {
   inventorySchemaVerificationId: string;
   inventorySchemaStatus: 'OFFICIAL_SCHEMA_VERIFIED';
   inventorySchemaCheckedAt: string;
-  authSchemaStatus: 'OFFICIAL_AUTH_SCHEMA_REVIEW_REQUIRED';
+  authSchemaVerificationId: string | null;
+  authSchemaStatus: 'OFFICIAL_AUTH_SCHEMA_VERIFIED' | 'OFFICIAL_AUTH_SCHEMA_REVIEW_REQUIRED';
+  authSchemaCheckedAt: string | null;
   networkFlagConfigured: boolean;
   canStartAuthorization: false;
   canExecuteApi: false;
@@ -85,6 +89,19 @@ function safeSchemaSnapshot(record: ShopeeSgApiSchemaVerificationRecord) {
   };
 }
 
+function safeAuthSchemaSnapshot(record: ShopeeSgAuthSchemaVerificationRecord) {
+  return {
+    verificationId: record.verificationId,
+    status: record.status,
+    officialSourceUrl: record.officialSourceUrl,
+    checkedAt: record.checkedAt,
+    currentSingaporeApplicabilityConfirmed: record.currentSingaporeApplicabilityConfirmed,
+    externalNetworkAllowed: record.externalNetworkAllowed,
+    externalWriteAllowed: record.externalWriteAllowed,
+    secretsStored: record.secretsStored
+  };
+}
+
 export async function fetchShopeeSgAuthReadiness(
   input: ShopeeSgAuthReadinessInput,
   baseUrl = getConfiguredBackendBaseUrl(),
@@ -118,7 +135,10 @@ export async function fetchShopeeSgAuthReadiness(
       accountId,
       credentialRef,
       shopId,
-      schemaVerification: safeSchemaSnapshot(input.schemaVerification)
+      schemaVerification: safeSchemaSnapshot(input.schemaVerification),
+      authSchemaVerification: input.authSchemaVerification
+        ? safeAuthSchemaSnapshot(input.authSchemaVerification)
+        : undefined
     })
   });
 
