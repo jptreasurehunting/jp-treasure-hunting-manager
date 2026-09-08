@@ -20,7 +20,8 @@ const {
   getShopeeSgAuthReadiness
 } = require('./integrations/shopeeSgAuthFoundationBackend');
 const {
-  buildShopeeSgAuthTransportPlan
+  buildShopeeSgAuthTransportPlan,
+  buildShopeeSgAuthorizationRequestPreview
 } = require('./integrations/shopeeSgAuthTransportBackend');
 
 dotenv.config();
@@ -160,6 +161,7 @@ function shopeeAuthReadinessErrorStatus(error) {
     case 'INVALID_SHOPEE_SCHEMA_VERIFICATION':
     case 'INVALID_SHOPEE_AUTH_SCHEMA_VERIFICATION':
     case 'MISSING_SHOPEE_AUTH_SCHEMA_VERIFICATION':
+    case 'INVALID_SHOPEE_AUTHORIZATION_ENDPOINT':
       return 400;
     case 'STALE_SHOPEE_SCHEMA_VERIFICATION':
     case 'STALE_SHOPEE_AUTH_SCHEMA_VERIFICATION':
@@ -243,6 +245,18 @@ app.post('/api/shopee/sg/auth/readiness', (req, res) => {
 app.post('/api/shopee/sg/auth/transport/plan', (req, res) => {
   try {
     res.json(buildShopeeSgAuthTransportPlan(req.body || {}));
+  } catch (err) {
+    return sendSafeShopeeAuthReadinessError(res, err);
+  }
+});
+
+/**
+ * Builds a non-executable preview of the first Shopee SG authorization stage.
+ * It never returns secret values, a signature, or a clickable authorization URL.
+ */
+app.post('/api/shopee/sg/auth/authorization-request/preview', (req, res) => {
+  try {
+    res.json(buildShopeeSgAuthorizationRequestPreview(req.body || {}));
   } catch (err) {
     return sendSafeShopeeAuthReadinessError(res, err);
   }
