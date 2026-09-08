@@ -5,6 +5,7 @@ import {
   InventorySalesState
 } from '../../services/inventorySalesWorkbenchService';
 import { InventoryImportPanel } from './InventoryImportPanel';
+import { MarketplaceSaleEventPanel } from './MarketplaceSaleEventPanel';
 import { CrossChannelInventorySyncQueuePanel } from './CrossChannelInventorySyncQueuePanel';
 import { ShopeeSgInventoryMappingPanel } from './ShopeeSgInventoryMappingPanel';
 import { InventorySalesPriorityPanel } from './InventorySalesPriorityPanel';
@@ -98,6 +99,7 @@ export function InventorySalesWorkbenchCard() {
       )}
 
       <InventoryImportPanel onInventoryChanged={reloadInventory} />
+      <MarketplaceSaleEventPanel items={items} onInventoryChanged={reloadInventory} />
       <CrossChannelInventorySyncQueuePanel />
       <ShopeeSgInventoryMappingPanel items={items} onInventoryChanged={reloadInventory} />
       <InventorySalesPriorityPanel items={items} />
