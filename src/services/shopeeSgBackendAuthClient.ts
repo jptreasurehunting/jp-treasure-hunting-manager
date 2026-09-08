@@ -223,6 +223,7 @@ function safeStructuredMappingSnapshot(record: ShopeeSgStructuredAuthMappingReco
     authorizationEndpoint: record.authorizationEndpoint,
     authorizationHttpMethod: record.authorizationHttpMethod,
     authorizationQueryFieldNames: record.authorizationQueryFieldNames,
+    authorizationQueryOrder: record.authorizationQueryOrder,
     signatureAlgorithm: record.signatureAlgorithm,
     signatureBaseComponents: record.signatureBaseComponents,
     callbackFieldNames: record.callbackFieldNames,
