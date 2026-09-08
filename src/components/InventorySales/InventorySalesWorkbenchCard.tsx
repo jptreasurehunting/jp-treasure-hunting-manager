@@ -6,6 +6,7 @@ import {
 } from '../../services/inventorySalesWorkbenchService';
 import { InventoryImportPanel } from './InventoryImportPanel';
 import { CrossChannelInventorySyncQueuePanel } from './CrossChannelInventorySyncQueuePanel';
+import { ShopeeSgInventoryMappingPanel } from './ShopeeSgInventoryMappingPanel';
 import { InventorySalesPriorityPanel } from './InventorySalesPriorityPanel';
 import { ListingPreparationPanel } from './ListingPreparationPanel';
 import { ListingDraftReviewPanel } from './ListingDraftReviewPanel';
@@ -98,6 +99,7 @@ export function InventorySalesWorkbenchCard() {
 
       <InventoryImportPanel onInventoryChanged={reloadInventory} />
       <CrossChannelInventorySyncQueuePanel />
+      <ShopeeSgInventoryMappingPanel items={items} />
       <InventorySalesPriorityPanel items={items} />
       <ListingPreparationPanel items={items} />
       <ListingDraftReviewPanel items={items} />
