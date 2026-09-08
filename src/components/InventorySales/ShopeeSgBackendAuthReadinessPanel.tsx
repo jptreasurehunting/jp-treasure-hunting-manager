@@ -3,6 +3,10 @@ import {
   getLatestShopeeSgApiSchemaVerification,
   isShopeeSgSchemaVerificationFresh
 } from '../../services/shopeeSgApiSchemaVerificationService';
+import {
+  getLatestShopeeSgAuthSchemaVerification,
+  isShopeeSgAuthSchemaVerificationFresh
+} from '../../services/shopeeSgAuthSchemaVerificationService';
 import { loadShopeeSgInventoryMappings } from '../../services/shopeeSgInventoryMappingService';
 import {
   fetchShopeeSgAuthReadiness,
@@ -58,6 +62,8 @@ export function ShopeeSgBackendAuthReadinessPanel() {
 
   const latestSchema = getLatestShopeeSgApiSchemaVerification();
   const schemaFresh = isShopeeSgSchemaVerificationFresh(latestSchema);
+  const latestAuthSchema = getLatestShopeeSgAuthSchemaVerification();
+  const authSchemaFresh = isShopeeSgAuthSchemaVerificationFresh(latestAuthSchema);
   const credentialRefValid = isValidShopeeSgCredentialRef(credentialRef);
   const shopIdValid = /^[1-9]\d*$/.test(shopId.trim());
   const canCheck = Boolean(
@@ -79,7 +85,8 @@ export function ShopeeSgBackendAuthReadinessPanel() {
         accountId,
         shopId,
         credentialRef,
-        schemaVerification: latestSchema
+        schemaVerification: latestSchema,
+        authSchemaVerification: latestAuthSchema && authSchemaFresh ? latestAuthSchema : undefined
       });
       setResult(response);
       setMessage('✅ バックエンドの安全な設定状態を確認しました。Shopeeへの通信は行っていません。');
@@ -94,7 +101,7 @@ export function ShopeeSgBackendAuthReadinessPanel() {
     <section style={panelStyle}>
       <h3 style={{ margin: 0, color: '#f8fafc', fontSize: 20 }}>Shopee SG バックエンド認証準備</h3>
       <p style={{ margin: '6px 0 12px', color: '#94a3b8', fontSize: 13, lineHeight: 1.65 }}>
-        Partner ID / Partner Keyがバックエンド環境に用意されているかを、秘密値を表示せず確認します。現在は認証・署名仕様の公式再確認待ちのため、Shopeeへの認証開始・API通信・在庫更新はすべて禁止したままです。
+        Partner ID / Partner Keyがバックエンド環境に用意されているかを秘密値なしで確認し、在庫Schemaと認証Schemaの確認状態を同時に照合します。Schema確認済みでも、認証Transportを実装・承認するまではShopee通信を開始しません。
       </p>
 
       <div style={{ padding: 10, borderRadius: 8, background: 'rgba(120,53,15,.25)', color: '#fde68a', fontSize: 12, lineHeight: 1.6, marginBottom: 12 }}>
@@ -120,6 +127,11 @@ export function ShopeeSgBackendAuthReadinessPanel() {
             {latestSchema ? (schemaFresh ? '確認記録あり・90日以内' : '再確認必要') : '確認記録なし'}
           </strong>
         </div>
+        <div>
+          認証・署名Schema: <strong style={{ color: latestAuthSchema && authSchemaFresh ? '#86efac' : '#fde68a' }}>
+            {latestAuthSchema ? (authSchemaFresh ? '確認記録あり・90日以内' : '再確認必要') : '確認記録なし'}
+          </strong>
+        </div>
         {!credentialRefValid && <div style={{ color: '#fecaca' }}>認証情報参照名は SHOPEE_SG_ で始まる形式が必要です。</div>}
         {shopId && !shopIdValid && <div style={{ color: '#fecaca' }}>Shop IDは正の整数IDで指定してください。</div>}
       </div>
@@ -140,7 +152,7 @@ export function ShopeeSgBackendAuthReadinessPanel() {
           <div>Partner ID: <strong>{yesNo(result.credentialState.partnerIdConfigured)}</strong></div>
           <div>Partner Key: <strong>{yesNo(result.credentialState.partnerKeyConfigured)}</strong>（値は非表示）</div>
           <div>在庫Schema: <strong>{result.inventorySchemaStatus}</strong></div>
-          <div>認証Schema: <strong style={{ color: '#fde68a' }}>{result.authSchemaStatus}</strong></div>
+          <div>認証Schema: <strong style={{ color: result.authSchemaStatus === 'OFFICIAL_AUTH_SCHEMA_VERIFIED' ? '#86efac' : '#fde68a' }}>{result.authSchemaStatus}</strong></div>
           <div>認証開始: <strong style={{ color: '#fecaca' }}>不可</strong></div>
           <div>API実行: <strong style={{ color: '#fecaca' }}>不可</strong></div>
           <div>在庫書込: <strong style={{ color: '#fecaca' }}>不可</strong></div>
