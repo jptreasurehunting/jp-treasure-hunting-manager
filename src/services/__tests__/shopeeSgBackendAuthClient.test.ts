@@ -1,6 +1,7 @@
 import {
   fetchShopeeSgAuthReadiness,
   fetchShopeeSgAuthTransportPlan,
+  fetchShopeeSgAuthorizationRequestPreview,
   isValidShopeeSgCredentialRef
 } from '../shopeeSgBackendAuthClient';
 import { describeBackendError } from '../ebaySandboxBackendClient';
@@ -137,6 +138,7 @@ export async function runShopeeSgBackendAuthClientTests(): Promise<{ passed: num
   );
   assert(
     Object.keys(sent.authSchemaVerification).sort().join(',') === [
+      'authorizationEndpoint',
       'checkedAt',
       'currentSingaporeApplicabilityConfirmed',
       'externalNetworkAllowed',
@@ -146,7 +148,7 @@ export async function runShopeeSgBackendAuthClientTests(): Promise<{ passed: num
       'status',
       'verificationId'
     ].sort().join(','),
-    'Test 6: Browser sends only the minimal safe auth-schema snapshot'
+    'Test 6: Browser sends only the minimal safe auth-schema snapshot plus verified endpoint'
   );
   const sentText = JSON.stringify(sent).toLowerCase();
   assert(
@@ -272,6 +274,93 @@ export async function runShopeeSgBackendAuthClientTests(): Promise<{ passed: num
     assert(false, 'Test 14: Missing auth schema should fail before transport backend call');
   } catch (error) {
     assert(!missingAuthFetchCalled && describeBackendError(error).includes('MISSING_SHOPEE_AUTH_SCHEMA_VERIFICATION'), 'Test 14: Missing auth schema is blocked before transport backend call');
+  }
+
+  let previewUrl = '';
+  let previewInit: RequestInit | undefined;
+  const preview = await fetchShopeeSgAuthorizationRequestPreview({
+    accountId: ' shopee_sg_main ',
+    credentialRef: ' SHOPEE_SG_MAIN ',
+    shopId: ' 123456789 ',
+    schemaVerification,
+    authSchemaVerification
+  }, 'http://localhost:3001/', async (input, init) => {
+    previewUrl = String(input);
+    previewInit = init;
+    return jsonResponse({
+      success: true,
+      marketplace: 'Shopee',
+      marketplaceRegion: 'SG',
+      mode: 'AUTHORIZATION_REQUEST_PREVIEW_ONLY',
+      stage: 'AUTHORIZATION_REQUEST_BUILD',
+      previewStatus: 'STRUCTURED_MAPPING_REQUIRED',
+      accountId: 'shopee_sg_main',
+      shopId: '123456789',
+      credentialRef: 'SHOPEE_SG_MAIN',
+      inventorySchemaVerificationId: 'schema-sg-1',
+      authSchemaVerificationId: 'auth-schema-sg-1',
+      authorizationEndpoint: authSchemaVerification.authorizationEndpoint,
+      requestMethod: 'UNVERIFIED',
+      executableAuthorizationUrl: null,
+      signatureValue: null,
+      partnerIdValueReturned: false,
+      partnerKeyValueReturned: false,
+      secretValuesReturned: false,
+      credentialState: { partnerIdConfigured: true, partnerKeyConfigured: true, credentialConfigured: true },
+      requirements: [
+        { requirement: 'CURRENT_SG_AUTH_SCHEMA', status: 'VERIFIED', detail: 'verified' },
+        { requirement: 'STRUCTURED_AUTHORIZATION_QUERY_MAPPING', status: 'REVIEW_REQUIRED', detail: 'not structured' }
+      ],
+      canGenerateAuthorizationRequest: false,
+      canStartAuthorization: false,
+      sendAllowed: false,
+      networkAction: 'NONE',
+      externalWritePerformed: false,
+      requiresSeparateExecutionApproval: true,
+      blockingReasons: ['Structured mapping required.']
+    });
+  });
+
+  assert(
+    previewUrl === 'http://localhost:3001/api/shopee/sg/auth/authorization-request/preview' && previewInit?.method === 'POST',
+    'Test 15: Authorization preview uses the dedicated backend preview endpoint'
+  );
+  const previewSent = JSON.parse(String(previewInit?.body || '{}'));
+  const previewSentText = JSON.stringify(previewSent).toLowerCase();
+  assert(
+    previewSent.authSchemaVerification.authorizationEndpoint === authSchemaVerification.authorizationEndpoint &&
+    previewSent.authSchemaVerification.authorizationSignBaseRule === undefined &&
+    !previewSentText.includes('partner_key') &&
+    !previewSentText.includes('access_token') &&
+    !previewSentText.includes('refresh_token'),
+    'Test 16: Authorization preview sends only safe verification metadata and endpoint, not free-text signing rules or secrets'
+  );
+  assert(
+    preview.previewStatus === 'STRUCTURED_MAPPING_REQUIRED' &&
+    preview.executableAuthorizationUrl === null &&
+    preview.signatureValue === null &&
+    preview.canGenerateAuthorizationRequest === false &&
+    preview.canStartAuthorization === false &&
+    preview.sendAllowed === false &&
+    preview.networkAction === 'NONE' &&
+    preview.externalWritePerformed === false,
+    'Test 17: Authorization preview cannot be mistaken for an executable authorization request'
+  );
+
+  let missingPreviewAuthFetchCalled = false;
+  try {
+    await fetchShopeeSgAuthorizationRequestPreview({
+      accountId: 'shopee_sg_main', credentialRef: 'SHOPEE_SG_MAIN', shopId: '123456789', schemaVerification
+    }, 'http://localhost:3001', async () => {
+      missingPreviewAuthFetchCalled = true;
+      return jsonResponse({});
+    });
+    assert(false, 'Test 18: Missing auth schema should fail before authorization-preview backend call');
+  } catch (error) {
+    assert(
+      !missingPreviewAuthFetchCalled && describeBackendError(error).includes('MISSING_SHOPEE_AUTH_SCHEMA_VERIFICATION'),
+      'Test 18: Missing auth schema is blocked before authorization-preview backend call'
+    );
   }
 
   return { passed, failed, log };
