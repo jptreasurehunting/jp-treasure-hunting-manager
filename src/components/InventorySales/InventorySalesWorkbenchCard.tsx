@@ -9,6 +9,7 @@ import { MarketplaceSaleEventPanel } from './MarketplaceSaleEventPanel';
 import { CrossChannelInventorySyncQueuePanel } from './CrossChannelInventorySyncQueuePanel';
 import { ShopeeSgInventoryMappingPanel } from './ShopeeSgInventoryMappingPanel';
 import { ShopeeSgApiSchemaVerificationPanel } from './ShopeeSgApiSchemaVerificationPanel';
+import { ShopeeSgAuthSchemaVerificationPanel } from './ShopeeSgAuthSchemaVerificationPanel';
 import { ShopeeSgBackendAuthReadinessPanel } from './ShopeeSgBackendAuthReadinessPanel';
 import { InventorySalesPriorityPanel } from './InventorySalesPriorityPanel';
 import { ListingPreparationPanel } from './ListingPreparationPanel';
@@ -105,6 +106,7 @@ export function InventorySalesWorkbenchCard() {
       <CrossChannelInventorySyncQueuePanel />
       <ShopeeSgInventoryMappingPanel items={items} onInventoryChanged={reloadInventory} />
       <ShopeeSgApiSchemaVerificationPanel />
+      <ShopeeSgAuthSchemaVerificationPanel />
       <ShopeeSgBackendAuthReadinessPanel />
       <InventorySalesPriorityPanel items={items} />
       <ListingPreparationPanel items={items} />
