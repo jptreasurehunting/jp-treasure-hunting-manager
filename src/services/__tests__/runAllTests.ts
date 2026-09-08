@@ -41,6 +41,7 @@ import { runShippingRouterTests } from './shippingRouter.test';
 import { runEnvelopeLayoutTests } from './envelopeLayout.test';
 import { runConsolidationTests } from './consolidation.test';
 import { runCentralInventoryTests } from './centralInventory.test';
+import { runMarketplaceSaleEventTests } from './marketplaceSaleEvent.test';
 import { runInventorySalesWorkbenchTests } from './inventorySalesWorkbench.test';
 import { runInventoryImportTests } from './inventoryImport.test';
 import { runInventorySalesPriorityTests } from './inventorySalesPriority.test';
@@ -100,6 +101,7 @@ export function runAllAppTests(): MasterTestSummary {
     { name: 'Pre-Release Opportunity Hunter Phase 2 Discovery & Lifecycle Tests', fn: runOpportunityHunterPhase2Tests },
     { name: 'Marketplace-Aware Shipment Consolidation Tests', fn: runConsolidationTests },
     { name: 'Central Inventory SSOT & Cross-Channel Sync Tests', fn: runCentralInventoryTests },
+    { name: 'Marketplace Sale Event Intake Safety Tests', fn: runMarketplaceSaleEventTests },
     { name: 'Shopee SG Inventory Identity Mapping Safety Tests', fn: runShopeeSgInventoryMappingTests },
     { name: 'Shopee Automation & Optimization Scoring Tests', fn: runShopeeAutomationTests },
     { name: 'Internationalization (i18n) & Locale Formatter Tests', fn: runI18nTests },
