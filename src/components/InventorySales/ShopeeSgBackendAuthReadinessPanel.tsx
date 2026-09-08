@@ -1,12 +1,19 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   getLatestShopeeSgApiSchemaVerification,
-  isShopeeSgSchemaVerificationFresh
+  isShopeeSgSchemaVerificationFresh,
+  SHOPEE_SG_SCHEMA_VERIFICATION_CHANGED_EVENT
 } from '../../services/shopeeSgApiSchemaVerificationService';
 import {
   getLatestShopeeSgAuthSchemaVerification,
-  isShopeeSgAuthSchemaVerificationFresh
+  isShopeeSgAuthSchemaVerificationFresh,
+  SHOPEE_SG_AUTH_SCHEMA_VERIFICATION_CHANGED_EVENT
 } from '../../services/shopeeSgAuthSchemaVerificationService';
+import {
+  getLatestShopeeSgStructuredAuthMapping,
+  isShopeeSgStructuredAuthMappingFresh,
+  SHOPEE_SG_STRUCTURED_AUTH_MAPPING_CHANGED_EVENT
+} from '../../services/shopeeSgStructuredAuthMappingService';
 import { loadShopeeSgInventoryMappings } from '../../services/shopeeSgInventoryMappingService';
 import {
   fetchShopeeSgAuthReadiness,
@@ -71,11 +78,32 @@ export function ShopeeSgBackendAuthReadinessPanel() {
   const [transportPlan, setTransportPlan] = useState<ShopeeSgAuthTransportPlanResponse | null>(null);
   const [authorizationPreview, setAuthorizationPreview] = useState<ShopeeSgAuthorizationRequestPreviewResponse | null>(null);
   const [message, setMessage] = useState('');
+  const [evidenceRevision, setEvidenceRevision] = useState(0);
 
-  const latestSchema = getLatestShopeeSgApiSchemaVerification();
+  useEffect(() => {
+    const refresh = () => setEvidenceRevision((value) => value + 1);
+    window.addEventListener(SHOPEE_SG_SCHEMA_VERIFICATION_CHANGED_EVENT, refresh);
+    window.addEventListener(SHOPEE_SG_AUTH_SCHEMA_VERIFICATION_CHANGED_EVENT, refresh);
+    window.addEventListener(SHOPEE_SG_STRUCTURED_AUTH_MAPPING_CHANGED_EVENT, refresh);
+    return () => {
+      window.removeEventListener(SHOPEE_SG_SCHEMA_VERIFICATION_CHANGED_EVENT, refresh);
+      window.removeEventListener(SHOPEE_SG_AUTH_SCHEMA_VERIFICATION_CHANGED_EVENT, refresh);
+      window.removeEventListener(SHOPEE_SG_STRUCTURED_AUTH_MAPPING_CHANGED_EVENT, refresh);
+    };
+  }, []);
+
+  const latestSchema = useMemo(() => getLatestShopeeSgApiSchemaVerification(), [evidenceRevision]);
   const schemaFresh = isShopeeSgSchemaVerificationFresh(latestSchema);
-  const latestAuthSchema = getLatestShopeeSgAuthSchemaVerification();
+  const latestAuthSchema = useMemo(() => getLatestShopeeSgAuthSchemaVerification(), [evidenceRevision]);
   const authSchemaFresh = isShopeeSgAuthSchemaVerificationFresh(latestAuthSchema);
+  const latestStructuredMapping = useMemo(
+    () => latestAuthSchema ? getLatestShopeeSgStructuredAuthMapping(latestAuthSchema.verificationId) : undefined,
+    [latestAuthSchema, evidenceRevision]
+  );
+  const structuredMappingFresh = Boolean(
+    latestStructuredMapping && latestAuthSchema && isShopeeSgStructuredAuthMappingFresh(latestStructuredMapping, latestAuthSchema)
+  );
+
   const credentialRefValid = isValidShopeeSgCredentialRef(credentialRef);
   const shopIdValid = /^[1-9]\d*$/.test(shopId.trim());
   const baseReady = Boolean(accountId.trim() && shopIdValid && credentialRefValid && latestSchema && schemaFresh);
@@ -141,10 +169,15 @@ export function ShopeeSgBackendAuthReadinessPanel() {
         shopId,
         credentialRef,
         schemaVerification: latestSchema,
-        authSchemaVerification: latestAuthSchema
+        authSchemaVerification: latestAuthSchema,
+        structuredAuthorizationMapping: structuredMappingFresh ? latestStructuredMapping : undefined
       });
       setAuthorizationPreview(response);
-      setMessage('✅ Authorization Request Previewを生成しました。実行URL・署名は生成せず、Shopee通信も行っていません。');
+      setMessage(
+        response.previewStatus === 'STRUCTURED_MAPPING_VERIFIED'
+          ? '✅ Structured Mappingを使ったAuthorization Request Previewを生成しました。実行URL・署名は生成せず、Shopee通信も行っていません。'
+          : '✅ Authorization Request Previewを生成しました。Structured Mappingが未確認のため、実行URL・署名は生成していません。'
+      );
     } catch (error) {
       setMessage(`❌ ${describeBackendError(error)}`);
     } finally {
@@ -156,7 +189,7 @@ export function ShopeeSgBackendAuthReadinessPanel() {
     <section style={panelStyle}>
       <h3 style={{ margin: 0, color: '#f8fafc', fontSize: 20 }}>Shopee SG バックエンド認証準備</h3>
       <p style={{ margin: '6px 0 12px', color: '#94a3b8', fontSize: 13, lineHeight: 1.65 }}>
-        Partner ID / Partner Keyがバックエンド環境に用意されているかを秘密値なしで確認し、在庫Schemaと認証Schemaを照合します。認証Transportは段階だけ定義し、外部通信・Token交換・署名・在庫更新は別承認まで無効です。
+        Partner ID / Partner Keyがバックエンド環境に用意されているかを秘密値なしで確認し、在庫Schema・認証Schema・Structured Auth Mappingを照合します。外部通信・Token交換・署名・在庫更新は別承認まで無効です。
       </p>
 
       <div style={{ padding: 10, borderRadius: 8, background: 'rgba(120,53,15,.25)', color: '#fde68a', fontSize: 12, lineHeight: 1.6, marginBottom: 12 }}>
@@ -185,6 +218,11 @@ export function ShopeeSgBackendAuthReadinessPanel() {
         <div>
           認証・署名Schema: <strong style={{ color: latestAuthSchema && authSchemaFresh ? '#86efac' : '#fde68a' }}>
             {latestAuthSchema ? (authSchemaFresh ? '確認記録あり・90日以内' : '再確認必要') : '確認記録なし'}
+          </strong>
+        </div>
+        <div>
+          Structured Auth Mapping: <strong style={{ color: structuredMappingFresh ? '#86efac' : '#fde68a' }}>
+            {latestStructuredMapping ? (structuredMappingFresh ? '確認記録あり・利用可能' : '再確認必要') : '確認記録なし'}
           </strong>
         </div>
         {!credentialRefValid && <div style={{ color: '#fecaca' }}>認証情報参照名は SHOPEE_SG_ で始まる形式が必要です。</div>}
@@ -257,10 +295,36 @@ export function ShopeeSgBackendAuthReadinessPanel() {
         <div style={{ marginTop: 14, padding: 12, borderRadius: 9, background: 'rgba(4,47,46,.22)', border: '1px solid rgba(45,212,191,.3)', fontSize: 12, lineHeight: 1.75 }}>
           <div>Preview状態: <strong>{authorizationPreview.previewStatus}</strong></div>
           <div>確認済みEndpoint: <code>{authorizationPreview.authorizationEndpoint}</code></div>
-          <div>HTTP Method: <strong>{authorizationPreview.requestMethod}</strong>（未確認のため固定しません）</div>
+          <div>HTTP Method: <strong>{authorizationPreview.requestMethod}</strong>{authorizationPreview.requestMethod === 'UNVERIFIED' ? '（Structured Mapping未確認）' : '（Structured Mapping確認済み）'}</div>
+          <div>Structured Mapping ID: <code>{authorizationPreview.structuredMappingId || 'なし'}</code></div>
           <div>実行URL: <strong>生成なし</strong> / 署名値: <strong>生成なし</strong></div>
           <div>外部通信: <strong>{authorizationPreview.networkAction}</strong> / 送信許可: <strong>なし</strong></div>
           <div>Partner ID値返却: <strong>なし</strong> / Partner Key値返却: <strong>なし</strong></div>
+
+          {authorizationPreview.queryTemplate && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ color: '#99f6e4', fontWeight: 700 }}>Query wire mapping（値は未生成）</div>
+              {authorizationPreview.queryTemplate.map((entry) => (
+                <div key={entry.role}><code>{entry.role}</code> → <code>{entry.fieldName}</code> / {entry.valueSource}</div>
+              ))}
+            </div>
+          )}
+          {authorizationPreview.signatureTemplate && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ color: '#99f6e4', fontWeight: 700 }}>署名構造（署名値は未生成）</div>
+              <div>Algorithm: <code>{authorizationPreview.signatureTemplate.algorithm}</code></div>
+              <div>API Path: <code>{authorizationPreview.signatureTemplate.apiPath}</code></div>
+              <div>Base components: <code>{authorizationPreview.signatureTemplate.baseComponents.join(' → ')}</code></div>
+            </div>
+          )}
+          {authorizationPreview.callbackTemplate && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ color: '#99f6e4', fontWeight: 700 }}>Callback binding</div>
+              <div>Authorization code field: <code>{authorizationPreview.callbackTemplate.authorizationCodeField}</code></div>
+              <div>Shop ID field: <code>{authorizationPreview.callbackTemplate.shopIdField}</code></div>
+            </div>
+          )}
+
           <div style={{ marginTop: 8, color: '#99f6e4', fontWeight: 700 }}>実行可能化までの確認条件</div>
           {authorizationPreview.requirements.map((requirement) => (
             <div key={requirement.requirement} style={{ marginTop: 5 }}>
