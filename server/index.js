@@ -155,8 +155,10 @@ function shopeeAuthReadinessErrorStatus(error) {
     case 'INVALID_SHOPEE_CREDENTIAL_REF':
     case 'INVALID_SHOPEE_SHOP_ID':
     case 'INVALID_SHOPEE_SCHEMA_VERIFICATION':
+    case 'INVALID_SHOPEE_AUTH_SCHEMA_VERIFICATION':
       return 400;
     case 'STALE_SHOPEE_SCHEMA_VERIFICATION':
+    case 'STALE_SHOPEE_AUTH_SCHEMA_VERIFICATION':
       return 409;
     default:
       return 500;
