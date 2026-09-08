@@ -60,6 +60,7 @@ import { runEbaySandboxMutationGateTests } from './ebaySandboxMutationGate.test'
 import { runShopeeSgInventoryMappingTests } from './shopeeSgInventoryMapping.test';
 import { runShopeeSgApiSchemaVerificationTests } from './shopeeSgApiSchemaVerification.test';
 import { runShopeeSgAuthSchemaVerificationTests } from './shopeeSgAuthSchemaVerification.test';
+import { runShopeeSgStructuredAuthMappingTests } from './shopeeSgStructuredAuthMapping.test';
 import { runShopeeAutomationTests } from './shopeeAutomation.test';
 import { runI18nTests } from './i18n.test';
 import { runZonosAugust13ReadinessTests } from './zonosAugust13Readiness.test';
@@ -107,6 +108,7 @@ export function runAllAppTests(): MasterTestSummary {
     { name: 'Shopee SG Inventory Identity Mapping Safety Tests', fn: runShopeeSgInventoryMappingTests },
     { name: 'Shopee SG API Schema Verification Tests', fn: runShopeeSgApiSchemaVerificationTests },
     { name: 'Shopee SG Auth Schema Verification Tests', fn: runShopeeSgAuthSchemaVerificationTests },
+    { name: 'Shopee SG Structured Auth Mapping Tests', fn: runShopeeSgStructuredAuthMappingTests },
     { name: 'Shopee Automation & Optimization Scoring Tests', fn: runShopeeAutomationTests },
     { name: 'Internationalization (i18n) & Locale Formatter Tests', fn: runI18nTests },
     { name: 'Envelope Vector Layout & Safe Test Mode Tests', fn: runEnvelopeLayoutTests },
