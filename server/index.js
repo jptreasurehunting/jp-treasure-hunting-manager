@@ -16,6 +16,9 @@ const {
 const {
   executeEbaySandboxInventorySync
 } = require('./integrations/ebaySandboxInventorySyncBackend');
+const {
+  getShopeeSgAuthReadiness
+} = require('./integrations/shopeeSgAuthFoundationBackend');
 
 dotenv.config();
 
@@ -146,6 +149,31 @@ function sendSafeInventorySyncError(res, error) {
   });
 }
 
+function shopeeAuthReadinessErrorStatus(error) {
+  switch (error && error.code) {
+    case 'MISSING_SHOPEE_ACCOUNT_ID':
+    case 'INVALID_SHOPEE_CREDENTIAL_REF':
+    case 'INVALID_SHOPEE_SHOP_ID':
+    case 'INVALID_SHOPEE_SCHEMA_VERIFICATION':
+      return 400;
+    case 'STALE_SHOPEE_SCHEMA_VERIFICATION':
+      return 409;
+    default:
+      return 500;
+  }
+}
+
+function sendSafeShopeeAuthReadinessError(res, error) {
+  return res.status(shopeeAuthReadinessErrorStatus(error)).json({
+    success: false,
+    errorCode: error && error.code ? error.code : 'SHOPEE_SG_AUTH_READINESS_ERROR',
+    error: error && error.message ? error.message : 'Shopee SG authentication readiness check failed.',
+    networkAction: 'NONE',
+    externalWritePerformed: false,
+    secretValuesReturned: false
+  });
+}
+
 app.get('/health', async (req, res) => {
   res.json({ status: 'UP', database: dbReady ? 'READY' : 'NOT_READY', timestamp: new Date().toISOString() });
 });
@@ -187,6 +215,18 @@ app.post('/api/auth/mock-connect', async (req, res) => {
     res.json({ success: true, message: `Mock connection registered successfully for ${accountId} in ${environment} environment.` });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message || 'Failed to seed mock connection.' });
+  }
+});
+
+/**
+ * Reports only safe Shopee Singapore backend credential/configuration readiness metadata.
+ * This endpoint never contacts Shopee, never signs requests, and never returns Partner Key/token values.
+ */
+app.post('/api/shopee/sg/auth/readiness', (req, res) => {
+  try {
+    res.json(getShopeeSgAuthReadiness(req.body || {}));
+  } catch (err) {
+    return sendSafeShopeeAuthReadinessError(res, err);
   }
 });
 
