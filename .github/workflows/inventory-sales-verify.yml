@@ -55,6 +55,8 @@ jobs:
         run: npx tsx -e "import { runEbaySandboxMutationGateTests } from './src/services/__tests__/ebaySandboxMutationGate.test.ts'; const r = runEbaySandboxMutationGateTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
       - name: eBay Sandbox Backend Client Tests
         run: npx tsx src/services/__tests__/runEbaySandboxBackendClientTestsCli.ts
+      - name: Marketplace Sale Event Intake Safety Tests
+        run: npx tsx -e "import { runMarketplaceSaleEventTests } from './src/services/__tests__/marketplaceSaleEvent.test.ts'; const r = runMarketplaceSaleEventTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
       - name: Shopee SG Inventory Identity Mapping Safety Tests
         run: npx tsx -e "import { runShopeeSgInventoryMappingTests } from './src/services/__tests__/shopeeSgInventoryMapping.test.ts'; const r = runShopeeSgInventoryMappingTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
       - name: Full Test Suite
