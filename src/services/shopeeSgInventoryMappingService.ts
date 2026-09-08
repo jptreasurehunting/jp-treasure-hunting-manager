@@ -14,9 +14,14 @@ export type ShopeeSgCentralLinkStatus =
   | 'NOT_LINKED'
   | 'CONFLICT';
 
+export type ShopeeSgApiSchemaStatus =
+  | 'OFFICIAL_SCHEMA_REVIEW_REQUIRED'
+  | 'OFFICIAL_SCHEMA_VERIFIED';
+
 export type ShopeeSgInventoryMappingStatus =
   | 'REVIEW_REQUIRED'
-  | 'IDENTITY_VERIFIED_API_BLOCKED';
+  | 'IDENTITY_VERIFIED_API_BLOCKED'
+  | 'IDENTITY_VERIFIED_API_READY';
 
 export interface ShopeeSgInventoryMappingInput {
   sku: string;
@@ -39,8 +44,8 @@ export interface ShopeeSgInventoryMappingRecord extends ShopeeSgInventoryMapping
   status: ShopeeSgInventoryMappingStatus;
   centralLinkStatus: ShopeeSgCentralLinkStatus;
   centralBindingListingId?: string;
-  apiSchemaStatus: 'OFFICIAL_SCHEMA_REVIEW_REQUIRED';
-  externalWriteAllowed: false;
+  apiSchemaStatus: ShopeeSgApiSchemaStatus;
+  externalWriteAllowed: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -251,9 +256,9 @@ export function upsertShopeeSgInventoryMapping(
 
 export function isShopeeSgMappingReadyForInventoryWrite(record: ShopeeSgInventoryMappingRecord): boolean {
   return Boolean(
-    record.status === 'IDENTITY_VERIFIED_API_BLOCKED' &&
+    record.status === 'IDENTITY_VERIFIED_API_READY' &&
     record.centralLinkStatus === 'MATCHED' &&
-    record.apiSchemaStatus !== 'OFFICIAL_SCHEMA_REVIEW_REQUIRED' &&
+    record.apiSchemaStatus === 'OFFICIAL_SCHEMA_VERIFIED' &&
     record.externalWriteAllowed === true
   );
 }
