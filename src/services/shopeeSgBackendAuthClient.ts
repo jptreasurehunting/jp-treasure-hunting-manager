@@ -1,5 +1,9 @@
 import type { ShopeeSgApiSchemaVerificationRecord } from './shopeeSgApiSchemaVerificationService';
 import type { ShopeeSgAuthSchemaVerificationRecord } from './shopeeSgAuthSchemaVerificationService';
+import type {
+  ShopeeSgSignatureComponent,
+  ShopeeSgStructuredAuthMappingRecord
+} from './shopeeSgStructuredAuthMappingService';
 import {
   BackendSafeError,
   getConfiguredBackendBaseUrl
@@ -11,6 +15,7 @@ export interface ShopeeSgAuthReadinessInput {
   shopId: string;
   schemaVerification: ShopeeSgApiSchemaVerificationRecord;
   authSchemaVerification?: ShopeeSgAuthSchemaVerificationRecord;
+  structuredAuthorizationMapping?: ShopeeSgStructuredAuthMappingRecord;
 }
 
 export interface ShopeeSgAuthReadinessResponse {
@@ -91,20 +96,41 @@ export interface ShopeeSgAuthorizationPreviewRequirement {
   detail: string;
 }
 
+export interface ShopeeSgAuthorizationQueryTemplateEntry {
+  role: 'PARTNER_ID' | 'TIMESTAMP' | 'SIGNATURE' | 'REDIRECT_URI';
+  fieldName: string;
+  valueSource:
+    | 'BACKEND_PARTNER_ID'
+    | 'CURRENT_UNIX_TIMESTAMP'
+    | 'BACKEND_GENERATED_SIGNATURE'
+    | 'BACKEND_CONFIGURED_REDIRECT_URI';
+}
+
 export interface ShopeeSgAuthorizationRequestPreviewResponse {
   success: true;
   marketplace: 'Shopee';
   marketplaceRegion: 'SG';
   mode: 'AUTHORIZATION_REQUEST_PREVIEW_ONLY';
   stage: 'AUTHORIZATION_REQUEST_BUILD';
-  previewStatus: 'STRUCTURED_MAPPING_REQUIRED';
+  previewStatus: 'STRUCTURED_MAPPING_REQUIRED' | 'STRUCTURED_MAPPING_VERIFIED';
   accountId: string;
   shopId: string;
   credentialRef: string;
   inventorySchemaVerificationId: string;
   authSchemaVerificationId: string;
+  structuredMappingId: string | null;
   authorizationEndpoint: string;
-  requestMethod: 'UNVERIFIED';
+  requestMethod: 'UNVERIFIED' | 'GET' | 'POST';
+  queryTemplate: ShopeeSgAuthorizationQueryTemplateEntry[] | null;
+  signatureTemplate: {
+    algorithm: string;
+    baseComponents: ShopeeSgSignatureComponent[];
+    apiPath: string;
+  } | null;
+  callbackTemplate: {
+    authorizationCodeField: string;
+    shopIdField: string;
+  } | null;
   executableAuthorizationUrl: null;
   signatureValue: null;
   partnerIdValueReturned: false;
@@ -179,6 +205,27 @@ function safeAuthSchemaSnapshot(record: ShopeeSgAuthSchemaVerificationRecord) {
     status: record.status,
     officialSourceUrl: record.officialSourceUrl,
     authorizationEndpoint: record.authorizationEndpoint,
+    checkedAt: record.checkedAt,
+    currentSingaporeApplicabilityConfirmed: record.currentSingaporeApplicabilityConfirmed,
+    externalNetworkAllowed: record.externalNetworkAllowed,
+    externalWriteAllowed: record.externalWriteAllowed,
+    secretsStored: record.secretsStored
+  };
+}
+
+function safeStructuredMappingSnapshot(record: ShopeeSgStructuredAuthMappingRecord) {
+  return {
+    mappingId: record.mappingId,
+    marketplaceRegion: record.marketplaceRegion,
+    status: record.status,
+    authSchemaVerificationId: record.authSchemaVerificationId,
+    officialSourceUrl: record.officialSourceUrl,
+    authorizationEndpoint: record.authorizationEndpoint,
+    authorizationHttpMethod: record.authorizationHttpMethod,
+    authorizationQueryFieldNames: record.authorizationQueryFieldNames,
+    signatureAlgorithm: record.signatureAlgorithm,
+    signatureBaseComponents: record.signatureBaseComponents,
+    callbackFieldNames: record.callbackFieldNames,
     checkedAt: record.checkedAt,
     currentSingaporeApplicabilityConfirmed: record.currentSingaporeApplicabilityConfirmed,
     externalNetworkAllowed: record.externalNetworkAllowed,
@@ -287,7 +334,10 @@ export async function fetchShopeeSgAuthorizationRequestPreview(
       credentialRef,
       shopId,
       schemaVerification: safeSchemaSnapshot(input.schemaVerification),
-      authSchemaVerification: safeAuthSchemaSnapshot(input.authSchemaVerification)
+      authSchemaVerification: safeAuthSchemaSnapshot(input.authSchemaVerification),
+      structuredAuthorizationMapping: input.structuredAuthorizationMapping
+        ? safeStructuredMappingSnapshot(input.structuredAuthorizationMapping)
+        : undefined
     })
   });
 
