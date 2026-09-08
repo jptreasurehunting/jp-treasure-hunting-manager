@@ -15,4 +15,4 @@ import { runShopeeSgAuthSchemaVerificationTests } from './shopeeSgAuthSchemaVeri
 const result = runShopeeSgAuthSchemaVerificationTests();
 console.log(result.log.join('\n'));
 console.log(`Shopee SG Auth Schema Verification Tests: ${result.passed} passed, ${result.failed} failed`);
-if (result.failed > 0) process.exit(1);
+if (result.failed > 0) (globalThis as any).process?.exit(1);
