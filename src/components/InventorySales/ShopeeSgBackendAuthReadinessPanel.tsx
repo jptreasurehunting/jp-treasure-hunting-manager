@@ -10,8 +10,10 @@ import {
 import { loadShopeeSgInventoryMappings } from '../../services/shopeeSgInventoryMappingService';
 import {
   fetchShopeeSgAuthReadiness,
+  fetchShopeeSgAuthTransportPlan,
   isValidShopeeSgCredentialRef,
-  ShopeeSgAuthReadinessResponse
+  ShopeeSgAuthReadinessResponse,
+  ShopeeSgAuthTransportPlanResponse
 } from '../../services/shopeeSgBackendAuthClient';
 import {
   describeBackendError,
@@ -58,6 +60,7 @@ export function ShopeeSgBackendAuthReadinessPanel() {
   const [credentialRef, setCredentialRef] = useState('SHOPEE_SG_MAIN');
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<ShopeeSgAuthReadinessResponse | null>(null);
+  const [transportPlan, setTransportPlan] = useState<ShopeeSgAuthTransportPlanResponse | null>(null);
   const [message, setMessage] = useState('');
 
   const latestSchema = getLatestShopeeSgApiSchemaVerification();
@@ -66,19 +69,15 @@ export function ShopeeSgBackendAuthReadinessPanel() {
   const authSchemaFresh = isShopeeSgAuthSchemaVerificationFresh(latestAuthSchema);
   const credentialRefValid = isValidShopeeSgCredentialRef(credentialRef);
   const shopIdValid = /^[1-9]\d*$/.test(shopId.trim());
-  const canCheck = Boolean(
-    accountId.trim() &&
-    shopIdValid &&
-    credentialRefValid &&
-    latestSchema &&
-    schemaFresh &&
-    !checking
-  );
+  const baseReady = Boolean(accountId.trim() && shopIdValid && credentialRefValid && latestSchema && schemaFresh);
+  const canCheck = baseReady && !checking;
+  const canBuildTransportPlan = Boolean(baseReady && latestAuthSchema && authSchemaFresh && !checking);
 
   const check = async () => {
     if (!latestSchema || !canCheck) return;
     setChecking(true);
     setResult(null);
+    setTransportPlan(null);
     setMessage('');
     try {
       const response = await fetchShopeeSgAuthReadiness({
@@ -97,11 +96,33 @@ export function ShopeeSgBackendAuthReadinessPanel() {
     }
   };
 
+  const buildTransport = async () => {
+    if (!latestSchema || !latestAuthSchema || !canBuildTransportPlan) return;
+    setChecking(true);
+    setTransportPlan(null);
+    setMessage('');
+    try {
+      const response = await fetchShopeeSgAuthTransportPlan({
+        accountId,
+        shopId,
+        credentialRef,
+        schemaVerification: latestSchema,
+        authSchemaVerification: latestAuthSchema
+      });
+      setTransportPlan(response);
+      setMessage('✅ 認証Transportの契約だけを生成しました。全段階は未実装で、Shopee通信は行っていません。');
+    } catch (error) {
+      setMessage(`❌ ${describeBackendError(error)}`);
+    } finally {
+      setChecking(false);
+    }
+  };
+
   return (
     <section style={panelStyle}>
       <h3 style={{ margin: 0, color: '#f8fafc', fontSize: 20 }}>Shopee SG バックエンド認証準備</h3>
       <p style={{ margin: '6px 0 12px', color: '#94a3b8', fontSize: 13, lineHeight: 1.65 }}>
-        Partner ID / Partner Keyがバックエンド環境に用意されているかを秘密値なしで確認し、在庫Schemaと認証Schemaの確認状態を同時に照合します。Schema確認済みでも、認証Transportを実装・承認するまではShopee通信を開始しません。
+        Partner ID / Partner Keyがバックエンド環境に用意されているかを秘密値なしで確認し、在庫Schemaと認証Schemaを照合します。認証Transportは段階だけ定義し、外部通信・Token交換・署名・在庫更新は別承認まで無効です。
       </p>
 
       <div style={{ padding: 10, borderRadius: 8, background: 'rgba(120,53,15,.25)', color: '#fde68a', fontSize: 12, lineHeight: 1.6, marginBottom: 12 }}>
@@ -136,14 +157,24 @@ export function ShopeeSgBackendAuthReadinessPanel() {
         {shopId && !shopIdValid && <div style={{ color: '#fecaca' }}>Shop IDは正の整数IDで指定してください。</div>}
       </div>
 
-      <button
-        type="button"
-        onClick={() => void check()}
-        disabled={!canCheck}
-        style={{ marginTop: 12, borderRadius: 8, padding: '8px 11px', border: '1px solid rgba(96,165,250,.5)', background: canCheck ? 'rgba(37,99,235,.7)' : 'rgba(51,65,85,.65)', color: '#f8fafc', fontWeight: 700, cursor: canCheck ? 'pointer' : 'not-allowed' }}
-      >
-        {checking ? '確認中…' : 'バックエンド認証準備を確認（Shopee通信なし）'}
-      </button>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+        <button
+          type="button"
+          onClick={() => void check()}
+          disabled={!canCheck}
+          style={{ borderRadius: 8, padding: '8px 11px', border: '1px solid rgba(96,165,250,.5)', background: canCheck ? 'rgba(37,99,235,.7)' : 'rgba(51,65,85,.65)', color: '#f8fafc', fontWeight: 700, cursor: canCheck ? 'pointer' : 'not-allowed' }}
+        >
+          {checking ? '確認中…' : 'バックエンド認証準備を確認（Shopee通信なし）'}
+        </button>
+        <button
+          type="button"
+          onClick={() => void buildTransport()}
+          disabled={!canBuildTransportPlan}
+          style={{ borderRadius: 8, padding: '8px 11px', border: '1px solid rgba(167,139,250,.5)', background: canBuildTransportPlan ? 'rgba(109,40,217,.65)' : 'rgba(51,65,85,.65)', color: '#f8fafc', fontWeight: 700, cursor: canBuildTransportPlan ? 'pointer' : 'not-allowed' }}
+        >
+          認証Transport契約を生成（通信なし）
+        </button>
+      </div>
 
       {message && <div style={{ marginTop: 10, color: '#cbd5e1', fontSize: 12 }}>{message}</div>}
 
@@ -160,6 +191,22 @@ export function ShopeeSgBackendAuthReadinessPanel() {
           <div>秘密値返却: <strong>{result.secretValuesReturned ? 'あり' : 'なし'}</strong></div>
           <div style={{ marginTop: 8, color: '#fca5a5' }}>
             {result.blockingReasons.map((reason) => <div key={reason}>⛔ {reason}</div>)}
+          </div>
+        </div>
+      )}
+
+      {transportPlan && (
+        <div style={{ marginTop: 14, padding: 12, borderRadius: 9, background: 'rgba(46,16,101,.18)', border: '1px solid rgba(167,139,250,.3)', fontSize: 12, lineHeight: 1.75 }}>
+          <div>Transport状態: <strong>{transportPlan.transportImplementationStatus}</strong></div>
+          <div>外部通信: <strong>{transportPlan.networkAction}</strong> / 在庫書込: <strong>不可</strong> / 秘密値返却: <strong>なし</strong></div>
+          <div style={{ marginTop: 8, color: '#ddd6fe', fontWeight: 700 }}>段階</div>
+          {transportPlan.stages.map((stage) => (
+            <div key={stage.stage} style={{ marginTop: 5 }}>
+              <code>{stage.stage}</code> — <strong style={{ color: '#fecaca' }}>{stage.status}</strong> / Network: 禁止
+            </div>
+          ))}
+          <div style={{ marginTop: 8, color: '#fca5a5' }}>
+            {transportPlan.blockingReasons.map((reason) => <div key={reason}>⛔ {reason}</div>)}
           </div>
         </div>
       )}
