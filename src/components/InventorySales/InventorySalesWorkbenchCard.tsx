@@ -99,7 +99,7 @@ export function InventorySalesWorkbenchCard() {
 
       <InventoryImportPanel onInventoryChanged={reloadInventory} />
       <CrossChannelInventorySyncQueuePanel />
-      <ShopeeSgInventoryMappingPanel items={items} />
+      <ShopeeSgInventoryMappingPanel items={items} onInventoryChanged={reloadInventory} />
       <InventorySalesPriorityPanel items={items} />
       <ListingPreparationPanel items={items} />
       <ListingDraftReviewPanel items={items} />
