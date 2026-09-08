@@ -41,6 +41,50 @@ export interface ShopeeSgAuthReadinessResponse {
   blockingReasons: string[];
 }
 
+export interface ShopeeSgAuthTransportStage {
+  stage:
+    | 'AUTHORIZATION_REQUEST_BUILD'
+    | 'AUTHORIZATION_CALLBACK_VALIDATE'
+    | 'TOKEN_EXCHANGE'
+    | 'TOKEN_REFRESH'
+    | 'AUTHENTICATED_REQUEST_SIGNING'
+    | 'API_EXECUTION';
+  status: 'NOT_IMPLEMENTED';
+  networkAllowed: false;
+  secretsRequiredInBrowser: false;
+  description: string;
+}
+
+export interface ShopeeSgAuthTransportPlanResponse {
+  success: true;
+  marketplace: 'Shopee';
+  marketplaceRegion: 'SG';
+  accountId: string;
+  shopId: string;
+  credentialRef: string;
+  inventorySchemaVerificationId: string;
+  authSchemaVerificationId: string;
+  transportImplementationStatus: 'CONTRACT_ONLY';
+  credentialState: {
+    partnerIdConfigured: boolean;
+    partnerKeyConfigured: boolean;
+    credentialConfigured: boolean;
+  };
+  stages: ShopeeSgAuthTransportStage[];
+  canGenerateAuthorizationRequest: false;
+  canReceiveAuthorizationCallback: false;
+  canExchangeToken: false;
+  canRefreshToken: false;
+  canSignApiRequest: false;
+  canExecuteApi: false;
+  canWriteInventory: false;
+  networkAction: 'NONE';
+  externalWritePerformed: false;
+  secretValuesReturned: false;
+  requiresSeparateExecutionApproval: true;
+  blockingReasons: string[];
+}
+
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 function trimTrailingSlash(value: string): string {
@@ -102,11 +146,7 @@ function safeAuthSchemaSnapshot(record: ShopeeSgAuthSchemaVerificationRecord) {
   };
 }
 
-export async function fetchShopeeSgAuthReadiness(
-  input: ShopeeSgAuthReadinessInput,
-  baseUrl = getConfiguredBackendBaseUrl(),
-  fetchImpl?: FetchLike
-): Promise<ShopeeSgAuthReadinessResponse> {
+function normalizeSafeIdentity(input: ShopeeSgAuthReadinessInput) {
   const accountId = input.accountId.trim();
   const credentialRef = input.credentialRef.trim();
   const shopId = input.shopId.trim();
@@ -128,6 +168,16 @@ export async function fetchShopeeSgAuthReadiness(
     throw <BackendSafeError>{ success: false, errorCode: 'INVALID_SHOPEE_SCHEMA_VERIFICATION', error: 'Shopee SG公式API Schema確認記録が必要です。' };
   }
 
+  return { accountId, credentialRef, shopId };
+}
+
+export async function fetchShopeeSgAuthReadiness(
+  input: ShopeeSgAuthReadinessInput,
+  baseUrl = getConfiguredBackendBaseUrl(),
+  fetchImpl?: FetchLike
+): Promise<ShopeeSgAuthReadinessResponse> {
+  const { accountId, credentialRef, shopId } = normalizeSafeIdentity(input);
+
   const response = await requireFetch(fetchImpl)(`${trimTrailingSlash(baseUrl)}/api/shopee/sg/auth/readiness`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -143,4 +193,33 @@ export async function fetchShopeeSgAuthReadiness(
   });
 
   return parseJsonResponse<ShopeeSgAuthReadinessResponse>(response);
+}
+
+export async function fetchShopeeSgAuthTransportPlan(
+  input: ShopeeSgAuthReadinessInput,
+  baseUrl = getConfiguredBackendBaseUrl(),
+  fetchImpl?: FetchLike
+): Promise<ShopeeSgAuthTransportPlanResponse> {
+  const { accountId, credentialRef, shopId } = normalizeSafeIdentity(input);
+  if (!input.authSchemaVerification) {
+    throw <BackendSafeError>{
+      success: false,
+      errorCode: 'MISSING_SHOPEE_AUTH_SCHEMA_VERIFICATION',
+      error: 'Shopee SGの現在有効な認証・署名Schema確認記録が必要です。'
+    };
+  }
+
+  const response = await requireFetch(fetchImpl)(`${trimTrailingSlash(baseUrl)}/api/shopee/sg/auth/transport/plan`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      accountId,
+      credentialRef,
+      shopId,
+      schemaVerification: safeSchemaSnapshot(input.schemaVerification),
+      authSchemaVerification: safeAuthSchemaSnapshot(input.authSchemaVerification)
+    })
+  });
+
+  return parseJsonResponse<ShopeeSgAuthTransportPlanResponse>(response);
 }
