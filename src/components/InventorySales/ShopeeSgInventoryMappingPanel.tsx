@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { CentralInventoryItem } from '../../types/centralInventory';
 import {
+  attachShopeeSgMappingToCentralInventory,
   evaluateShopeeSgInventoryMapping,
   loadShopeeSgInventoryMappings,
   SHOPEE_SG_INVENTORY_MAPPING_CHANGED_EVENT,
@@ -61,10 +62,22 @@ const LINK_COLOR: Record<ShopeeSgInventoryMappingRecord['centralLinkStatus'], st
   CONFLICT: '#fecaca'
 };
 
-export function ShopeeSgInventoryMappingPanel({ items }: { items: CentralInventoryItem[] }) {
+export function ShopeeSgInventoryMappingPanel({
+  items,
+  onInventoryChanged
+}: {
+  items: CentralInventoryItem[];
+  onInventoryChanged?: () => void;
+}) {
   const [input, setInput] = useState<ShopeeSgInventoryMappingInput>(() => blankInput(items));
   const [records, setRecords] = useState<ShopeeSgInventoryMappingRecord[]>(() => loadShopeeSgInventoryMappings());
   const [message, setMessage] = useState('');
+  const [attachMappingId, setAttachMappingId] = useState<string>('');
+  const [attachStock, setAttachStock] = useState('');
+  const [attachStockConfirmed, setAttachStockConfirmed] = useState(false);
+  const [attachBy, setAttachBy] = useState('');
+  const [attachAt, setAttachAt] = useState(() => localDateTimeInputValue());
+  const [attachNote, setAttachNote] = useState('');
 
   useEffect(() => {
     if (!input.sku && items[0]?.sku) setInput((current) => ({ ...current, sku: items[0].sku }));
@@ -79,6 +92,15 @@ export function ShopeeSgInventoryMappingPanel({ items }: { items: CentralInvento
   const evaluation = useMemo(
     () => evaluateShopeeSgInventoryMapping(input, items, records),
     [input, items, records]
+  );
+
+  const selectedAttachRecord = useMemo(
+    () => records.find((record) => record.mappingId === attachMappingId),
+    [attachMappingId, records]
+  );
+  const selectedAttachItem = useMemo(
+    () => items.find((item) => item.sku === selectedAttachRecord?.sku),
+    [items, selectedAttachRecord]
   );
 
   const setField = <K extends keyof ShopeeSgInventoryMappingInput>(key: K, value: ShopeeSgInventoryMappingInput[K]) => {
@@ -109,6 +131,37 @@ export function ShopeeSgInventoryMappingPanel({ items }: { items: CentralInvento
     setMessage('保存済みMappingを編集欄へ読み込みました。変更後はSeller Centreで再確認して保存してください。');
   };
 
+  const beginAttach = (record: ShopeeSgInventoryMappingRecord) => {
+    setAttachMappingId(record.mappingId);
+    setAttachStock('');
+    setAttachStockConfirmed(false);
+    setAttachBy(record.checkedBy || '');
+    setAttachAt(localDateTimeInputValue());
+    setAttachNote('');
+    setMessage('Seller Centreで現在の在庫数を確認し、中央ATSと一致している場合だけBindingへ接続してください。');
+  };
+
+  const attach = () => {
+    const stock = attachStock.trim() === '' ? Number.NaN : Number(attachStock);
+    const result = attachShopeeSgMappingToCentralInventory({
+      mappingId: attachMappingId,
+      confirmedExternalStock: stock,
+      stockConfirmedInSellerCentre: attachStockConfirmed,
+      attachedBy: attachBy,
+      attachedAt: attachAt,
+      attachmentNote: attachNote
+    });
+    setMessage(result.messageJa);
+    if (result.success) {
+      setRecords(loadShopeeSgInventoryMappings());
+      setAttachMappingId('');
+      setAttachStock('');
+      setAttachStockConfirmed(false);
+      setAttachNote('');
+      onInventoryChanged?.();
+    }
+  };
+
   return (
     <section style={panelStyle}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
@@ -129,7 +182,7 @@ export function ShopeeSgInventoryMappingPanel({ items }: { items: CentralInvento
       </div>
 
       <div style={{ margin: '14px 0', padding: 11, borderRadius: 9, background: 'rgba(120,53,15,.25)', color: '#fde68a', fontSize: 12, lineHeight: 1.65 }}>
-        <strong>API書き込みは無効です。</strong> 現在のShopee Singapore Open Platform在庫更新Request Schemaは公式確認待ちです。この画面は商品Identityの紐付けだけを保存し、Partner Key・Secret・Access Token等の秘密情報は入力・保存しません。
+        <strong>API書き込みは無効です。</strong> 現在のShopee Singapore Open Platform在庫更新Request Schemaは公式確認待ちです。この画面は商品Identityと中央在庫Bindingの安全な対応付けだけを行い、Partner Key・Secret・Access Token等の秘密情報は入力・保存しません。
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
@@ -217,7 +270,7 @@ export function ShopeeSgInventoryMappingPanel({ items }: { items: CentralInvento
       {message && <div style={{ marginTop: 10, color: '#dbeafe', fontSize: 12 }}>{message}</div>}
 
       <div style={{ marginTop: 18, overflowX: 'auto' }}>
-        <table style={{ width: '100%', minWidth: 980, borderCollapse: 'collapse' }}>
+        <table style={{ width: '100%', minWidth: 1040, borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ color: '#94a3b8', fontSize: 11, textAlign: 'left' }}>
               <th style={{ padding: 8 }}>中央在庫</th>
@@ -226,7 +279,7 @@ export function ShopeeSgInventoryMappingPanel({ items }: { items: CentralInvento
               <th style={{ padding: 8 }}>中央Binding</th>
               <th style={{ padding: 8 }}>API状態</th>
               <th style={{ padding: 8 }}>確認</th>
-              <th style={{ padding: 8 }}></th>
+              <th style={{ padding: 8 }}>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -238,8 +291,11 @@ export function ShopeeSgInventoryMappingPanel({ items }: { items: CentralInvento
                 <td style={{ padding: 9, color: LINK_COLOR[record.centralLinkStatus], fontWeight: 700, fontSize: 12 }}>{LINK_LABEL[record.centralLinkStatus]}</td>
                 <td style={{ padding: 9, color: '#fde68a', fontSize: 12 }}>公式Schema確認待ち<br />外部書込: 無効</td>
                 <td style={{ padding: 9, color: '#94a3b8', fontSize: 12 }}>{record.checkedBy}<br />{new Date(record.checkedAt).toLocaleString()}</td>
-                <td style={{ padding: 9 }}>
+                <td style={{ padding: 9, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   <button type="button" onClick={() => loadForEdit(record)} style={{ borderRadius: 7, border: '1px solid rgba(148,163,184,.35)', background: 'rgba(30,41,59,.8)', color: '#e2e8f0', padding: '6px 8px', cursor: 'pointer' }}>編集</button>
+                  {record.centralLinkStatus === 'NOT_LINKED' && (
+                    <button type="button" onClick={() => beginAttach(record)} style={{ borderRadius: 7, border: '1px solid rgba(52,211,153,.4)', background: 'rgba(6,78,59,.45)', color: '#d1fae5', padding: '6px 8px', cursor: 'pointer' }}>中央在庫へ接続</button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -247,6 +303,41 @@ export function ShopeeSgInventoryMappingPanel({ items }: { items: CentralInvento
         </table>
         {records.length === 0 && <div style={{ color: '#64748b', fontSize: 12 }}>まだShopee SG商品Mappingはありません。</div>}
       </div>
+
+      {selectedAttachRecord && (
+        <div style={{ marginTop: 16, padding: 13, borderRadius: 10, border: '1px solid rgba(52,211,153,.28)', background: 'rgba(6,78,59,.16)' }}>
+          <h4 style={{ margin: '0 0 8px', color: '#d1fae5' }}>中央在庫Bindingへ接続</h4>
+          <div style={{ color: '#cbd5e1', fontSize: 12, lineHeight: 1.65 }}>
+            SKU: <strong>{selectedAttachRecord.sku}</strong> / Shopee Item ID: <strong>{selectedAttachRecord.shopeeItemId}</strong><br />
+            現在の中央ATS: <strong>{selectedAttachItem?.availableToSell ?? '不明'} 点</strong>。Seller Centreの現在在庫がこの数と一致していることを確認してから接続します。
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10, marginTop: 10 }}>
+            <label style={{ color: '#cbd5e1', fontSize: 12 }}>Seller Centreで確認した現在在庫
+              <input type="number" min="0" step="1" value={attachStock} onChange={(e) => setAttachStock(e.target.value)} style={{ ...inputStyle, marginTop: 5 }} />
+            </label>
+            <label style={{ color: '#cbd5e1', fontSize: 12 }}>接続確認者
+              <input value={attachBy} onChange={(e) => setAttachBy(e.target.value)} style={{ ...inputStyle, marginTop: 5 }} />
+            </label>
+            <label style={{ color: '#cbd5e1', fontSize: 12 }}>接続確認日時
+              <input type="datetime-local" value={attachAt} onChange={(e) => setAttachAt(e.target.value)} style={{ ...inputStyle, marginTop: 5 }} />
+            </label>
+          </div>
+          <label style={{ display: 'block', marginTop: 10, color: '#cbd5e1', fontSize: 12 }}>接続確認メモ
+            <input value={attachNote} onChange={(e) => setAttachNote(e.target.value)} style={{ ...inputStyle, marginTop: 5 }} placeholder="Seller Centre在庫と中央ATSの一致を確認" />
+          </label>
+          <label style={{ display: 'block', marginTop: 10, color: '#e2e8f0', fontSize: 13 }}>
+            <input type="checkbox" checked={attachStockConfirmed} onChange={(e) => setAttachStockConfirmed(e.target.checked)} />{' '}
+            Shopee Seller Centreに表示されている現在在庫数を確認した
+          </label>
+          <div style={{ marginTop: 10, color: '#fde68a', fontSize: 12, lineHeight: 1.6 }}>
+            接続後も <strong>isAutoSyncEnabled=false</strong> のままです。Shopee Open Platformの公式在庫API仕様と認証を確認するまでは、自動在庫書き込みを開始しません。
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <button type="button" onClick={attach} style={{ borderRadius: 8, border: '1px solid rgba(52,211,153,.45)', background: 'rgba(5,150,105,.55)', color: '#f0fdf4', padding: '8px 11px', fontWeight: 800, cursor: 'pointer' }}>確認して中央在庫へ接続</button>
+            <button type="button" onClick={() => setAttachMappingId('')} style={{ borderRadius: 8, border: '1px solid rgba(148,163,184,.35)', background: 'rgba(30,41,59,.75)', color: '#e2e8f0', padding: '8px 11px', cursor: 'pointer' }}>キャンセル</button>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
