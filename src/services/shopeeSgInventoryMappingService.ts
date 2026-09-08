@@ -1,4 +1,5 @@
 import type { CentralInventoryItem } from '../types/centralInventory';
+import { loadCentralInventory, saveCentralInventory } from './centralInventoryService';
 
 const STORAGE_KEY = 'jp_shopee_sg_inventory_mappings_v1';
 export const SHOPEE_SG_INVENTORY_MAPPING_CHANGED_EVENT = 'jp-shopee-sg-inventory-mapping-changed';
@@ -61,6 +62,22 @@ export interface ShopeeSgInventoryMappingEvaluation {
   canMarkIdentityVerified: boolean;
 }
 
+export interface ShopeeSgCentralBindingAttachInput {
+  mappingId: string;
+  confirmedExternalStock: number;
+  stockConfirmedInSellerCentre: boolean;
+  attachedBy: string;
+  attachedAt: string;
+  attachmentNote: string;
+}
+
+export interface ShopeeSgCentralBindingAttachResult {
+  success: boolean;
+  record?: ShopeeSgInventoryMappingRecord;
+  messageJa: string;
+  blockingReasons: string[];
+}
+
 function normalize(value: string | undefined): string {
   return String(value || '').trim();
 }
@@ -78,6 +95,22 @@ function getCentralLinkState(
   input: ShopeeSgInventoryMappingInput,
   items: CentralInventoryItem[]
 ): { status: ShopeeSgCentralLinkStatus; listingId?: string; warning?: string; blockingReason?: string } {
+  const boundElsewhere = items.find((candidate) =>
+    candidate.sku !== input.sku &&
+    candidate.channelBindings.some((binding) =>
+      binding.channel === 'Shopee' &&
+      binding.sellerAccountId === input.sellerAccountId &&
+      binding.channelListingId === input.shopeeItemId
+    )
+  );
+  if (boundElsewhere) {
+    return {
+      status: 'CONFLICT',
+      listingId: input.shopeeItemId,
+      blockingReason: `Shopee Item ID [${input.shopeeItemId}] は中央在庫の別SKU [${boundElsewhere.sku}] に既に紐付いています。`
+    };
+  }
+
   const item = items.find((candidate) => candidate.sku === input.sku);
   if (!item) {
     return {
@@ -251,6 +284,96 @@ export function upsertShopeeSgInventoryMapping(
     messageJa: evaluation.centralLinkStatus === 'MATCHED'
       ? 'Shopee SGの商品Identityと中央在庫Bindingの一致を保存しました。API書き込みはまだ無効です。'
       : 'Shopee SGの商品Identityを保存しました。中央在庫Bindingへの接続と公式API Schema確認が残っています。'
+  };
+}
+
+export function attachShopeeSgMappingToCentralInventory(
+  input: ShopeeSgCentralBindingAttachInput
+): ShopeeSgCentralBindingAttachResult {
+  const records = loadShopeeSgInventoryMappings();
+  const recordIndex = records.findIndex((record) => record.mappingId === normalize(input.mappingId));
+  if (recordIndex < 0) {
+    return { success: false, blockingReasons: ['対象のShopee SG商品Mappingが見つかりません。'], messageJa: '中央在庫Bindingへ接続できませんでした。' };
+  }
+
+  const record = records[recordIndex];
+  const blockingReasons: string[] = [];
+  const attachedBy = normalize(input.attachedBy);
+  const attachmentNote = normalize(input.attachmentNote);
+  const attachedAtMs = Date.parse(input.attachedAt);
+
+  if (record.status !== 'IDENTITY_VERIFIED_API_BLOCKED') blockingReasons.push('商品Identity確認済み・API停止中のMappingだけを中央在庫へ接続できます。');
+  if (record.centralLinkStatus === 'CONFLICT') blockingReasons.push('Mappingに中央在庫との不一致があります。先にItem ID/SKUを確認してください。');
+  if (record.centralLinkStatus === 'MATCHED') blockingReasons.push('このMappingはすでに中央在庫Bindingと一致しています。');
+  if (!Number.isInteger(input.confirmedExternalStock) || input.confirmedExternalStock < 0) blockingReasons.push('Seller Centreで確認した現在在庫は0以上の整数で入力してください。');
+  if (input.stockConfirmedInSellerCentre !== true) blockingReasons.push('Seller Centreに表示されている現在在庫の確認が必要です。');
+  if (!attachedBy) blockingReasons.push('Binding接続の確認者が必要です。');
+  if (!Number.isFinite(attachedAtMs)) blockingReasons.push('Binding接続の確認日時が不正です。');
+  if (!attachmentNote) blockingReasons.push('Binding接続の確認メモが必要です。');
+
+  const items = loadCentralInventory();
+  const itemIndex = items.findIndex((item) => item.sku === record.sku);
+  if (itemIndex < 0) blockingReasons.push(`中央在庫にSKU [${record.sku}] が存在しません。`);
+
+  const duplicateBindingItem = items.find((item) =>
+    item.sku !== record.sku &&
+    item.channelBindings.some((binding) =>
+      binding.channel === 'Shopee' &&
+      binding.sellerAccountId === record.sellerAccountId &&
+      binding.channelListingId === record.shopeeItemId
+    )
+  );
+  if (duplicateBindingItem) blockingReasons.push(`Shopee Item ID [${record.shopeeItemId}] は別SKU [${duplicateBindingItem.sku}] の中央在庫Bindingに使用されています。`);
+
+  const item = itemIndex >= 0 ? items[itemIndex] : undefined;
+  if (item) {
+    const sameAccountBinding = item.channelBindings.find((binding) =>
+      binding.channel === 'Shopee' && binding.sellerAccountId === record.sellerAccountId
+    );
+    if (sameAccountBinding) blockingReasons.push(`このSKUにはShopeeアカウント [${record.sellerAccountId}] のBindingが既にあります。`);
+    if (Number.isInteger(input.confirmedExternalStock) && input.confirmedExternalStock >= 0 && input.confirmedExternalStock !== item.availableToSell) {
+      blockingReasons.push(`Seller Centre確認在庫 ${input.confirmedExternalStock} 点と中央ATS ${item.availableToSell} 点が一致しません。接続前にShopee側を中央ATSへ手動調整し、再確認してください。`);
+    }
+  }
+
+  if (blockingReasons.length > 0 || !item) {
+    return {
+      success: false,
+      record,
+      blockingReasons,
+      messageJa: `中央在庫Bindingへ接続できません。${blockingReasons.join(' / ')}`
+    };
+  }
+
+  const confirmedAt = new Date(attachedAtMs).toISOString();
+  item.channelBindings.push({
+    channel: 'Shopee',
+    sellerAccountId: record.sellerAccountId,
+    channelListingId: record.shopeeItemId,
+    syncedStock: input.confirmedExternalStock,
+    syncStatus: input.confirmedExternalStock === 0 ? 'PAUSED' : 'SYNCED',
+    lastSyncedAt: confirmedAt,
+    isAutoSyncEnabled: false
+  });
+  items[itemIndex] = item;
+  saveCentralInventory(items);
+
+  const updatedRecord: ShopeeSgInventoryMappingRecord = {
+    ...record,
+    centralLinkStatus: 'MATCHED',
+    centralBindingListingId: record.shopeeItemId,
+    updatedAt: confirmedAt,
+    verificationNote: `${record.verificationNote} / Binding接続: ${attachmentNote} / 確認者: ${attachedBy}`
+  };
+  const nextRecords = [...records];
+  nextRecords[recordIndex] = updatedRecord;
+  saveShopeeSgInventoryMappings(nextRecords);
+
+  return {
+    success: true,
+    record: updatedRecord,
+    blockingReasons: [],
+    messageJa: `Shopee Item ID [${record.shopeeItemId}] を中央SKU [${record.sku}] に接続しました。確認在庫 ${input.confirmedExternalStock} 点を最後の外部確認値として保存しました。Shopee API自動同期はまだOFFです。`
   };
 }
 
