@@ -11,9 +11,11 @@ import { loadShopeeSgInventoryMappings } from '../../services/shopeeSgInventoryM
 import {
   fetchShopeeSgAuthReadiness,
   fetchShopeeSgAuthTransportPlan,
+  fetchShopeeSgAuthorizationRequestPreview,
   isValidShopeeSgCredentialRef,
   ShopeeSgAuthReadinessResponse,
-  ShopeeSgAuthTransportPlanResponse
+  ShopeeSgAuthTransportPlanResponse,
+  ShopeeSgAuthorizationRequestPreviewResponse
 } from '../../services/shopeeSgBackendAuthClient';
 import {
   describeBackendError,
@@ -53,6 +55,12 @@ function yesNo(value: boolean): string {
   return value ? '設定あり' : '未設定';
 }
 
+function requirementColor(status: string): string {
+  if (status === 'VERIFIED' || status === 'CONFIGURED') return '#86efac';
+  if (status === 'REVIEW_REQUIRED') return '#fde68a';
+  return '#fecaca';
+}
+
 export function ShopeeSgBackendAuthReadinessPanel() {
   const initial = useMemo(() => initialMappingIdentity(), []);
   const [accountId, setAccountId] = useState(initial.accountId);
@@ -61,6 +69,7 @@ export function ShopeeSgBackendAuthReadinessPanel() {
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<ShopeeSgAuthReadinessResponse | null>(null);
   const [transportPlan, setTransportPlan] = useState<ShopeeSgAuthTransportPlanResponse | null>(null);
+  const [authorizationPreview, setAuthorizationPreview] = useState<ShopeeSgAuthorizationRequestPreviewResponse | null>(null);
   const [message, setMessage] = useState('');
 
   const latestSchema = getLatestShopeeSgApiSchemaVerification();
@@ -72,12 +81,14 @@ export function ShopeeSgBackendAuthReadinessPanel() {
   const baseReady = Boolean(accountId.trim() && shopIdValid && credentialRefValid && latestSchema && schemaFresh);
   const canCheck = baseReady && !checking;
   const canBuildTransportPlan = Boolean(baseReady && latestAuthSchema && authSchemaFresh && !checking);
+  const canBuildAuthorizationPreview = canBuildTransportPlan;
 
   const check = async () => {
     if (!latestSchema || !canCheck) return;
     setChecking(true);
     setResult(null);
     setTransportPlan(null);
+    setAuthorizationPreview(null);
     setMessage('');
     try {
       const response = await fetchShopeeSgAuthReadiness({
@@ -100,6 +111,7 @@ export function ShopeeSgBackendAuthReadinessPanel() {
     if (!latestSchema || !latestAuthSchema || !canBuildTransportPlan) return;
     setChecking(true);
     setTransportPlan(null);
+    setAuthorizationPreview(null);
     setMessage('');
     try {
       const response = await fetchShopeeSgAuthTransportPlan({
@@ -111,6 +123,28 @@ export function ShopeeSgBackendAuthReadinessPanel() {
       });
       setTransportPlan(response);
       setMessage('✅ 認証Transportの契約だけを生成しました。全段階は未実装で、Shopee通信は行っていません。');
+    } catch (error) {
+      setMessage(`❌ ${describeBackendError(error)}`);
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const buildAuthorizationPreview = async () => {
+    if (!latestSchema || !latestAuthSchema || !canBuildAuthorizationPreview) return;
+    setChecking(true);
+    setAuthorizationPreview(null);
+    setMessage('');
+    try {
+      const response = await fetchShopeeSgAuthorizationRequestPreview({
+        accountId,
+        shopId,
+        credentialRef,
+        schemaVerification: latestSchema,
+        authSchemaVerification: latestAuthSchema
+      });
+      setAuthorizationPreview(response);
+      setMessage('✅ Authorization Request Previewを生成しました。実行URL・署名は生成せず、Shopee通信も行っていません。');
     } catch (error) {
       setMessage(`❌ ${describeBackendError(error)}`);
     } finally {
@@ -174,6 +208,14 @@ export function ShopeeSgBackendAuthReadinessPanel() {
         >
           認証Transport契約を生成（通信なし）
         </button>
+        <button
+          type="button"
+          onClick={() => void buildAuthorizationPreview()}
+          disabled={!canBuildAuthorizationPreview}
+          style={{ borderRadius: 8, padding: '8px 11px', border: '1px solid rgba(45,212,191,.5)', background: canBuildAuthorizationPreview ? 'rgba(13,148,136,.65)' : 'rgba(51,65,85,.65)', color: '#f8fafc', fontWeight: 700, cursor: canBuildAuthorizationPreview ? 'pointer' : 'not-allowed' }}
+        >
+          Authorization Request Preview（通信なし）
+        </button>
       </div>
 
       {message && <div style={{ marginTop: 10, color: '#cbd5e1', fontSize: 12 }}>{message}</div>}
@@ -207,6 +249,27 @@ export function ShopeeSgBackendAuthReadinessPanel() {
           ))}
           <div style={{ marginTop: 8, color: '#fca5a5' }}>
             {transportPlan.blockingReasons.map((reason) => <div key={reason}>⛔ {reason}</div>)}
+          </div>
+        </div>
+      )}
+
+      {authorizationPreview && (
+        <div style={{ marginTop: 14, padding: 12, borderRadius: 9, background: 'rgba(4,47,46,.22)', border: '1px solid rgba(45,212,191,.3)', fontSize: 12, lineHeight: 1.75 }}>
+          <div>Preview状態: <strong>{authorizationPreview.previewStatus}</strong></div>
+          <div>確認済みEndpoint: <code>{authorizationPreview.authorizationEndpoint}</code></div>
+          <div>HTTP Method: <strong>{authorizationPreview.requestMethod}</strong>（未確認のため固定しません）</div>
+          <div>実行URL: <strong>生成なし</strong> / 署名値: <strong>生成なし</strong></div>
+          <div>外部通信: <strong>{authorizationPreview.networkAction}</strong> / 送信許可: <strong>なし</strong></div>
+          <div>Partner ID値返却: <strong>なし</strong> / Partner Key値返却: <strong>なし</strong></div>
+          <div style={{ marginTop: 8, color: '#99f6e4', fontWeight: 700 }}>実行可能化までの確認条件</div>
+          {authorizationPreview.requirements.map((requirement) => (
+            <div key={requirement.requirement} style={{ marginTop: 5 }}>
+              <code>{requirement.requirement}</code> — <strong style={{ color: requirementColor(requirement.status) }}>{requirement.status}</strong>
+              <div style={{ color: '#94a3b8' }}>{requirement.detail}</div>
+            </div>
+          ))}
+          <div style={{ marginTop: 8, color: '#fca5a5' }}>
+            {authorizationPreview.blockingReasons.map((reason) => <div key={reason}>⛔ {reason}</div>)}
           </div>
         </div>
       )}
