@@ -5,6 +5,24 @@ const {
   validateAuthSchemaVerification
 } = require('./shopeeSgAuthFoundationBackend');
 
+const STRUCTURED_MAPPING_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
+const AUTHORIZATION_QUERY_ROLES = [
+  'PARTNER_ID',
+  'TIMESTAMP',
+  'SIGNATURE',
+  'REDIRECT_URI'
+];
+const SIGNATURE_COMPONENTS = [
+  'PARTNER_ID',
+  'API_PATH',
+  'TIMESTAMP',
+  'ACCESS_TOKEN',
+  'SHOP_ID',
+  'MERCHANT_ID',
+  'REDIRECT_URI',
+  'AUTHORIZATION_CODE'
+];
+
 function normalize(value) {
   return String(value || '').trim();
 }
@@ -27,6 +45,43 @@ function isShopeeServiceEndpoint(value) {
   } catch {
     return false;
   }
+}
+
+function isOfficialShopeeDocumentationUrl(value) {
+  try {
+    const url = new URL(normalize(value));
+    return url.protocol === 'https:' && (
+      url.hostname === 'open.shopee.com' ||
+      url.hostname.endsWith('.shopee.com')
+    );
+  } catch {
+    return false;
+  }
+}
+
+function normalizeEndpoint(value) {
+  try {
+    const url = new URL(normalize(value));
+    url.hash = '';
+    if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/, '');
+    return url.toString();
+  } catch {
+    return normalize(value);
+  }
+}
+
+function isSafeWireFieldName(value) {
+  return /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(normalize(value));
+}
+
+function hasDuplicate(values) {
+  return new Set(values).size !== values.length;
+}
+
+function hasExactRoleSet(values, allowed) {
+  if (!Array.isArray(values) || values.length !== allowed.length || hasDuplicate(values)) return false;
+  const allowedSet = new Set(allowed);
+  return values.every((value) => allowedSet.has(value));
 }
 
 function validateTransportIdentity(input) {
@@ -54,6 +109,176 @@ function validateTransportSchemas(input, now) {
     );
   }
   return { inventorySchema, authSchema };
+}
+
+function validateStructuredAuthorizationMapping(mapping, authSchema, rawAuthSchema, now) {
+  if (!mapping || typeof mapping !== 'object') return null;
+
+  const mappingId = normalize(mapping.mappingId);
+  const status = normalize(mapping.status);
+  const region = normalize(mapping.marketplaceRegion);
+  const authSchemaVerificationId = normalize(mapping.authSchemaVerificationId);
+  const officialSourceUrl = normalize(mapping.officialSourceUrl);
+  const authorizationEndpoint = normalize(mapping.authorizationEndpoint);
+  const authorizationHttpMethod = normalize(mapping.authorizationHttpMethod).toUpperCase();
+  const signatureAlgorithm = normalize(mapping.signatureAlgorithm);
+  const checkedAt = normalize(mapping.checkedAt);
+  const expectedAuthorizationEndpoint = normalize(rawAuthSchema && rawAuthSchema.authorizationEndpoint);
+
+  if (
+    !mappingId ||
+    status !== 'STRUCTURED_AUTH_MAPPING_VERIFIED' ||
+    region !== 'SG' ||
+    authSchemaVerificationId !== authSchema.verificationId
+  ) {
+    throw createError(
+      'INVALID_SHOPEE_STRUCTURED_AUTH_MAPPING',
+      'Shopee SG structured auth mapping must be verified, Singapore-scoped, and bound to the current auth schema verification.'
+    );
+  }
+  if (!isOfficialShopeeDocumentationUrl(officialSourceUrl)) {
+    throw createError(
+      'INVALID_SHOPEE_STRUCTURED_AUTH_MAPPING',
+      'Shopee SG structured auth mapping must reference an official Shopee HTTPS documentation source.'
+    );
+  }
+  if (
+    !isShopeeServiceEndpoint(authorizationEndpoint) ||
+    !isShopeeServiceEndpoint(expectedAuthorizationEndpoint) ||
+    normalizeEndpoint(authorizationEndpoint) !== normalizeEndpoint(expectedAuthorizationEndpoint)
+  ) {
+    throw createError(
+      'INVALID_SHOPEE_STRUCTURED_AUTH_MAPPING',
+      'Shopee SG structured auth mapping authorization endpoint must match the current verified auth schema endpoint.'
+    );
+  }
+  if (authorizationHttpMethod !== 'GET' && authorizationHttpMethod !== 'POST') {
+    throw createError(
+      'INVALID_SHOPEE_STRUCTURED_AUTH_MAPPING',
+      'Shopee SG structured auth mapping HTTP method must be GET or POST.'
+    );
+  }
+
+  const queryFields = mapping.authorizationQueryFieldNames;
+  if (!queryFields || typeof queryFields !== 'object') {
+    throw createError('INVALID_SHOPEE_STRUCTURED_AUTH_MAPPING', 'Structured authorization query field mapping is required.');
+  }
+  const normalizedQueryFields = {
+    partnerId: normalize(queryFields.partnerId),
+    timestamp: normalize(queryFields.timestamp),
+    signature: normalize(queryFields.signature),
+    redirectUri: normalize(queryFields.redirectUri)
+  };
+  const queryFieldValues = Object.values(normalizedQueryFields);
+  if (queryFieldValues.some((value) => !isSafeWireFieldName(value)) || hasDuplicate(queryFieldValues)) {
+    throw createError(
+      'INVALID_SHOPEE_STRUCTURED_AUTH_MAPPING',
+      'Structured authorization query wire names must be safe and unique.'
+    );
+  }
+
+  const authorizationQueryOrder = Array.isArray(mapping.authorizationQueryOrder)
+    ? mapping.authorizationQueryOrder.map((value) => normalize(value).toUpperCase())
+    : [];
+  if (!hasExactRoleSet(authorizationQueryOrder, AUTHORIZATION_QUERY_ROLES)) {
+    throw createError(
+      'INVALID_SHOPEE_STRUCTURED_AUTH_MAPPING',
+      'Structured authorization query order must contain each supported semantic role exactly once.'
+    );
+  }
+
+  const signatureBaseComponents = Array.isArray(mapping.signatureBaseComponents)
+    ? mapping.signatureBaseComponents.map((value) => normalize(value).toUpperCase())
+    : [];
+  if (
+    !signatureAlgorithm ||
+    signatureAlgorithm.length > 80 ||
+    signatureBaseComponents.length < 1 ||
+    signatureBaseComponents.length > 8 ||
+    hasDuplicate(signatureBaseComponents) ||
+    signatureBaseComponents.some((value) => !SIGNATURE_COMPONENTS.includes(value))
+  ) {
+    throw createError(
+      'INVALID_SHOPEE_STRUCTURED_AUTH_MAPPING',
+      'Structured signature algorithm and base components must be explicitly supported and non-duplicated.'
+    );
+  }
+
+  const callbackFields = mapping.callbackFieldNames;
+  if (!callbackFields || typeof callbackFields !== 'object') {
+    throw createError('INVALID_SHOPEE_STRUCTURED_AUTH_MAPPING', 'Structured callback field mapping is required.');
+  }
+  const normalizedCallbackFields = {
+    authorizationCode: normalize(callbackFields.authorizationCode),
+    shopId: normalize(callbackFields.shopId)
+  };
+  const callbackValues = Object.values(normalizedCallbackFields);
+  if (callbackValues.some((value) => !isSafeWireFieldName(value)) || hasDuplicate(callbackValues)) {
+    throw createError(
+      'INVALID_SHOPEE_STRUCTURED_AUTH_MAPPING',
+      'Structured callback wire names must be safe and unique.'
+    );
+  }
+
+  const checkedAtMs = Date.parse(checkedAt);
+  if (!Number.isFinite(checkedAtMs) || checkedAtMs > now || now - checkedAtMs > STRUCTURED_MAPPING_MAX_AGE_MS) {
+    throw createError(
+      'STALE_SHOPEE_STRUCTURED_AUTH_MAPPING',
+      'Shopee SG structured auth mapping is missing, future-dated, or older than 90 days.'
+    );
+  }
+  if (
+    mapping.currentSingaporeApplicabilityConfirmed !== true ||
+    mapping.externalNetworkAllowed !== false ||
+    mapping.externalWriteAllowed !== false ||
+    mapping.secretsStored !== false
+  ) {
+    throw createError(
+      'INVALID_SHOPEE_STRUCTURED_AUTH_MAPPING',
+      'Structured auth mapping must confirm current Singapore applicability and must not grant network/write permission or store secrets.'
+    );
+  }
+
+  return {
+    mappingId,
+    authSchemaVerificationId,
+    officialSourceUrl,
+    authorizationEndpoint,
+    authorizationHttpMethod,
+    authorizationQueryFieldNames: normalizedQueryFields,
+    authorizationQueryOrder,
+    signatureAlgorithm,
+    signatureBaseComponents,
+    callbackFieldNames: normalizedCallbackFields,
+    checkedAt: new Date(checkedAtMs).toISOString()
+  };
+}
+
+function buildAuthorizationQueryTemplate(mapping) {
+  const roleMap = {
+    PARTNER_ID: {
+      fieldName: mapping.authorizationQueryFieldNames.partnerId,
+      valueSource: 'BACKEND_PARTNER_ID'
+    },
+    TIMESTAMP: {
+      fieldName: mapping.authorizationQueryFieldNames.timestamp,
+      valueSource: 'CURRENT_UNIX_TIMESTAMP'
+    },
+    SIGNATURE: {
+      fieldName: mapping.authorizationQueryFieldNames.signature,
+      valueSource: 'BACKEND_GENERATED_SIGNATURE'
+    },
+    REDIRECT_URI: {
+      fieldName: mapping.authorizationQueryFieldNames.redirectUri,
+      valueSource: 'BACKEND_CONFIGURED_REDIRECT_URI'
+    }
+  };
+
+  return mapping.authorizationQueryOrder.map((role) => ({
+    role,
+    fieldName: roleMap[role].fieldName,
+    valueSource: roleMap[role].valueSource
+  }));
 }
 
 function buildShopeeSgAuthTransportPlan(input, now = Date.now()) {
@@ -148,13 +373,14 @@ function buildShopeeSgAuthTransportPlan(input, now = Date.now()) {
 
 /**
  * Produces only a non-executable preview of the first Shopee SG auth stage.
- * It intentionally does not infer query parameter names or signing components from prose.
- * No signature, Partner ID value, Partner Key value, or clickable authorization URL is returned.
+ * Free-text schema notes are never parsed into executable request fields.
+ * Even with a verified structured mapping, no signature, secret value, or clickable authorization URL is returned.
  */
 function buildShopeeSgAuthorizationRequestPreview(input, now = Date.now()) {
   const { accountId, shopId, credentialRef } = validateTransportIdentity(input);
   const { inventorySchema, authSchema } = validateTransportSchemas(input, now);
-  const authorizationEndpoint = normalize(input && input.authSchemaVerification && input.authSchemaVerification.authorizationEndpoint);
+  const rawAuthSchema = input && input.authSchemaVerification;
+  const authorizationEndpoint = normalize(rawAuthSchema && rawAuthSchema.authorizationEndpoint);
 
   if (!isShopeeServiceEndpoint(authorizationEndpoint)) {
     throw createError(
@@ -163,7 +389,15 @@ function buildShopeeSgAuthorizationRequestPreview(input, now = Date.now()) {
     );
   }
 
+  const structuredMapping = validateStructuredAuthorizationMapping(
+    input && input.structuredAuthorizationMapping,
+    authSchema,
+    rawAuthSchema,
+    now
+  );
   const credentialState = resolveShopeeSgCredentialMetadata(credentialRef);
+  const mappingVerified = Boolean(structuredMapping);
+
   const requirements = [
     {
       requirement: 'CURRENT_SG_AUTH_SCHEMA',
@@ -187,18 +421,24 @@ function buildShopeeSgAuthorizationRequestPreview(input, now = Date.now()) {
     },
     {
       requirement: 'STRUCTURED_AUTHORIZATION_QUERY_MAPPING',
-      status: 'REVIEW_REQUIRED',
-      detail: 'Exact authorization query field names/order are not yet stored as a machine-verifiable mapping.'
+      status: mappingVerified ? 'VERIFIED' : 'REVIEW_REQUIRED',
+      detail: mappingVerified
+        ? 'Exact authorization wire field names and explicit query-role order are machine-structured.'
+        : 'Exact authorization query field names/order are not yet stored as a machine-verifiable mapping.'
     },
     {
       requirement: 'STRUCTURED_SIGNATURE_BASE_COMPONENTS',
-      status: 'REVIEW_REQUIRED',
-      detail: 'The signing base components are still human-reviewed text and are not parsed or guessed by the backend.'
+      status: mappingVerified ? 'VERIFIED' : 'REVIEW_REQUIRED',
+      detail: mappingVerified
+        ? 'Signature algorithm label and base-component order are machine-structured without secret values.'
+        : 'The signing base components are still human-reviewed text and are not parsed or guessed by the backend.'
     },
     {
       requirement: 'CALLBACK_BINDING_CONTRACT',
-      status: 'REVIEW_REQUIRED',
-      detail: 'The exact callback fields and seller/shop binding checks are not yet machine-structured.'
+      status: mappingVerified ? 'VERIFIED' : 'REVIEW_REQUIRED',
+      detail: mappingVerified
+        ? 'Authorization-code and shop-ID callback wire names are machine-structured.'
+        : 'The exact callback fields and seller/shop binding checks are not yet machine-structured.'
     }
   ];
 
@@ -206,9 +446,19 @@ function buildShopeeSgAuthorizationRequestPreview(input, now = Date.now()) {
   if (!credentialState.credentialConfigured) {
     blockingReasons.push('Shopee SG backend Partner ID / Partner Key configuration is incomplete.');
   }
-  blockingReasons.push('Authorization query parameters are not machine-structured; the backend will not infer them from free-text notes.');
-  blockingReasons.push('Signature base components are not machine-structured; no signature is generated.');
-  blockingReasons.push('Callback binding is not machine-structured; authorization start remains disabled.');
+  if (!mappingVerified) {
+    blockingReasons.push('Authorization query parameters are not machine-structured; the backend will not infer them from free-text notes.');
+    blockingReasons.push('Signature base components are not machine-structured; no signature is generated.');
+    blockingReasons.push('Callback binding is not machine-structured; authorization start remains disabled.');
+  } else {
+    blockingReasons.push('Structured mapping is verified, but backend redirect-URI configuration and signature generation are not implemented in this preview-only stage.');
+    blockingReasons.push('Authorization start remains disabled until a separate execution gate explicitly permits external navigation/network action.');
+  }
+
+  let apiPath = null;
+  if (structuredMapping) {
+    apiPath = new URL(structuredMapping.authorizationEndpoint).pathname;
+  }
 
   return {
     success: true,
@@ -216,14 +466,25 @@ function buildShopeeSgAuthorizationRequestPreview(input, now = Date.now()) {
     marketplaceRegion: 'SG',
     mode: 'AUTHORIZATION_REQUEST_PREVIEW_ONLY',
     stage: 'AUTHORIZATION_REQUEST_BUILD',
-    previewStatus: 'STRUCTURED_MAPPING_REQUIRED',
+    previewStatus: mappingVerified ? 'STRUCTURED_MAPPING_VERIFIED' : 'STRUCTURED_MAPPING_REQUIRED',
     accountId,
     shopId,
     credentialRef,
     inventorySchemaVerificationId: inventorySchema.verificationId,
     authSchemaVerificationId: authSchema.verificationId,
+    structuredMappingId: structuredMapping ? structuredMapping.mappingId : null,
     authorizationEndpoint,
-    requestMethod: 'UNVERIFIED',
+    requestMethod: structuredMapping ? structuredMapping.authorizationHttpMethod : 'UNVERIFIED',
+    queryTemplate: structuredMapping ? buildAuthorizationQueryTemplate(structuredMapping) : null,
+    signatureTemplate: structuredMapping ? {
+      algorithm: structuredMapping.signatureAlgorithm,
+      baseComponents: structuredMapping.signatureBaseComponents,
+      apiPath
+    } : null,
+    callbackTemplate: structuredMapping ? {
+      authorizationCodeField: structuredMapping.callbackFieldNames.authorizationCode,
+      shopIdField: structuredMapping.callbackFieldNames.shopId
+    } : null,
     executableAuthorizationUrl: null,
     signatureValue: null,
     partnerIdValueReturned: false,
