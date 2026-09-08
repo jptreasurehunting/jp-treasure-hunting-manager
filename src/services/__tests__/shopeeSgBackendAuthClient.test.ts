@@ -1,5 +1,6 @@
 import {
   fetchShopeeSgAuthReadiness,
+  fetchShopeeSgAuthTransportPlan,
   isValidShopeeSgCredentialRef
 } from '../shopeeSgBackendAuthClient';
 import { describeBackendError } from '../ebaySandboxBackendClient';
@@ -206,6 +207,71 @@ export async function runShopeeSgBackendAuthClientTests(): Promise<{ passed: num
     assert(false, 'Test 10: Backend stale-auth-schema response should fail');
   } catch (error) {
     assert(describeBackendError(error).includes('STALE_SHOPEE_AUTH_SCHEMA_VERIFICATION'), 'Test 10: Safe stale-auth-schema backend error code is preserved');
+  }
+
+  let transportUrl = '';
+  let transportInit: RequestInit | undefined;
+  const transport = await fetchShopeeSgAuthTransportPlan({
+    accountId: ' shopee_sg_main ',
+    credentialRef: ' SHOPEE_SG_MAIN ',
+    shopId: ' 123456789 ',
+    schemaVerification,
+    authSchemaVerification
+  }, 'http://localhost:3001/', async (input, init) => {
+    transportUrl = String(input);
+    transportInit = init;
+    return jsonResponse({
+      success: true,
+      marketplace: 'Shopee', marketplaceRegion: 'SG', accountId: 'shopee_sg_main', shopId: '123456789', credentialRef: 'SHOPEE_SG_MAIN',
+      inventorySchemaVerificationId: 'schema-sg-1', authSchemaVerificationId: 'auth-schema-sg-1',
+      transportImplementationStatus: 'CONTRACT_ONLY',
+      credentialState: { partnerIdConfigured: true, partnerKeyConfigured: true, credentialConfigured: true },
+      stages: [
+        { stage: 'AUTHORIZATION_REQUEST_BUILD', status: 'NOT_IMPLEMENTED', networkAllowed: false, secretsRequiredInBrowser: false, description: 'contract only' },
+        { stage: 'AUTHORIZATION_CALLBACK_VALIDATE', status: 'NOT_IMPLEMENTED', networkAllowed: false, secretsRequiredInBrowser: false, description: 'contract only' },
+        { stage: 'TOKEN_EXCHANGE', status: 'NOT_IMPLEMENTED', networkAllowed: false, secretsRequiredInBrowser: false, description: 'contract only' },
+        { stage: 'TOKEN_REFRESH', status: 'NOT_IMPLEMENTED', networkAllowed: false, secretsRequiredInBrowser: false, description: 'contract only' },
+        { stage: 'AUTHENTICATED_REQUEST_SIGNING', status: 'NOT_IMPLEMENTED', networkAllowed: false, secretsRequiredInBrowser: false, description: 'contract only' },
+        { stage: 'API_EXECUTION', status: 'NOT_IMPLEMENTED', networkAllowed: false, secretsRequiredInBrowser: false, description: 'contract only' }
+      ],
+      canGenerateAuthorizationRequest: false, canReceiveAuthorizationCallback: false, canExchangeToken: false,
+      canRefreshToken: false, canSignApiRequest: false, canExecuteApi: false, canWriteInventory: false,
+      networkAction: 'NONE', externalWritePerformed: false, secretValuesReturned: false,
+      requiresSeparateExecutionApproval: true, blockingReasons: ['Transport is contract-only.']
+    });
+  });
+  assert(transportUrl === 'http://localhost:3001/api/shopee/sg/auth/transport/plan' && transportInit?.method === 'POST', 'Test 11: Transport plan uses dedicated backend-only contract endpoint');
+
+  const transportSent = JSON.parse(String(transportInit?.body || '{}'));
+  const transportSentText = JSON.stringify(transportSent).toLowerCase();
+  assert(
+    transportSent.authSchemaVerification.verificationId === 'auth-schema-sg-1' &&
+    !transportSentText.includes('partner_key') &&
+    !transportSentText.includes('access_token') &&
+    !transportSentText.includes('refresh_token'),
+    'Test 12: Transport planning sends schema evidence but no secrets or tokens'
+  );
+  assert(
+    transport.transportImplementationStatus === 'CONTRACT_ONLY' &&
+    transport.stages.length === 6 &&
+    transport.stages.every((stage) => stage.status === 'NOT_IMPLEMENTED' && stage.networkAllowed === false) &&
+    transport.canExecuteApi === false &&
+    transport.canWriteInventory === false &&
+    transport.networkAction === 'NONE',
+    'Test 13: Transport plan remains completely non-executable'
+  );
+
+  let missingAuthFetchCalled = false;
+  try {
+    await fetchShopeeSgAuthTransportPlan({
+      accountId: 'shopee_sg_main', credentialRef: 'SHOPEE_SG_MAIN', shopId: '123456789', schemaVerification
+    }, 'http://localhost:3001', async () => {
+      missingAuthFetchCalled = true;
+      return jsonResponse({});
+    });
+    assert(false, 'Test 14: Missing auth schema should fail before transport backend call');
+  } catch (error) {
+    assert(!missingAuthFetchCalled && describeBackendError(error).includes('MISSING_SHOPEE_AUTH_SCHEMA_VERIFICATION'), 'Test 14: Missing auth schema is blocked before transport backend call');
   }
 
   return { passed, failed, log };
