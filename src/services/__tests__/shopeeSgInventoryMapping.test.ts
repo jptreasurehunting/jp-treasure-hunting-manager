@@ -1,5 +1,5 @@
 import type { CentralInventoryItem } from '../../types/centralInventory';
-import { loadCentralInventory, saveCentralInventory } from '../centralInventoryService';
+import { getDefaultCentralInventory, loadCentralInventory, saveCentralInventory } from '../centralInventoryService';
 import {
   attachShopeeSgMappingToCentralInventory,
   evaluateShopeeSgInventoryMapping,
@@ -181,6 +181,9 @@ export function runShopeeSgInventoryMappingTests(): { passed: number; failed: nu
   const updatedMapping = loadShopeeSgInventoryMappings().find((record) => record.mappingId === attachBase.mappingId)!;
   assert(updatedMapping.centralLinkStatus === 'MATCHED' && updatedMapping.centralBindingListingId === '333333333', 'Test 20: Successful attachment updates the Shopee Mapping to MATCHED');
   assert(!isShopeeSgMappingReadyForInventoryWrite(updatedMapping), 'Test 21: Matched Central Binding still cannot write to Shopee while official API schema is unverified');
+
+  // Keep the master suite isolated: later Shopee optimization tests expect the default demo inventory.
+  saveCentralInventory(getDefaultCentralInventory());
 
   return { passed, failed, log };
 }
