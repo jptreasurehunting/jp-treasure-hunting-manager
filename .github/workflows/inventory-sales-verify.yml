@@ -55,16 +55,22 @@ jobs:
         run: npx tsx -e "import { runEbaySandboxMutationGateTests } from './src/services/__tests__/ebaySandboxMutationGate.test.ts'; const r = runEbaySandboxMutationGateTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
       - name: eBay Sandbox Backend Client Tests
         run: npx tsx src/services/__tests__/runEbaySandboxBackendClientTestsCli.ts
+      - name: eBay Sandbox Inventory Sync Client Tests
+        run: npx tsx src/services/__tests__/runEbaySandboxInventorySyncClientTestsCli.ts
       - name: Marketplace Sale Event Intake Safety Tests
         run: npx tsx -e "import { runMarketplaceSaleEventTests } from './src/services/__tests__/marketplaceSaleEvent.test.ts'; const r = runMarketplaceSaleEventTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
       - name: Shopee SG Inventory Identity Mapping Safety Tests
         run: npx tsx -e "import { runShopeeSgInventoryMappingTests } from './src/services/__tests__/shopeeSgInventoryMapping.test.ts'; const r = runShopeeSgInventoryMappingTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
+      - name: Shopee SG API Schema Verification Tests
+        run: npx tsx -e "import { runShopeeSgApiSchemaVerificationTests } from './src/services/__tests__/shopeeSgApiSchemaVerification.test.ts'; const r = runShopeeSgApiSchemaVerificationTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
+      - name: Shopee SG Backend Auth Readiness Tests
+        run: npx tsx src/services/__tests__/runShopeeSgBackendAuthClientTestsCli.ts
       - name: Full Test Suite
         run: npm run test:all
       - name: Install backend dependencies
         working-directory: server
         run: npm ci
-      - name: Backend Security and eBay Sandbox OAuth Tests
+      - name: Backend Security and Marketplace Auth Tests
         working-directory: server
         run: npm test
       - name: Production Build
