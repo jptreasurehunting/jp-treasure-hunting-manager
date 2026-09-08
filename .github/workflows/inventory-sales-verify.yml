@@ -61,6 +61,8 @@ jobs:
         run: npx tsx -e "import { runShopeeSgInventoryMappingTests } from './src/services/__tests__/shopeeSgInventoryMapping.test.ts'; const r = runShopeeSgInventoryMappingTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
       - name: Shopee SG API Schema Verification Tests
         run: npx tsx src/services/__tests__/runShopeeSgApiSchemaVerificationTestsCli.ts
+      - name: Shopee SG Auth Schema Verification Tests
+        run: npx tsx src/services/__tests__/runShopeeSgAuthSchemaVerificationTestsCli.ts
       - name: Shopee SG Backend Auth Readiness Tests
         run: npx tsx src/services/__tests__/runShopeeSgBackendAuthClientTestsCli.ts
       - name: Full Test Suite
