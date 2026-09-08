@@ -9,8 +9,10 @@ import {
   getLatestShopeeSgStructuredAuthMapping,
   isShopeeSgStructuredAuthMappingFresh,
   recordShopeeSgStructuredAuthMapping,
+  SHOPEE_SG_AUTHORIZATION_QUERY_ROLES,
   SHOPEE_SG_SIGNATURE_COMPONENTS,
   ShopeeSgAuthorizationHttpMethod,
+  ShopeeSgAuthorizationQueryRole,
   ShopeeSgSignatureComponent,
   ShopeeSgStructuredAuthMappingInput
 } from '../../services/shopeeSgStructuredAuthMappingService';
@@ -45,6 +47,7 @@ type FormState = {
   timestampField: string;
   signatureField: string;
   redirectUriField: string;
+  authorizationQueryOrderText: string;
   signatureAlgorithm: string;
   signatureBaseComponentsText: string;
   callbackAuthorizationCodeField: string;
@@ -56,11 +59,18 @@ type FormState = {
   currentSingaporeApplicabilityConfirmed: boolean;
 };
 
-function parseComponents(text: string): ShopeeSgSignatureComponent[] {
+function parseSignatureComponents(text: string): ShopeeSgSignatureComponent[] {
   return text
     .split(',')
     .map((value) => value.trim().toUpperCase())
     .filter(Boolean) as ShopeeSgSignatureComponent[];
+}
+
+function parseQueryRoles(text: string): ShopeeSgAuthorizationQueryRole[] {
+  return text
+    .split(',')
+    .map((value) => value.trim().toUpperCase())
+    .filter(Boolean) as ShopeeSgAuthorizationQueryRole[];
 }
 
 function makeInput(form: FormState, authSchema: ReturnType<typeof getLatestShopeeSgAuthSchemaVerification>): ShopeeSgStructuredAuthMappingInput {
@@ -75,8 +85,9 @@ function makeInput(form: FormState, authSchema: ReturnType<typeof getLatestShope
       signature: form.signatureField,
       redirectUri: form.redirectUriField
     },
+    authorizationQueryOrder: parseQueryRoles(form.authorizationQueryOrderText),
     signatureAlgorithm: form.signatureAlgorithm,
-    signatureBaseComponents: parseComponents(form.signatureBaseComponentsText),
+    signatureBaseComponents: parseSignatureComponents(form.signatureBaseComponentsText),
     callbackFieldNames: {
       authorizationCode: form.callbackAuthorizationCodeField,
       shopId: form.callbackShopIdField
@@ -108,6 +119,7 @@ export function ShopeeSgStructuredAuthMappingPanel() {
     timestampField: '',
     signatureField: '',
     redirectUriField: '',
+    authorizationQueryOrderText: '',
     signatureAlgorithm: '',
     signatureBaseComponentsText: '',
     callbackAuthorizationCodeField: '',
@@ -154,7 +166,7 @@ export function ShopeeSgStructuredAuthMappingPanel() {
     <section style={panelStyle}>
       <h3 style={{ margin: 0, color: '#f8fafc', fontSize: 20 }}>Shopee SG Structured Auth Mapping</h3>
       <p style={{ margin: '6px 0 12px', color: '#94a3b8', fontSize: 13, lineHeight: 1.65 }}>
-        前段の認証Schema確認で保存した文章を、そのままプログラムが解釈することはしません。公式本文で確認したwire項目名、HTTP Method、署名base stringのcomponent順、Callback項目名だけを構造化して固定します。
+        前段の認証Schema確認で保存した文章を、そのままプログラムが解釈することはしません。公式本文で確認したwire項目名、Query順序、HTTP Method、署名base stringのcomponent順、Callback項目名だけを構造化して固定します。
       </p>
 
       <div style={{ padding: 10, borderRadius: 8, background: 'rgba(120,53,15,.25)', color: '#fde68a', fontSize: 12, lineHeight: 1.6, marginBottom: 12 }}>
@@ -209,6 +221,13 @@ export function ShopeeSgStructuredAuthMappingPanel() {
         <label style={{ color: '#cbd5e1', fontSize: 12 }}>確認日時
           <input type="datetime-local" style={{ ...inputStyle, marginTop: 5 }} value={form.checkedAt} onChange={(e) => update('checkedAt', e.target.value)} />
         </label>
+      </div>
+
+      <label style={{ display: 'block', color: '#cbd5e1', fontSize: 12, marginTop: 10 }}>Authorization Query順序（役割名をカンマ区切り）
+        <input style={{ ...inputStyle, marginTop: 5 }} value={form.authorizationQueryOrderText} onChange={(e) => update('authorizationQueryOrderText', e.target.value)} placeholder="公式本文で確認した順序だけを入力" />
+      </label>
+      <div style={{ color: '#64748b', fontSize: 11, marginTop: 4, lineHeight: 1.5 }}>
+        4役割を各1回: {SHOPEE_SG_AUTHORIZATION_QUERY_ROLES.join(', ')}。画面側で既定順序を決めず、確認した順序を明示的に記録します。
       </div>
 
       <label style={{ display: 'block', color: '#cbd5e1', fontSize: 12, marginTop: 10 }}>署名base string component順（カンマ区切り）
