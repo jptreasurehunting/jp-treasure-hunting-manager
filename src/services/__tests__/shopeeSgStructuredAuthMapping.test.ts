@@ -57,6 +57,7 @@ export function runShopeeSgStructuredAuthMappingTests(): { passed: number; faile
       signature: 'sign',
       redirectUri: 'redirect'
     },
+    authorizationQueryOrder: ['PARTNER_ID', 'TIMESTAMP', 'SIGNATURE', 'REDIRECT_URI'],
     signatureAlgorithm: 'OFFICIAL_ALGORITHM_LABEL',
     signatureBaseComponents: ['PARTNER_ID', 'API_PATH', 'TIMESTAMP'],
     callbackFieldNames: {
@@ -101,32 +102,38 @@ export function runShopeeSgStructuredAuthMappingTests(): { passed: number; faile
   }, authSchema, now);
   assert(!duplicateWire.canRecord && duplicateWire.blockingReasons.some((reason) => reason.includes('重複')), 'Test 8: Duplicate authorization query field mappings are blocked');
 
+  const invalidQueryOrder = evaluateShopeeSgStructuredAuthMapping({
+    ...validInput,
+    authorizationQueryOrder: ['PARTNER_ID', 'TIMESTAMP', 'SIGNATURE', 'SIGNATURE'] as any
+  }, authSchema, now);
+  assert(!invalidQueryOrder.canRecord && invalidQueryOrder.blockingReasons.some((reason) => reason.includes('Query順序')), 'Test 9: Query order must contain each structured role exactly once');
+
   const unsupportedComponent = evaluateShopeeSgStructuredAuthMapping({
     ...validInput,
     signatureBaseComponents: ['PARTNER_ID', 'API_PATH', 'UNKNOWN_COMPONENT' as any]
   }, authSchema, now);
-  assert(!unsupportedComponent.canRecord && unsupportedComponent.blockingReasons.some((reason) => reason.includes('未対応')), 'Test 9: Unknown signature components are blocked instead of guessed');
+  assert(!unsupportedComponent.canRecord && unsupportedComponent.blockingReasons.some((reason) => reason.includes('未対応')), 'Test 10: Unknown signature components are blocked instead of guessed');
 
   const mismatchedSchema = evaluateShopeeSgStructuredAuthMapping({
     ...validInput,
     authSchemaVerificationId: 'another-auth-schema'
   }, authSchema, now);
-  assert(!mismatchedSchema.canRecord && mismatchedSchema.blockingReasons.some((reason) => reason.includes('verificationId')), 'Test 10: Mapping cannot attach to a different auth schema verification');
+  assert(!mismatchedSchema.canRecord && mismatchedSchema.blockingReasons.some((reason) => reason.includes('verificationId')), 'Test 11: Mapping cannot attach to a different auth schema verification');
 
   const mismatchedEndpoint = evaluateShopeeSgStructuredAuthMapping({
     ...validInput,
     authorizationEndpoint: 'https://partner.shopeemobile.com/api/v2/shop/another_auth_path'
   }, authSchema, now);
-  assert(!mismatchedEndpoint.canRecord && mismatchedEndpoint.blockingReasons.some((reason) => reason.includes('Endpoint')), 'Test 11: Mapping endpoint must match the verified auth schema endpoint');
+  assert(!mismatchedEndpoint.canRecord && mismatchedEndpoint.blockingReasons.some((reason) => reason.includes('Endpoint')), 'Test 12: Mapping endpoint must match the verified auth schema endpoint');
 
   const staleMapping = { ...stored[0], checkedAt: '2026-05-01T00:00:00.000Z' };
-  assert(!isShopeeSgStructuredAuthMappingFresh(staleMapping, authSchema, now), 'Test 12: Old structured mapping expires instead of being treated as permanently valid');
+  assert(!isShopeeSgStructuredAuthMappingFresh(staleMapping, authSchema, now), 'Test 13: Old structured mapping expires instead of being treated as permanently valid');
 
   const leakedSecret = evaluateShopeeSgStructuredAuthMapping({
     ...validInput,
     verificationNote: 'partner_key=THIS_LOOKS_LIKE_A_REAL_SECRET_123456789'
   }, authSchema, now);
-  assert(!leakedSecret.canRecord && leakedSecret.blockingReasons.some((reason) => reason.includes('秘密値')), 'Test 13: Secret-like values are blocked from structured mapping storage');
+  assert(!leakedSecret.canRecord && leakedSecret.blockingReasons.some((reason) => reason.includes('秘密値')), 'Test 14: Secret-like values are blocked from structured mapping storage');
 
   const newerAuthSchema: ShopeeSgAuthSchemaVerificationRecord = {
     ...authSchema,
@@ -135,10 +142,10 @@ export function runShopeeSgStructuredAuthMappingTests(): { passed: number; faile
     createdAt: '2026-09-08T03:45:00.000Z',
     updatedAt: '2026-09-08T03:45:00.000Z'
   };
-  assert(!isShopeeSgStructuredAuthMappingFresh(stored[0], newerAuthSchema, now), 'Test 14: A new auth schema verification invalidates the old structured mapping');
+  assert(!isShopeeSgStructuredAuthMappingFresh(stored[0], newerAuthSchema, now), 'Test 15: A new auth schema verification invalidates the old structured mapping');
 
   saveShopeeSgStructuredAuthMappings([]);
-  assert(loadShopeeSgStructuredAuthMappings().length === 0, 'Test 15: Structured mapping storage can be reset without affecting other records');
+  assert(loadShopeeSgStructuredAuthMappings().length === 0, 'Test 16: Structured mapping storage can be reset without affecting other records');
 
   return { passed, failed, log };
 }
