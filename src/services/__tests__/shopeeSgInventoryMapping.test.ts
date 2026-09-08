@@ -1,5 +1,7 @@
 import type { CentralInventoryItem } from '../../types/centralInventory';
+import { loadCentralInventory, saveCentralInventory } from '../centralInventoryService';
 import {
+  attachShopeeSgMappingToCentralInventory,
   evaluateShopeeSgInventoryMapping,
   isShopeeSgMappingReadyForInventoryWrite,
   loadShopeeSgInventoryMappings,
@@ -128,6 +130,57 @@ export function runShopeeSgInventoryMappingTests(): { passed: number; failed: nu
 
   const modelVerified = evaluateShopeeSgInventoryMapping(validInput({ modelResolutionStatus: 'MODEL_ID_VERIFIED', shopeeModelId: '555555555' }), noBindingItems, []);
   assert(modelVerified.canSave && modelVerified.normalized.shopeeModelId === '555555555', 'Test 14: A verified positive Shopee Model ID is accepted');
+
+  const elsewhereBindingItems = [
+    item('SKU-001'),
+    item('SKU-002', [{
+      channel: 'Shopee',
+      sellerAccountId: 'shopee_sg_main',
+      channelListingId: '987654321',
+      syncedStock: 3,
+      syncStatus: 'SYNCED',
+      lastSyncedAt: '2026-09-08T00:00:00.000Z',
+      isAutoSyncEnabled: false
+    }])
+  ];
+  const elsewhereConflict = evaluateShopeeSgInventoryMapping(validInput(), elsewhereBindingItems, []);
+  assert(elsewhereConflict.centralLinkStatus === 'CONFLICT' && !elsewhereConflict.canSave, 'Test 15: A Shopee Item ID already bound to another Central SKU is blocked globally');
+
+  localStorage.clear();
+  const attachItems = [item('SKU-ATTACH-001')];
+  saveCentralInventory(attachItems);
+  const attachMapping = upsertShopeeSgInventoryMapping(validInput({
+    sku: 'SKU-ATTACH-001',
+    shopId: '222222222',
+    shopeeItemId: '333333333'
+  }), attachItems, '2026-09-08T00:10:00.000Z');
+  const attachBase = {
+    mappingId: attachMapping.record!.mappingId,
+    confirmedExternalStock: 3,
+    stockConfirmedInSellerCentre: true,
+    attachedBy: 'owner',
+    attachedAt: '2026-09-08T00:15:00.000Z',
+    attachmentNote: 'Seller Centreの現在在庫3点と中央ATS3点の一致を確認。'
+  };
+
+  const missingStockConfirmation = attachShopeeSgMappingToCentralInventory({ ...attachBase, stockConfirmedInSellerCentre: false });
+  assert(!missingStockConfirmation.success && missingStockConfirmation.blockingReasons.some((reason) => reason.includes('現在在庫の確認')), 'Test 16: Central Binding attachment requires explicit Seller Centre stock confirmation');
+
+  const mismatchStock = attachShopeeSgMappingToCentralInventory({ ...attachBase, confirmedExternalStock: 2 });
+  assert(!mismatchStock.success && mismatchStock.blockingReasons.some((reason) => reason.includes('中央ATS 3 点')), 'Test 17: Binding attachment blocks when confirmed Shopee stock differs from Central ATS');
+
+  const attached = attachShopeeSgMappingToCentralInventory(attachBase);
+  const attachedCentral = loadCentralInventory().find((candidate) => candidate.sku === 'SKU-ATTACH-001')!;
+  const attachedBinding = attachedCentral.channelBindings.find((binding) => binding.channel === 'Shopee')!;
+  assert(
+    attached.success && attachedBinding.channelListingId === '333333333' && attachedBinding.syncedStock === 3 && attachedBinding.syncStatus === 'SYNCED',
+    'Test 18: Confirmed matching Shopee stock creates the Central Inventory Binding with the observed stock'
+  );
+  assert(attachedBinding.isAutoSyncEnabled === false, 'Test 19: Newly attached Shopee Binding keeps automatic inventory writes disabled');
+
+  const updatedMapping = loadShopeeSgInventoryMappings().find((record) => record.mappingId === attachBase.mappingId)!;
+  assert(updatedMapping.centralLinkStatus === 'MATCHED' && updatedMapping.centralBindingListingId === '333333333', 'Test 20: Successful attachment updates the Shopee Mapping to MATCHED');
+  assert(!isShopeeSgMappingReadyForInventoryWrite(updatedMapping), 'Test 21: Matched Central Binding still cannot write to Shopee while official API schema is unverified');
 
   return { passed, failed, log };
 }
