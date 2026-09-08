@@ -19,6 +19,9 @@ const {
 const {
   getShopeeSgAuthReadiness
 } = require('./integrations/shopeeSgAuthFoundationBackend');
+const {
+  buildShopeeSgAuthTransportPlan
+} = require('./integrations/shopeeSgAuthTransportBackend');
 
 dotenv.config();
 
@@ -156,6 +159,7 @@ function shopeeAuthReadinessErrorStatus(error) {
     case 'INVALID_SHOPEE_SHOP_ID':
     case 'INVALID_SHOPEE_SCHEMA_VERIFICATION':
     case 'INVALID_SHOPEE_AUTH_SCHEMA_VERIFICATION':
+    case 'MISSING_SHOPEE_AUTH_SCHEMA_VERIFICATION':
       return 400;
     case 'STALE_SHOPEE_SCHEMA_VERIFICATION':
     case 'STALE_SHOPEE_AUTH_SCHEMA_VERIFICATION':
@@ -227,6 +231,18 @@ app.post('/api/auth/mock-connect', async (req, res) => {
 app.post('/api/shopee/sg/auth/readiness', (req, res) => {
   try {
     res.json(getShopeeSgAuthReadiness(req.body || {}));
+  } catch (err) {
+    return sendSafeShopeeAuthReadinessError(res, err);
+  }
+});
+
+/**
+ * Builds a contract-only Shopee Singapore auth transport plan.
+ * Every external/auth/signing stage stays NOT_IMPLEMENTED and networkAction remains NONE.
+ */
+app.post('/api/shopee/sg/auth/transport/plan', (req, res) => {
+  try {
+    res.json(buildShopeeSgAuthTransportPlan(req.body || {}));
   } catch (err) {
     return sendSafeShopeeAuthReadinessError(res, err);
   }
