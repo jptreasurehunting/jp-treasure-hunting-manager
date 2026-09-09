@@ -23,6 +23,9 @@ const {
   buildShopeeSgAuthTransportPlan,
   buildShopeeSgAuthorizationRequestPreview
 } = require('./integrations/shopeeSgAuthTransportBackend');
+const {
+  buildShopeeSgAuthorizationSigningPreview
+} = require('./integrations/shopeeSgAuthorizationSigningPreviewBackend');
 
 dotenv.config();
 
@@ -163,11 +166,19 @@ function shopeeAuthReadinessErrorStatus(error) {
     case 'MISSING_SHOPEE_AUTH_SCHEMA_VERIFICATION':
     case 'INVALID_SHOPEE_AUTHORIZATION_ENDPOINT':
     case 'INVALID_SHOPEE_STRUCTURED_AUTH_MAPPING':
+    case 'MISSING_SHOPEE_SIGNING_RUNTIME':
+    case 'INVALID_SHOPEE_SIGNING_RUNTIME':
+    case 'UNSUPPORTED_SHOPEE_SIGNATURE_IMPLEMENTATION':
+    case 'UNSUPPORTED_SHOPEE_SIGNATURE_SERIALIZATION':
+    case 'SHOPEE_STRUCTURED_MAPPING_REQUIRED':
       return 400;
     case 'STALE_SHOPEE_SCHEMA_VERIFICATION':
     case 'STALE_SHOPEE_AUTH_SCHEMA_VERIFICATION':
     case 'STALE_SHOPEE_STRUCTURED_AUTH_MAPPING':
+    case 'STALE_SHOPEE_SIGNING_RUNTIME':
       return 409;
+    case 'INVALID_SHOPEE_REDIRECT_URI':
+      return 503;
     default:
       return 500;
   }
@@ -259,6 +270,18 @@ app.post('/api/shopee/sg/auth/transport/plan', (req, res) => {
 app.post('/api/shopee/sg/auth/authorization-request/preview', (req, res) => {
   try {
     res.json(buildShopeeSgAuthorizationRequestPreview(req.body || {}));
+  } catch (err) {
+    return sendSafeShopeeAuthReadinessError(res, err);
+  }
+});
+
+/**
+ * Computes the verified authorization-stage signature only inside the backend for preview validation.
+ * The signature/base string/Partner Key are never returned and no Shopee request is sent.
+ */
+app.post('/api/shopee/sg/auth/authorization-request/signing-preview', (req, res) => {
+  try {
+    res.json(buildShopeeSgAuthorizationSigningPreview(req.body || {}));
   } catch (err) {
     return sendSafeShopeeAuthReadinessError(res, err);
   }
