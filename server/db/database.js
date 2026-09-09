@@ -27,6 +27,14 @@ class DBProvider {
   async getShopeeSgAuthSession(sessionId) {
     throw new Error('Database interface error: getShopeeSgAuthSession() must be implemented.');
   }
+
+  /**
+   * Atomically consumes the preview-only correlation-state issuance slot for one Shopee SG auth session.
+   * Only the SHA-256 hash is persisted; the plaintext state must never be stored.
+   */
+  async issueShopeeSgAuthSessionPreviewState(sessionId, stateHash, issuedAt) {
+    throw new Error('Database interface error: issueShopeeSgAuthSessionPreviewState() must be implemented.');
+  }
 }
 
 function getDB() {
