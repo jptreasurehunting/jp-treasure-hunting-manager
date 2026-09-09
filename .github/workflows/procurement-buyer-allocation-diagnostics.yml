@@ -1,0 +1,44 @@
+name: Procurement Buyer Allocation Diagnostics
+
+on:
+  push:
+    branches:
+      - feature/procurement-buyer-allocation
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Capture typecheck
+        shell: bash
+        run: |
+          set +e
+          npm run typecheck > typecheck.log 2>&1
+          echo $? > typecheck.exit
+          exit 0
+      - name: Capture central inventory lifecycle test
+        shell: bash
+        run: |
+          set +e
+          npx tsx -e "import { runCentralInventoryTests } from './src/services/__tests__/centralInventory.test.ts'; const r = runCentralInventoryTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);" > central-inventory-test.log 2>&1
+          echo $? > central-inventory-test.exit
+          exit 0
+      - name: Upload diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: procurement-buyer-allocation-diagnostics
+          path: |
+            typecheck.log
+            typecheck.exit
+            central-inventory-test.log
+            central-inventory-test.exit
+          if-no-files-found: error
