@@ -67,6 +67,10 @@ jobs:
         run: npx tsx -e "import { runShopeeSgStructuredAuthMappingTests } from './src/services/__tests__/shopeeSgStructuredAuthMapping.test.ts'; const r = runShopeeSgStructuredAuthMappingTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
       - name: Shopee SG Structured Auth Preview Client Tests
         run: npx tsx src/services/__tests__/runShopeeSgStructuredAuthPreviewClientTestsCli.ts
+      - name: Shopee SG Signing Runtime Verification Tests
+        run: npx tsx -e "import { runShopeeSgAuthorizationSigningRuntimeTests } from './src/services/__tests__/shopeeSgAuthorizationSigningRuntime.test.ts'; const r = runShopeeSgAuthorizationSigningRuntimeTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
+      - name: Shopee SG Signing Preview Client Tests
+        run: npx tsx src/services/__tests__/runShopeeSgAuthorizationSigningPreviewClientTestsCli.ts
       - name: Shopee SG Backend Auth Readiness Tests
         run: npx tsx src/services/__tests__/runShopeeSgBackendAuthClientTestsCli.ts
       - name: Full Test Suite
