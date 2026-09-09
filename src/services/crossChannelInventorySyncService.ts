@@ -5,9 +5,12 @@ const STORAGE_KEY = 'jp_cross_channel_inventory_sync_queue_v1';
 export const CROSS_CHANNEL_INVENTORY_SYNC_CHANGED_EVENT = 'jp-cross-channel-inventory-sync-changed';
 
 export type CrossChannelInventorySyncReason =
-  | 'SALE_RESERVATION'
+  | 'BUYER_ALLOCATION'
+  | 'BUYER_ALLOCATION_RELEASE'
   | 'CANCELLATION_RESTOCK'
-  | 'RECONCILIATION';
+  | 'RECONCILIATION'
+  // Legacy queue values are retained only so previously stored requests remain readable.
+  | 'SALE_RESERVATION';
 
 export type CrossChannelInventorySyncStatus =
   | 'QUEUED'
