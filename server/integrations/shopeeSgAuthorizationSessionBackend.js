@@ -96,6 +96,16 @@ function validateCallbackCorrelationMapping(mapping, signingPreview, now) {
 
 function safeSessionResponse(row, now = Date.now()) {
   const expired = Date.parse(row.expires_at) <= now;
+  const stateIssued = Boolean(row.correlation_state_issued_at);
+  const status = expired && (row.status === 'PREPARED' || row.status === 'STATE_ISSUED_PREVIEW_ONLY') ? 'EXPIRED' : row.status;
+  const blockingReasons = [];
+  if (!stateIssued) {
+    blockingReasons.push('Correlation state has not been issued; external authorization navigation remains disabled.');
+  } else if (row.status === 'STATE_ISSUED_PREVIEW_ONLY') {
+    blockingReasons.push('The correlation state was issued for preview only and its plaintext was discarded; create a new session for any future live authorization start.');
+  }
+  blockingReasons.push('Authorization callback validation and token exchange are not enabled in this preparation stage.');
+
   return {
     success: true,
     marketplace: 'Shopee',
@@ -114,8 +124,8 @@ function safeSessionResponse(row, now = Date.now()) {
     correlationCallbackField: row.correlation_callback_field,
     issuedAt: row.issued_at,
     expiresAt: row.expires_at,
-    status: expired && row.status === 'PREPARED' ? 'EXPIRED' : row.status,
-    correlationStateIssued: Boolean(row.correlation_state_issued_at),
+    status,
+    correlationStateIssued: stateIssued,
     correlationStateValueReturned: false,
     correlationStateHashReturned: false,
     authorizationCodeStored: false,
@@ -123,17 +133,14 @@ function safeSessionResponse(row, now = Date.now()) {
     signatureValueReturned: false,
     partnerKeyValueReturned: false,
     secretValuesReturned: false,
-    canIssueCorrelationStateInFutureAuthStart: !expired && row.status === 'PREPARED' && !row.correlation_state_issued_at,
+    canIssueCorrelationStateInFutureAuthStart: !expired && row.status === 'PREPARED' && !stateIssued,
     canStartAuthorization: false,
     canReceiveAuthorizationCallback: false,
     canExchangeToken: false,
     sendAllowed: false,
     networkAction: 'NONE',
     externalWritePerformed: false,
-    blockingReasons: [
-      'Correlation state has not been issued; external authorization navigation remains disabled.',
-      'Authorization callback validation and token exchange are not enabled in this preparation stage.'
-    ]
+    blockingReasons
   };
 }
 
