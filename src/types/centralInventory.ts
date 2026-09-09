@@ -1,11 +1,11 @@
 import { SalesChannel } from './shippingRouter';
 
 export type ChannelSyncStatus =
-  | 'SYNCED'            // 外部販売先まで反映確認済み
-  | 'PENDING'           // 外部販売先への同期待ち
-  | 'FAILED'            // 外部販売先への同期失敗
-  | 'OVERSELLING_RISK'  // 二重販売リスク (要確認)
-  | 'PAUSED';           // 在庫切れ/手動による休止
+  | 'SYNCED'
+  | 'PENDING'
+  | 'FAILED'
+  | 'OVERSELLING_RISK'
+  | 'PAUSED';
 
 export interface ChannelInventoryBinding {
   channel: SalesChannel;
@@ -24,10 +24,7 @@ export type OversellingRiskReason =
   | 'AUTO_SYNC_DISABLED'
   | 'SELLABLE_GATE_INCOMPLETE';
 
-/**
- * Supplier-side lifecycle. A procurement order is never Buyer inventory and
- * PURCHASE_ORDERED / INBOUND quantities are never counted in marketplace ATS.
- */
+/** Supplier-side lifecycle. PURCHASE_ORDERED / INBOUND never count in ATS. */
 export type ProcurementStatus =
   | 'PURCHASE_ORDERED'
   | 'INBOUND'
@@ -50,10 +47,6 @@ export interface ProcurementOrder {
   notes?: string;
 }
 
-/**
- * Physical-unit lifecycle after the item is under company control.
- * PURCHASE_ORDERED belongs to ProcurementOrder, not to a physical InventoryUnit.
- */
 export type InventoryUnitStatus =
   | 'ON_HAND'
   | 'AVAILABLE'
@@ -89,17 +82,16 @@ export interface InventoryUnit {
 }
 
 /**
- * Public/read-model shape accepts legacy v1 fields during migration. New code
- * must use sellableStock / buyerAllocatedStock / inboundStock. The v2 loader
- * always returns NormalizedCentralInventoryItem.
+ * Central v2 read model. New logic uses explicit supplier-side and Buyer-side
+ * fields. reservedStock remains optional only as an import/migration alias.
  */
 export interface CentralInventoryItem {
   sku: string;
   itemTitle: string;
-  physicalStock: number;          // 現在、自社管理下にある実物総数。INBOUNDは含めない。
-  sellableStock?: number;         // v2: Sellable Inventory Gateを通過した実物数。
-  buyerAllocatedStock?: number;   // v2: Buyer Orderへ割当済みで、まだ自社にある実物数。
-  inboundStock?: number;          // v2: 入荷予定/輸送中。ATSには絶対に含めない。
+  physicalStock: number;
+  sellableStock: number;
+  buyerAllocatedStock: number;
+  inboundStock: number;
   /** @deprecated v1 migration input only. Do not display or use for new decisions. */
   reservedStock?: number;
   availableToSell: number;
@@ -114,11 +106,7 @@ export interface CentralInventoryItem {
   oversellingRiskReason?: OversellingRiskReason;
 }
 
-export interface NormalizedCentralInventoryItem extends CentralInventoryItem {
-  sellableStock: number;
-  buyerAllocatedStock: number;
-  inboundStock: number;
-}
+export type NormalizedCentralInventoryItem = CentralInventoryItem;
 
 export type BuyerAllocationStatus =
   | 'BUYER_ALLOCATED'
@@ -127,10 +115,7 @@ export type BuyerAllocationStatus =
   | 'SHIPPED'
   | 'RELEASED_CANCELLED';
 
-/**
- * Buyer-side commitment. This is deliberately not named "Reserved" because it
- * must be clear that the commitment came from a Buyer Order, not a supplier PO.
- */
+/** Buyer-side commitment; never used for supplier procurement. */
 export interface BuyerInventoryAllocation {
   allocationId: string;
   sku: string;
