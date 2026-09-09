@@ -2,7 +2,6 @@
  * Central Test Suite Runner for JP Treasure Hunting Manager
  */
 
-// Node.js test runtime in-memory storage polyfill
 if (typeof globalThis.localStorage === 'undefined') {
   const store: Record<string, string> = {};
   (globalThis as any).localStorage = {
@@ -12,7 +11,6 @@ if (typeof globalThis.localStorage === 'undefined') {
     clear: () => { Object.keys(store).forEach((k) => delete store[k]); }
   };
 }
-
 if (typeof globalThis.sessionStorage === 'undefined') {
   const sessStore: Record<string, string> = {};
   (globalThis as any).sessionStorage = {
@@ -61,6 +59,8 @@ import { runShopeeSgInventoryMappingTests } from './shopeeSgInventoryMapping.tes
 import { runShopeeSgApiSchemaVerificationTests } from './shopeeSgApiSchemaVerification.test';
 import { runShopeeSgAuthSchemaVerificationTests } from './shopeeSgAuthSchemaVerification.test';
 import { runShopeeSgStructuredAuthMappingTests } from './shopeeSgStructuredAuthMapping.test';
+import { runShopeeSgAuthorizationSigningRuntimeTests } from './shopeeSgAuthorizationSigningRuntime.test';
+import { runShopeeSgCallbackCorrelationMappingTests } from './shopeeSgCallbackCorrelationMapping.test';
 import { runShopeeAutomationTests } from './shopeeAutomation.test';
 import { runI18nTests } from './i18n.test';
 import { runZonosAugust13ReadinessTests } from './zonosAugust13Readiness.test';
@@ -72,12 +72,7 @@ import { runShippingDecisionIntegrationTests } from './shippingDecisionIntegrati
 export interface MasterTestSummary {
   totalPassed: number;
   totalFailed: number;
-  suites: {
-    name: string;
-    passed: number;
-    failed: number;
-    log: string[];
-  }[];
+  suites: { name: string; passed: number; failed: number; log: string[]; }[];
 }
 
 export function runAllAppTests(): MasterTestSummary {
@@ -109,6 +104,8 @@ export function runAllAppTests(): MasterTestSummary {
     { name: 'Shopee SG API Schema Verification Tests', fn: runShopeeSgApiSchemaVerificationTests },
     { name: 'Shopee SG Auth Schema Verification Tests', fn: runShopeeSgAuthSchemaVerificationTests },
     { name: 'Shopee SG Structured Auth Mapping Tests', fn: runShopeeSgStructuredAuthMappingTests },
+    { name: 'Shopee SG Signing Runtime Verification Tests', fn: runShopeeSgAuthorizationSigningRuntimeTests },
+    { name: 'Shopee SG Callback Correlation Mapping Tests', fn: runShopeeSgCallbackCorrelationMappingTests },
     { name: 'Shopee Automation & Optimization Scoring Tests', fn: runShopeeAutomationTests },
     { name: 'Internationalization (i18n) & Locale Formatter Tests', fn: runI18nTests },
     { name: 'Envelope Vector Layout & Safe Test Mode Tests', fn: runEnvelopeLayoutTests },
@@ -128,25 +125,7 @@ export function runAllAppTests(): MasterTestSummary {
     { name: 'Shipping Template Tests', fn: runShippingTemplateTests },
     { name: 'Zonos Portable Project Tests', fn: runZonosPortableTests }
   ];
-
-  let totalPassed = 0;
-  let totalFailed = 0;
-
-  const results = suites.map((s) => {
-    const res = s.fn();
-    totalPassed += res.passed;
-    totalFailed += res.failed;
-    return {
-      name: s.name,
-      passed: res.passed,
-      failed: res.failed,
-      log: res.log
-    };
-  });
-
-  return {
-    totalPassed,
-    totalFailed,
-    suites: results
-  };
+  let totalPassed = 0; let totalFailed = 0;
+  const results = suites.map((s) => { const res = s.fn(); totalPassed += res.passed; totalFailed += res.failed; return { name: s.name, passed: res.passed, failed: res.failed, log: res.log }; });
+  return { totalPassed, totalFailed, suites: results };
 }
