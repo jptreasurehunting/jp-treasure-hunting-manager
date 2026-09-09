@@ -11,6 +11,7 @@ import { ShopeeSgInventoryMappingPanel } from './ShopeeSgInventoryMappingPanel';
 import { ShopeeSgApiSchemaVerificationPanel } from './ShopeeSgApiSchemaVerificationPanel';
 import { ShopeeSgAuthSchemaVerificationPanel } from './ShopeeSgAuthSchemaVerificationPanel';
 import { ShopeeSgStructuredAuthMappingPanel } from './ShopeeSgStructuredAuthMappingPanel';
+import { ShopeeSgStructuredTokenMappingPanel } from './ShopeeSgStructuredTokenMappingPanel';
 import { ShopeeSgBackendAuthReadinessPanel } from './ShopeeSgBackendAuthReadinessPanel';
 import { ShopeeSgAuthorizationSigningPreviewPanel } from './ShopeeSgAuthorizationSigningPreviewPanel';
 import { ShopeeSgCallbackCorrelationSessionPanel } from './ShopeeSgCallbackCorrelationSessionPanel';
@@ -61,6 +62,7 @@ export function InventorySalesWorkbenchCard() {
       <ShopeeSgApiSchemaVerificationPanel />
       <ShopeeSgAuthSchemaVerificationPanel />
       <ShopeeSgStructuredAuthMappingPanel />
+      <ShopeeSgStructuredTokenMappingPanel />
       <ShopeeSgBackendAuthReadinessPanel />
       <ShopeeSgAuthorizationSigningPreviewPanel />
       <ShopeeSgCallbackCorrelationSessionPanel />
