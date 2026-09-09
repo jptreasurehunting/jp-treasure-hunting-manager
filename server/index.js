@@ -10,6 +10,7 @@ const { getShopeeSgAuthReadiness } = require('./integrations/shopeeSgAuthFoundat
 const { buildShopeeSgAuthTransportPlan, buildShopeeSgAuthorizationRequestPreview } = require('./integrations/shopeeSgAuthTransportBackend');
 const { buildShopeeSgAuthorizationSigningPreview } = require('./integrations/shopeeSgAuthorizationSigningPreviewBackend');
 const { prepareShopeeSgAuthorizationSession, getShopeeSgAuthorizationSessionStatus } = require('./integrations/shopeeSgAuthorizationSessionBackend');
+const { issueShopeeSgAuthorizationRequestPreview } = require('./integrations/shopeeSgAuthorizationRequestAssemblyBackend');
 
 dotenv.config();
 const app = express();
@@ -61,11 +62,14 @@ function shopeeAuthReadinessErrorStatus(error) {
     case 'INVALID_SHOPEE_SIGNING_RUNTIME': case 'UNSUPPORTED_SHOPEE_SIGNATURE_IMPLEMENTATION': case 'UNSUPPORTED_SHOPEE_SIGNATURE_SERIALIZATION':
     case 'SHOPEE_STRUCTURED_MAPPING_REQUIRED': case 'MISSING_SHOPEE_CALLBACK_CORRELATION_MAPPING': case 'INVALID_SHOPEE_CALLBACK_CORRELATION_MAPPING':
     case 'SHOPEE_SAFE_CALLBACK_CORRELATION_UNAVAILABLE': case 'SHOPEE_CORRELATION_SIGNATURE_MAPPING_REQUIRED': case 'SHOPEE_CORRELATION_FIELD_COLLISION':
-    case 'SHOPEE_SIGNED_AUTHORIZATION_PREPARATION_NOT_READY': case 'INVALID_SHOPEE_AUTH_SESSION_ID': return 400;
+    case 'SHOPEE_SIGNED_AUTHORIZATION_PREPARATION_NOT_READY': case 'INVALID_SHOPEE_AUTH_SESSION_ID':
+    case 'SHOPEE_AUTHORIZATION_REQUEST_ASSEMBLY_INCOMPLETE': return 400;
     case 'STALE_SHOPEE_SCHEMA_VERIFICATION': case 'STALE_SHOPEE_AUTH_SCHEMA_VERIFICATION': case 'STALE_SHOPEE_STRUCTURED_AUTH_MAPPING':
-    case 'STALE_SHOPEE_SIGNING_RUNTIME': case 'STALE_SHOPEE_CALLBACK_CORRELATION_MAPPING': case 'SHOPEE_AUTH_SESSION_ALREADY_EXISTS': return 409;
+    case 'STALE_SHOPEE_SIGNING_RUNTIME': case 'STALE_SHOPEE_CALLBACK_CORRELATION_MAPPING': case 'SHOPEE_AUTH_SESSION_ALREADY_EXISTS':
+    case 'SHOPEE_AUTH_SESSION_EXPIRED': case 'SHOPEE_AUTH_SESSION_STATE_ALREADY_ISSUED': case 'SHOPEE_AUTH_SESSION_STATE_NOT_ISSUABLE':
+    case 'SHOPEE_AUTH_SESSION_BINDING_MISMATCH': return 409;
     case 'SHOPEE_AUTH_SESSION_NOT_FOUND': return 404;
-    case 'INVALID_SHOPEE_REDIRECT_URI': return 503;
+    case 'INVALID_SHOPEE_REDIRECT_URI': case 'SHOPEE_BACKEND_CREDENTIAL_INCOMPLETE': return 503;
     default: return 500;
   }
 }
@@ -85,6 +89,14 @@ app.post('/api/shopee/sg/auth/authorization-request/signing-preview', (req, res)
 app.post('/api/shopee/sg/auth/session/prepare', async (req, res) => { try { res.json(await prepareShopeeSgAuthorizationSession(req.body || {})); } catch (err) { return sendSafeShopeeAuthReadinessError(res, err); } });
 /** Returns only safe session metadata; correlation state/hash and authorization code are never returned. */
 app.get('/api/shopee/sg/auth/session/:sessionId', async (req, res) => { try { res.json(await getShopeeSgAuthorizationSessionStatus(req.params.sessionId)); } catch (err) { return sendSafeShopeeAuthReadinessError(res, err); } });
+/** Issues one preview-only state, stores only its hash, and assembles a signed authorization request without returning the executable URL or contacting Shopee. */
+app.post('/api/shopee/sg/auth/session/:sessionId/authorization-request-preview', async (req, res) => {
+  try {
+    res.json(await issueShopeeSgAuthorizationRequestPreview({ ...(req.body || {}), sessionId: req.params.sessionId }));
+  } catch (err) {
+    return sendSafeShopeeAuthReadinessError(res, err);
+  }
+});
 
 app.post('/api/ebay/sandbox/oauth/start', (req, res) => { const { accountId, credentialRef } = req.body || {}; try { const start = createSandboxAuthorizationStart(accountId, credentialRef); res.json({ success: true, ...start }); } catch (err) { return sendSafeOAuthError(res, err); } });
 app.get('/api/ebay/sandbox/oauth/callback', async (req, res) => { const { code, state } = req.query || {}; try { res.json(await completeSandboxAuthorizationCallback({ code, state })); } catch (err) { return sendSafeOAuthError(res, err); } });
