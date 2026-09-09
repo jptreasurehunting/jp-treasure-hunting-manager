@@ -59,6 +59,7 @@ import { runShopeeSgInventoryMappingTests } from './shopeeSgInventoryMapping.tes
 import { runShopeeSgApiSchemaVerificationTests } from './shopeeSgApiSchemaVerification.test';
 import { runShopeeSgAuthSchemaVerificationTests } from './shopeeSgAuthSchemaVerification.test';
 import { runShopeeSgStructuredAuthMappingTests } from './shopeeSgStructuredAuthMapping.test';
+import { runShopeeSgStructuredTokenMappingTests } from './shopeeSgStructuredTokenMapping.test';
 import { runShopeeSgAuthorizationSigningRuntimeTests } from './shopeeSgAuthorizationSigningRuntime.test';
 import { runShopeeSgCallbackCorrelationMappingTests } from './shopeeSgCallbackCorrelationMapping.test';
 import { runShopeeAutomationTests } from './shopeeAutomation.test';
@@ -104,6 +105,7 @@ export function runAllAppTests(): MasterTestSummary {
     { name: 'Shopee SG API Schema Verification Tests', fn: runShopeeSgApiSchemaVerificationTests },
     { name: 'Shopee SG Auth Schema Verification Tests', fn: runShopeeSgAuthSchemaVerificationTests },
     { name: 'Shopee SG Structured Auth Mapping Tests', fn: runShopeeSgStructuredAuthMappingTests },
+    { name: 'Shopee SG Structured Token Mapping Tests', fn: runShopeeSgStructuredTokenMappingTests },
     { name: 'Shopee SG Signing Runtime Verification Tests', fn: runShopeeSgAuthorizationSigningRuntimeTests },
     { name: 'Shopee SG Callback Correlation Mapping Tests', fn: runShopeeSgCallbackCorrelationMappingTests },
     { name: 'Shopee Automation & Optimization Scoring Tests', fn: runShopeeAutomationTests },
