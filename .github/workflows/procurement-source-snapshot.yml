@@ -1,0 +1,25 @@
+name: Procurement Inventory Source Snapshot
+
+on:
+  push:
+    branches:
+      - feature/procurement-buyer-allocation
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: procurement-inventory-source-snapshot
+          path: |
+            src
+            package.json
+            package-lock.json
+            tsconfig.json
+          if-no-files-found: error
