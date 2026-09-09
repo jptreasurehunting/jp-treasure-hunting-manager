@@ -268,6 +268,46 @@ class SqliteProvider extends DBProvider {
       });
     });
   }
+
+  async issueShopeeSgAuthSessionPreviewState(sessionId, stateHash, issuedAt) {
+    if (!this.db) await this.initialize();
+    const db = this.db;
+    const query = `
+      UPDATE shopee_sg_auth_session
+      SET correlation_state_hash = ?, correlation_state_issued_at = ?, status = 'STATE_ISSUED_PREVIEW_ONLY'
+      WHERE session_id = ?
+        AND status = 'PREPARED'
+        AND correlation_state_hash IS NULL
+        AND correlation_state_issued_at IS NULL
+        AND expires_at > ?
+    `;
+
+    return new Promise((resolve, reject) => {
+      db.run(query, [stateHash, issuedAt, sessionId, issuedAt], function onIssued(err) {
+        if (err) return reject(new Error(`Failed to issue Shopee SG preview correlation state: ${err.message}`));
+        if (this.changes === 1) return resolve();
+
+        db.get(
+          'SELECT session_id, status, correlation_state_hash, correlation_state_issued_at, expires_at FROM shopee_sg_auth_session WHERE session_id = ?',
+          [sessionId],
+          (readErr, row) => {
+            if (readErr) return reject(new Error(`Failed to inspect Shopee SG authorization session: ${readErr.message}`));
+            const wrapped = new Error('Shopee SG authorization session cannot issue another preview correlation state.');
+            if (!row) {
+              wrapped.code = 'SHOPEE_AUTH_SESSION_NOT_FOUND';
+            } else if (Date.parse(row.expires_at) <= Date.parse(issuedAt)) {
+              wrapped.code = 'SHOPEE_AUTH_SESSION_EXPIRED';
+            } else if (row.correlation_state_hash || row.correlation_state_issued_at || row.status !== 'PREPARED') {
+              wrapped.code = 'SHOPEE_AUTH_SESSION_STATE_ALREADY_ISSUED';
+            } else {
+              wrapped.code = 'SHOPEE_AUTH_SESSION_STATE_NOT_ISSUABLE';
+            }
+            reject(wrapped);
+          }
+        );
+      });
+    });
+  }
 }
 
 module.exports = SqliteProvider;
