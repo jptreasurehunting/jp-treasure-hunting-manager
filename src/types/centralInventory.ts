@@ -88,14 +88,21 @@ export interface InventoryUnit {
   notes?: string;
 }
 
+/**
+ * Public/read-model shape accepts legacy v1 fields during migration. New code
+ * must use sellableStock / buyerAllocatedStock / inboundStock. The v2 loader
+ * always returns NormalizedCentralInventoryItem.
+ */
 export interface CentralInventoryItem {
   sku: string;
   itemTitle: string;
-  physicalStock: number;         // 現在、自社管理下にある実物総数。INBOUNDは含めない。
-  sellableStock: number;         // Sellable Inventory Gateを通過し、販売対象にできる実物数。
-  buyerAllocatedStock: number;   // Buyer Orderへ割当済みで、まだ自社にある実物数。
-  inboundStock: number;          // 仕入先から入荷予定/輸送中。ATSには絶対に含めない。
-  availableToSell: number;       // max(0, sellableStock - buyerAllocatedStock - safetyBuffer)
+  physicalStock: number;          // 現在、自社管理下にある実物総数。INBOUNDは含めない。
+  sellableStock?: number;         // v2: Sellable Inventory Gateを通過した実物数。
+  buyerAllocatedStock?: number;   // v2: Buyer Orderへ割当済みで、まだ自社にある実物数。
+  inboundStock?: number;          // v2: 入荷予定/輸送中。ATSには絶対に含めない。
+  /** @deprecated v1 migration input only. Do not display or use for new decisions. */
+  reservedStock?: number;
+  availableToSell: number;
   safetyBuffer: number;
   unitCostJpy: number;
   weightGrams: number;
@@ -105,6 +112,12 @@ export interface CentralInventoryItem {
   lastReconciledAt: string;
   isLockedForOversellingRisk: boolean;
   oversellingRiskReason?: OversellingRiskReason;
+}
+
+export interface NormalizedCentralInventoryItem extends CentralInventoryItem {
+  sellableStock: number;
+  buyerAllocatedStock: number;
+  inboundStock: number;
 }
 
 export type BuyerAllocationStatus =
@@ -157,10 +170,10 @@ export interface InventorySyncEvent {
   afterPhysicalStock: number;
   beforeAvailableToSell: number;
   afterAvailableToSell: number;
-  syncedChannels: SalesChannel[];       // 外部販売先まで反映確認済み
-  pendingChannels?: SalesChannel[];     // 同期要求を発行済みだが外部反映未確認
+  syncedChannels: SalesChannel[];
+  pendingChannels?: SalesChannel[];
   failedChannels: SalesChannel[];
-  blockedChannels?: SalesChannel[];     // 自動同期無効等で同期要求を実行できない
+  blockedChannels?: SalesChannel[];
   isIdempotentReplay: boolean;
   timestamp: string;
 }
