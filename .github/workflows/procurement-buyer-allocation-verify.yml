@@ -1,0 +1,33 @@
+name: Procurement Buyer Allocation Verification
+
+on:
+  push:
+    branches:
+      - feature/procurement-buyer-allocation
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Central Inventory Lifecycle Tests
+        run: npx tsx -e "import { runCentralInventoryTests } from './src/services/__tests__/centralInventory.test.ts'; const r = runCentralInventoryTests(); console.log(r.log.join('\\n')); if (r.failed) process.exit(1);"
+      - name: Decision Tests
+        run: npm run test:decision
+      - name: Full Test Suite
+        run: npm run test:all
+      - name: Production Build
+        run: npm run build
