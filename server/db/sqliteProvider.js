@@ -69,6 +69,28 @@ class SqliteProvider extends DBProvider {
             network_action TEXT NOT NULL,
             external_write_performed INTEGER NOT NULL DEFAULT 0
           );
+
+          CREATE TABLE IF NOT EXISTS shopee_sg_auth_session (
+            session_id TEXT PRIMARY KEY,
+            account_id TEXT NOT NULL,
+            shop_id TEXT NOT NULL,
+            credential_ref TEXT NOT NULL,
+            auth_schema_verification_id TEXT NOT NULL,
+            structured_mapping_id TEXT NOT NULL,
+            signing_runtime_id TEXT NOT NULL,
+            correlation_mapping_id TEXT NOT NULL,
+            redirect_uri TEXT NOT NULL,
+            correlation_request_field TEXT NOT NULL,
+            correlation_callback_field TEXT NOT NULL,
+            correlation_state_hash TEXT,
+            correlation_state_issued_at TEXT,
+            issued_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            status TEXT NOT NULL,
+            consumed_at TEXT,
+            network_action TEXT NOT NULL,
+            external_write_performed INTEGER NOT NULL DEFAULT 0
+          );
         `;
 
         this.db.exec(schemaQuery, async (schemaErr) => {
@@ -136,7 +158,7 @@ class SqliteProvider extends DBProvider {
     if (!this.db) await this.initialize();
     return new Promise((resolve, reject) => {
       this.db.all('SELECT account_id, environment, last_auth_date FROM ebay_tokens', [], (err, rows) => {
-        if (err) return reject(new Error(`Failed to query accounts metadata from SQLite: ${err.message}`));
+        if (err) return reject(new Error(`Failed to query accounts metadata: ${err.message}`));
         resolve(rows || []);
       });
     });
@@ -153,43 +175,19 @@ class SqliteProvider extends DBProvider {
         status, network_action, external_write_performed
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
-
     const values = [
-      reservation.authorizationId,
-      reservation.sellerAccountId,
-      reservation.sku,
-      reservation.previewId,
-      reservation.marketplaceId,
-      reservation.contentLanguage,
-      reservation.requestFingerprint,
-      reservation.planId,
-      reservation.credentialRef,
-      reservation.verificationId,
-      reservation.operationId,
-      reservation.operationOrder,
-      reservation.method,
-      reservation.pathTemplate,
-      JSON.stringify(reservation.pathParameters || {}),
-      reservation.requestBody == null ? null : JSON.stringify(reservation.requestBody),
-      reservation.stepFingerprint,
-      reservation.approvedBy,
-      reservation.approvalReason,
-      reservation.approvedAt,
-      reservation.expiresAt,
-      reservation.stagedAt,
-      reservation.status,
-      reservation.networkAction,
-      reservation.externalWritePerformed ? 1 : 0
+      reservation.authorizationId, reservation.sellerAccountId, reservation.sku, reservation.previewId,
+      reservation.marketplaceId, reservation.contentLanguage, reservation.requestFingerprint, reservation.planId,
+      reservation.credentialRef, reservation.verificationId, reservation.operationId, reservation.operationOrder,
+      reservation.method, reservation.pathTemplate, JSON.stringify(reservation.pathParameters || {}),
+      reservation.requestBody == null ? null : JSON.stringify(reservation.requestBody), reservation.stepFingerprint,
+      reservation.approvedBy, reservation.approvalReason, reservation.approvedAt, reservation.expiresAt,
+      reservation.stagedAt, reservation.status, reservation.networkAction, reservation.externalWritePerformed ? 1 : 0
     ];
-
     return new Promise((resolve, reject) => {
       this.db.run(query, values, (err) => {
         if (err) {
-          const wrapped = new Error(
-            err.code === 'SQLITE_CONSTRAINT'
-              ? 'Sandbox mutation authorization has already been consumed.'
-              : `Failed to stage Sandbox mutation authorization: ${err.message}`
-          );
+          const wrapped = new Error(err.code === 'SQLITE_CONSTRAINT' ? 'Sandbox mutation authorization has already been consumed.' : `Failed to stage Sandbox mutation authorization: ${err.message}`);
           if (err.code === 'SQLITE_CONSTRAINT') wrapped.code = 'AUTHORIZATION_ALREADY_CONSUMED';
           return reject(wrapped);
         }
@@ -206,8 +204,7 @@ class SqliteProvider extends DBProvider {
              method, path_template, path_parameters_json, request_body_json, step_fingerprint,
              approved_by, approval_reason, approved_at, expires_at, staged_at, status,
              network_action, external_write_performed
-      FROM ebay_sandbox_mutation_stage
-      WHERE authorization_id = ?
+      FROM ebay_sandbox_mutation_stage WHERE authorization_id = ?
     `;
     return new Promise((resolve, reject) => {
       this.db.get(query, [authorizationId], (err, row) => {
@@ -219,6 +216,55 @@ class SqliteProvider extends DBProvider {
           request_body: row.request_body_json ? JSON.parse(row.request_body_json) : null,
           external_write_performed: Boolean(row.external_write_performed)
         });
+      });
+    });
+  }
+
+  async createShopeeSgAuthSession(session) {
+    if (!this.db) await this.initialize();
+    const query = `
+      INSERT INTO shopee_sg_auth_session (
+        session_id, account_id, shop_id, credential_ref, auth_schema_verification_id,
+        structured_mapping_id, signing_runtime_id, correlation_mapping_id, redirect_uri,
+        correlation_request_field, correlation_callback_field, correlation_state_hash,
+        correlation_state_issued_at, issued_at, expires_at, status, consumed_at,
+        network_action, external_write_performed
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+    const values = [
+      session.sessionId, session.accountId, session.shopId, session.credentialRef,
+      session.authSchemaVerificationId, session.structuredMappingId, session.signingRuntimeId,
+      session.correlationMappingId, session.redirectUri, session.correlationRequestField,
+      session.correlationCallbackField, session.correlationStateHash || null,
+      session.correlationStateIssuedAt || null, session.issuedAt, session.expiresAt, session.status,
+      session.consumedAt || null, session.networkAction, session.externalWritePerformed ? 1 : 0
+    ];
+    return new Promise((resolve, reject) => {
+      this.db.run(query, values, (err) => {
+        if (err) {
+          const wrapped = new Error(err.code === 'SQLITE_CONSTRAINT' ? 'Shopee SG authorization session ID already exists.' : `Failed to save Shopee SG authorization session: ${err.message}`);
+          if (err.code === 'SQLITE_CONSTRAINT') wrapped.code = 'SHOPEE_AUTH_SESSION_ALREADY_EXISTS';
+          return reject(wrapped);
+        }
+        resolve();
+      });
+    });
+  }
+
+  async getShopeeSgAuthSession(sessionId) {
+    if (!this.db) await this.initialize();
+    return new Promise((resolve, reject) => {
+      this.db.get(`
+        SELECT session_id, account_id, shop_id, credential_ref, auth_schema_verification_id,
+               structured_mapping_id, signing_runtime_id, correlation_mapping_id, redirect_uri,
+               correlation_request_field, correlation_callback_field, correlation_state_hash,
+               correlation_state_issued_at, issued_at, expires_at, status, consumed_at,
+               network_action, external_write_performed
+        FROM shopee_sg_auth_session WHERE session_id = ?
+      `, [sessionId], (err, row) => {
+        if (err) return reject(new Error(`Failed to fetch Shopee SG authorization session: ${err.message}`));
+        if (!row) return resolve(null);
+        resolve({ ...row, external_write_performed: Boolean(row.external_write_performed) });
       });
     });
   }
