@@ -12,6 +12,7 @@ import { ShopeeSgApiSchemaVerificationPanel } from './ShopeeSgApiSchemaVerificat
 import { ShopeeSgAuthSchemaVerificationPanel } from './ShopeeSgAuthSchemaVerificationPanel';
 import { ShopeeSgStructuredAuthMappingPanel } from './ShopeeSgStructuredAuthMappingPanel';
 import { ShopeeSgBackendAuthReadinessPanel } from './ShopeeSgBackendAuthReadinessPanel';
+import { ShopeeSgAuthorizationSigningPreviewPanel } from './ShopeeSgAuthorizationSigningPreviewPanel';
 import { InventorySalesPriorityPanel } from './InventorySalesPriorityPanel';
 import { ListingPreparationPanel } from './ListingPreparationPanel';
 import { ListingDraftReviewPanel } from './ListingDraftReviewPanel';
@@ -110,6 +111,7 @@ export function InventorySalesWorkbenchCard() {
       <ShopeeSgAuthSchemaVerificationPanel />
       <ShopeeSgStructuredAuthMappingPanel />
       <ShopeeSgBackendAuthReadinessPanel />
+      <ShopeeSgAuthorizationSigningPreviewPanel />
       <InventorySalesPriorityPanel items={items} />
       <ListingPreparationPanel items={items} />
       <ListingDraftReviewPanel items={items} />
