@@ -1,4 +1,6 @@
-import { ImportedEbayOrderRecord, OrderFulfillmentStatus } from '../types/safetyGate';
+import '../types/inventoryOrderLinkage';
+import { ImportedEbayOrderRecord } from '../types/safetyGate';
+import { loadBuyerInventoryAllocations } from './centralInventoryService';
 
 const ORDER_FULFILLMENT_SESSION_KEY = 'zonos_imported_ebay_orders';
 
@@ -24,7 +26,7 @@ export function createInitialImportedOrders(): ImportedEbayOrderRecord[] {
       packageHeightCm: 12,
       carrierName: 'Japan Post (EMS)',
       trackingNumber: '',
-      declaredValueUsd: 93.33 // Candidate 1: 1/3 value ($280 / 3)
+      declaredValueUsd: 93.33
     },
     {
       id: 'ord-rec-002',
@@ -69,11 +71,56 @@ export function saveImportedOrders(orders: ImportedEbayOrderRecord[]): void {
   }
 }
 
+/**
+ * Explicitly links the marketplace Buyer Order to the Central Inventory v2 allocation.
+ * This prevents a generic "reserved" quantity from losing who bought which physical item.
+ */
+export function linkImportedOrderToBuyerAllocation(
+  importedOrderRecordId: string,
+  buyerAllocationId: string
+): { success: boolean; messageJa: string } {
+  const orders = loadImportedOrders();
+  const order = orders.find((candidate) => candidate.id === importedOrderRecordId);
+  if (!order) return { success: false, messageJa: '対象の取込注文が見つかりません。' };
+
+  const allocation = loadBuyerInventoryAllocations().find(
+    (candidate) => candidate.allocationId === buyerAllocationId
+  );
+  if (!allocation) return { success: false, messageJa: '対象のBuyer Allocationが見つかりません。' };
+
+  if (allocation.marketplace !== 'eBay' || allocation.orderId !== order.ebayOrderId || allocation.sku !== order.sku) {
+    return {
+      success: false,
+      messageJa: 'Buyer AllocationのMarketplace / Order ID / SKUが取込eBay注文と一致しないため、紐付けを停止しました。'
+    };
+  }
+
+  if (allocation.buyerId !== order.buyerUsername && allocation.buyerId !== 'LEGACY_BUYER_UNKNOWN') {
+    return {
+      success: false,
+      messageJa: 'Buyer AllocationのBuyer IDが取込注文のBuyerと一致しないため、紐付けを停止しました。'
+    };
+  }
+
+  order.buyerAllocationId = allocation.allocationId;
+  order.inventoryUnitIds = [...allocation.inventoryUnitIds];
+  saveImportedOrders(orders);
+
+  return {
+    success: true,
+    messageJa: `✅ eBay Order [${order.ebayOrderId}] をBuyer Allocation [${allocation.allocationId}] に紐付けました。`
+  };
+}
+
 export function validateShipmentPrep(order: ImportedEbayOrderRecord): { isValid: boolean; errors: string[] } {
   const errors: string[] = [];
 
   if (!order.physicalItemConfirmed) {
     errors.push('必須チェック: 「発送する現物を手元で確認しました。」 にチェックが入っていません。');
+  }
+
+  if (!order.buyerAllocationId) {
+    errors.push('必須チェック: Buyer OrderにBuyer Allocation IDが紐付いていません。');
   }
 
   if (!order.packageWeightGrams || order.packageWeightGrams <= 0) {
