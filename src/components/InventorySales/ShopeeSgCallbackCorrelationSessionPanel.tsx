@@ -12,7 +12,12 @@ import {
   ShopeeSgCorrelationSignatureParticipation
 } from '../../services/shopeeSgCallbackCorrelationMappingService';
 import { loadShopeeSgInventoryMappings } from '../../services/shopeeSgInventoryMappingService';
-import { prepareShopeeSgAuthorizationSession, ShopeeSgAuthorizationSessionResponse } from '../../services/shopeeSgAuthorizationSessionClient';
+import {
+  issueShopeeSgSignedAuthorizationRequestPreview,
+  prepareShopeeSgAuthorizationSession,
+  ShopeeSgAuthorizationSessionResponse,
+  ShopeeSgSignedAuthorizationRequestPreviewResponse
+} from '../../services/shopeeSgAuthorizationSessionClient';
 import { describeBackendError, getConfiguredBackendBaseUrl } from '../../services/ebaySandboxBackendClient';
 
 const panelStyle: React.CSSProperties = { background: 'rgba(15,23,42,.94)', border: '1px solid rgba(148,163,184,.22)', borderRadius: 14, padding: 18, marginBottom: 16 };
@@ -46,6 +51,7 @@ export function ShopeeSgCallbackCorrelationSessionPanel() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [session, setSession] = useState<ShopeeSgAuthorizationSessionResponse | null>(null);
+  const [requestPreview, setRequestPreview] = useState<ShopeeSgSignedAuthorizationRequestPreviewResponse | null>(null);
 
   const inventorySchema = getLatestShopeeSgApiSchemaVerification();
   const authSchema = getLatestShopeeSgAuthSchemaVerification();
@@ -79,6 +85,7 @@ export function ShopeeSgCallbackCorrelationSessionPanel() {
     const result = recordShopeeSgCallbackCorrelationMapping(correlationInput, structured, authSchema);
     setMessage(result.success ? `✅ ${result.messageJa}` : `❌ ${result.messageJa} ${result.blockingReasons.join(' / ')}`);
     setSession(null);
+    setRequestPreview(null);
     if (result.success) setRevision((v) => v + 1);
   };
 
@@ -87,11 +94,35 @@ export function ShopeeSgCallbackCorrelationSessionPanel() {
 
   const prepareSession = async () => {
     if (!inventorySchema || !authSchema || !structured || !signingRuntime || !latestCorrelation || !canPrepare) return;
-    setBusy(true); setSession(null); setMessage('');
+    setBusy(true); setSession(null); setRequestPreview(null); setMessage('');
     try {
       const result = await prepareShopeeSgAuthorizationSession({ accountId, shopId, credentialRef, schemaVerification: inventorySchema, authSchemaVerification: authSchema, structuredAuthorizationMapping: structured, signingRuntimeVerification: signingRuntime, callbackCorrelationMapping: latestCorrelation });
       setSession(result);
       setMessage('✅ 一度限りのShopee SG認証Sessionを準備しました。相関stateはまだ発行せず、Shopeeへの通信も行っていません。');
+    } catch (error) {
+      setMessage(`❌ ${describeBackendError(error)}`);
+    } finally { setBusy(false); }
+  };
+
+  const canIssuePreview = Boolean(session && session.status === 'PREPARED' && session.canIssueCorrelationStateInFutureAuthStart && !busy && inventorySchema && authSchema && structured && signingRuntime && latestCorrelation);
+
+  const issuePreview = async () => {
+    if (!session || !inventorySchema || !authSchema || !structured || !signingRuntime || !latestCorrelation || !canIssuePreview) return;
+    setBusy(true); setRequestPreview(null); setMessage('');
+    try {
+      const result = await issueShopeeSgSignedAuthorizationRequestPreview(session.sessionId, {
+        accountId,
+        shopId,
+        credentialRef,
+        schemaVerification: inventorySchema,
+        authSchemaVerification: authSchema,
+        structuredAuthorizationMapping: structured,
+        signingRuntimeVerification: signingRuntime,
+        callbackCorrelationMapping: latestCorrelation
+      });
+      setRequestPreview(result);
+      setSession((current) => current ? { ...current, status: 'STATE_ISSUED_PREVIEW_ONLY', correlationStateIssued: true, canIssueCorrelationStateInFutureAuthStart: false } : current);
+      setMessage('✅ Preview専用stateを1回だけ発行し、hashだけを保存しました。署名済みAuthorization Requestはバックエンド内だけで組み立て、実行URL・state・署名値は返していません。');
     } catch (error) {
       setMessage(`❌ ${describeBackendError(error)}`);
     } finally { setBusy(false); }
@@ -104,7 +135,7 @@ export function ShopeeSgCallbackCorrelationSessionPanel() {
         認証後のCallbackが「このアプリが開始した認証」と安全に対応するかを確認する層です。Shopeeが返す相関fieldを推測せず、現在のSingapore公式仕様で確認した場合だけ一度限りSessionを準備します。
       </p>
       <div style={{ padding: 10, borderRadius: 8, background: 'rgba(120,53,15,.25)', color: '#fde68a', fontSize: 12, lineHeight: 1.6, marginBottom: 12 }}>
-        <strong>TokenやAuthorization Codeは入力しません。</strong> Session準備段階では相関stateも発行せず、認証URL生成・Shopee画面遷移・Callback受信・Token交換はすべて無効です。
+        <strong>TokenやAuthorization Codeは入力しません。</strong> Previewで発行する相関stateは平文保存せず、hashだけをバックエンドへ保存します。Preview後のSessionは実認証には再利用できません。
       </div>
       <div style={{ padding: 10, borderRadius: 8, background: 'rgba(30,41,59,.6)', color: '#cbd5e1', fontSize: 12, lineHeight: 1.7, marginBottom: 12 }}>
         <div>Backend: <code>{getConfiguredBackendBaseUrl()}</code></div>
@@ -145,16 +176,30 @@ export function ShopeeSgCallbackCorrelationSessionPanel() {
         <label style={{ color: '#cbd5e1', fontSize: 12 }}>Shopee Shop ID<input style={{ ...inputStyle, marginTop: 5 }} value={shopId} onChange={(e) => setShopId(e.target.value)} inputMode="numeric" /></label>
         <label style={{ color: '#cbd5e1', fontSize: 12 }}>バックエンド認証参照名<input style={{ ...inputStyle, marginTop: 5 }} value={credentialRef} onChange={(e) => setCredentialRef(e.target.value.toUpperCase())} /></label>
       </div>
-      <button type="button" onClick={() => void prepareSession()} disabled={!canPrepare} style={{ marginTop: 12, borderRadius: 8, padding: '8px 11px', border: '1px solid rgba(96,165,250,.5)', background: canPrepare ? 'rgba(37,99,235,.7)' : 'rgba(51,65,85,.65)', color: '#f8fafc', fontWeight: 700, cursor: canPrepare ? 'pointer' : 'not-allowed' }}>{busy ? '準備中…' : '一度限り認証Sessionを準備（Shopee通信なし）'}</button>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+        <button type="button" onClick={() => void prepareSession()} disabled={!canPrepare} style={{ borderRadius: 8, padding: '8px 11px', border: '1px solid rgba(96,165,250,.5)', background: canPrepare ? 'rgba(37,99,235,.7)' : 'rgba(51,65,85,.65)', color: '#f8fafc', fontWeight: 700, cursor: canPrepare ? 'pointer' : 'not-allowed' }}>{busy && !session ? '準備中…' : '一度限り認証Sessionを準備（Shopee通信なし）'}</button>
+        <button type="button" onClick={() => void issuePreview()} disabled={!canIssuePreview} style={{ borderRadius: 8, padding: '8px 11px', border: '1px solid rgba(167,139,250,.55)', background: canIssuePreview ? 'rgba(109,40,217,.72)' : 'rgba(51,65,85,.65)', color: '#f8fafc', fontWeight: 700, cursor: canIssuePreview ? 'pointer' : 'not-allowed' }}>{busy && session ? '生成中…' : 'state発行＋署名済みRequest Preview（通信なし）'}</button>
+      </div>
       {message && <div style={{ marginTop: 10, color: '#cbd5e1', fontSize: 12 }}>{message}</div>}
       {session && (
         <div style={{ marginTop: 14, padding: 12, borderRadius: 9, background: 'rgba(15,23,42,.78)', border: '1px solid rgba(96,165,250,.28)', fontSize: 12, lineHeight: 1.75 }}>
           <div>Session: <code>{session.sessionId}</code></div><div>状態: <strong>{session.status}</strong> / 有効期限: {new Date(session.expiresAt).toLocaleString()}</div>
           <div>相関Request field: <code>{session.correlationRequestField}</code> / Callback field: <code>{session.correlationCallbackField}</code></div>
-          <div>相関state発行: <strong>未発行</strong> / state値・hash返却: <strong>なし</strong></div>
+          <div>相関state発行: <strong>{session.correlationStateIssued ? '発行済み（Preview専用）' : '未発行'}</strong> / state値・hash返却: <strong>なし</strong></div>
           <div>Authorization Code保存: <strong>なし</strong> / Token交換: <strong>不可</strong></div>
           <div>Shopee通信: <strong>{session.networkAction}</strong> / 認証開始: <strong style={{ color: '#fecaca' }}>不可</strong></div>
-          <div style={{ marginTop: 8, color: '#fca5a5' }}>{session.blockingReasons.map((reason) => <div key={reason}>⛔ {reason}</div>)}</div>
+        </div>
+      )}
+      {requestPreview && (
+        <div style={{ marginTop: 14, padding: 12, borderRadius: 9, background: 'rgba(49,46,129,.2)', border: '1px solid rgba(167,139,250,.32)', fontSize: 12, lineHeight: 1.75 }}>
+          <div><strong style={{ color: '#ddd6fe' }}>署名済みAuthorization Request Preview</strong></div>
+          <div>Method: <code>{requestPreview.requestMethod}</code> / Endpoint: <code>{requestPreview.authorizationEndpoint}</code></div>
+          <div>Query fields: {requestPreview.queryFields.map((q) => <code key={`${q.role}-${q.fieldName}`} style={{ marginRight: 6 }}>{q.fieldName}</code>)}</div>
+          <div>署名: <strong>内部生成済み</strong>（長さ {requestPreview.signatureLength}） / 署名値返却: <strong>なし</strong></div>
+          <div>相関state: {requestPreview.correlationStateEntropyBytes} bytes / 平文保存: <strong>なし</strong> / state・hash返却: <strong>なし</strong></div>
+          <div>Request fingerprint: <code>{requestPreview.authorizationRequestFingerprint}</code></div>
+          <div>実行可能URL返却: <strong>なし</strong> / Shopee通信: <strong>{requestPreview.networkAction}</strong></div>
+          <div style={{ marginTop: 8, color: '#fde68a' }}>このPreviewでstate発行枠を消費したため、実際の認証開始時は新しいSessionを作成します。</div>
         </div>
       )}
     </section>
