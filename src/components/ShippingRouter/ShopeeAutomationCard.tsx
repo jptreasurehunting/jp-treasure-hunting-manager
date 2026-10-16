@@ -141,7 +141,7 @@ export const ShopeeAutomationCard: React.FC<ShopeeAutomationCardProps> = ({ onAd
                 {inventory.reduce((acc, i) => acc + i.availableToSell, 0)} <span className="text-xs text-slate-400 font-normal">点 (ATS)</span>
               </div>
               <div className="text-[10px] text-slate-400">
-                実在庫: {inventory.reduce((acc, i) => acc + i.physicalStock, 0)}点 / 引当予約: {inventory.reduce((acc, i) => acc + i.reservedStock, 0)}点
+                実在庫: {inventory.reduce((acc, i) => acc + i.physicalStock, 0)}点 / 引当予約: {inventory.reduce((acc, i) => acc + (i.buyerAllocatedStock ?? i.reservedStock ?? 0), 0)}点
               </div>
             </div>
 

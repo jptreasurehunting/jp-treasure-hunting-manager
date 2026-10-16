@@ -204,13 +204,27 @@ function createAfterItem(
   draft: InventoryImportDraftRow,
   existing?: CentralInventoryItem
 ): CentralInventoryItem {
-  const availableToSell = Math.max(0, draft.physicalStock - draft.reservedStock - draft.safetyBuffer);
+  const sellableStock = existing
+    ? Math.min(draft.physicalStock, existing.sellableStock)
+    : 0;
+  const buyerAllocatedStock = existing ? existing.buyerAllocatedStock : 0;
+  const inboundStock = existing?.inboundStock ?? 0;
+  const availableToSell = Math.max(0, sellableStock - buyerAllocatedStock - draft.safetyBuffer);
+
+  const isDeficit = existing && (draft.physicalStock < buyerAllocatedStock || sellableStock < buyerAllocatedStock);
+  const isLockedForOversellingRisk = existing?.isLockedForOversellingRisk || Boolean(isDeficit);
+  const oversellingRiskReason = isLockedForOversellingRisk
+    ? (existing?.oversellingRiskReason ?? 'INSUFFICIENT_ATS')
+    : undefined;
 
   return {
     sku: draft.sku,
     itemTitle: draft.itemTitle,
     physicalStock: draft.physicalStock,
-    reservedStock: draft.reservedStock,
+    sellableStock,
+    buyerAllocatedStock,
+    inboundStock,
+    reservedStock: buyerAllocatedStock,
     availableToSell,
     safetyBuffer: draft.safetyBuffer,
     unitCostJpy: draft.unitCostJpy,
@@ -223,7 +237,8 @@ function createAfterItem(
     category: draft.category,
     channelBindings: existing?.channelBindings ?? [],
     lastReconciledAt: existing?.lastReconciledAt ?? new Date().toISOString(),
-    isLockedForOversellingRisk: existing?.isLockedForOversellingRisk ?? false
+    isLockedForOversellingRisk,
+    oversellingRiskReason
   };
 }
 
@@ -232,6 +247,9 @@ function isCoreInventoryEqual(a: CentralInventoryItem, b: CentralInventoryItem):
     a.sku === b.sku &&
     a.itemTitle === b.itemTitle &&
     a.physicalStock === b.physicalStock &&
+    a.sellableStock === b.sellableStock &&
+    a.buyerAllocatedStock === b.buyerAllocatedStock &&
+    a.inboundStock === b.inboundStock &&
     a.reservedStock === b.reservedStock &&
     a.availableToSell === b.availableToSell &&
     a.safetyBuffer === b.safetyBuffer &&

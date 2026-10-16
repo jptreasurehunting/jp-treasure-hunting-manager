@@ -30,6 +30,9 @@ function testItem(sku: string, availableToSell = 3): CentralInventoryItem {
     sku,
     itemTitle: `Test ${sku}`,
     physicalStock: availableToSell,
+    sellableStock: availableToSell,
+    buyerAllocatedStock: 0,
+    inboundStock: 0,
     reservedStock: 0,
     availableToSell,
     safetyBuffer: 0,
@@ -94,7 +97,7 @@ export function runMarketplaceSaleEventTests(): { passed: number; failed: number
   const ebaySale = processMarketplaceSaleEvent(event(), '2026-09-08T00:01:00.000Z');
   const afterEbay = loadCentralInventory().find((item) => item.sku === 'SKU-A')!;
   const ebayQueue = loadCrossChannelInventorySyncRequests();
-  assert(ebaySale.success && afterEbay.availableToSell === 2 && afterEbay.reservedStock === 1, 'Test 1: eBay sale immediately reserves Central ATS');
+  assert(ebaySale.success && afterEbay.availableToSell === 2 && afterEbay.buyerAllocatedStock === 1 && afterEbay.reservedStock === 1, 'Test 1: eBay sale immediately reserves Central ATS');
   assert(ebayQueue.some((request) => request.targetChannel === 'Shopee' && request.sku === 'SKU-A' && request.targetStock === 2 && request.status === 'QUEUED'), 'Test 2: eBay sale queues absolute remaining stock for Shopee');
 
   reset([testItem('SKU-A', 3)]);

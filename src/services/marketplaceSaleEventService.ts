@@ -8,11 +8,14 @@ const SALE_EVENT_STORAGE_KEY = 'jp_marketplace_sale_events_v1';
 export const MARKETPLACE_SALE_EVENTS_CHANGED_EVENT = 'jp-marketplace-sale-events-changed';
 
 const TRANSACTION_STORAGE_KEYS = [
+  'zonos_central_inventory_ssot_v2',
+  'zonos_buyer_inventory_allocations_v2',
+  'zonos_inventory_units_v1',
+  'zonos_inventory_sync_events_v2',
+  'zonos_processed_inventory_event_ids_v2',
+  'jp_cross_channel_inventory_sync_queue_v1',
   'zonos_central_inventory_ssot_v1',
-  'zonos_inventory_reservations_v1',
-  'zonos_inventory_sync_events_v1',
-  'zonos_processed_inventory_event_ids_v1',
-  'jp_cross_channel_inventory_sync_queue_v1'
+  'zonos_inventory_reservations_v1'
 ] as const;
 
 export type MarketplaceSaleEventStatus =

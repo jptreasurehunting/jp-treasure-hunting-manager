@@ -2,12 +2,20 @@ import { CentralInventoryItem } from '../../types/centralInventory';
 import { buildInventorySalesPriorityQueue } from '../inventorySalesPriorityService';
 
 function makeItem(overrides: Partial<CentralInventoryItem> & Pick<CentralInventoryItem, 'sku' | 'itemTitle'>): CentralInventoryItem {
+  const physicalStock = overrides.physicalStock ?? 1;
+  const buyerAllocatedStock = overrides.buyerAllocatedStock ?? overrides.reservedStock ?? 0;
+  const sellableStock = overrides.sellableStock ?? (overrides.availableToSell !== undefined ? overrides.availableToSell + buyerAllocatedStock : physicalStock);
+  const availableToSell = overrides.availableToSell ?? Math.max(0, sellableStock - buyerAllocatedStock - (overrides.safetyBuffer ?? 0));
+
   return {
     sku: overrides.sku,
     itemTitle: overrides.itemTitle,
-    physicalStock: overrides.physicalStock ?? 1,
-    reservedStock: overrides.reservedStock ?? 0,
-    availableToSell: overrides.availableToSell ?? 1,
+    physicalStock,
+    sellableStock,
+    buyerAllocatedStock,
+    inboundStock: overrides.inboundStock ?? 0,
+    reservedStock: buyerAllocatedStock,
+    availableToSell,
     safetyBuffer: overrides.safetyBuffer ?? 0,
     unitCostJpy: overrides.unitCostJpy ?? 1000,
     weightGrams: overrides.weightGrams ?? 100,
@@ -18,7 +26,7 @@ function makeItem(overrides: Partial<CentralInventoryItem> & Pick<CentralInvento
         channel: 'eBay',
         sellerAccountId: 'test',
         channelListingId: `listing-${overrides.sku}`,
-        syncedStock: overrides.availableToSell ?? 1,
+        syncedStock: availableToSell,
         syncStatus: 'SYNCED',
         lastSyncedAt: '2026-09-07T00:00:00.000Z',
         isAutoSyncEnabled: true

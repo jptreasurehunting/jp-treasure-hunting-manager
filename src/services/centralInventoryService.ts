@@ -61,6 +61,7 @@ function normalizeCentralInventoryItem(raw: any): CentralInventoryItem {
     physicalStock,
     sellableStock,
     buyerAllocatedStock: Math.min(sellableStock, buyerAllocatedStock),
+    reservedStock: Math.min(sellableStock, buyerAllocatedStock),
     inboundStock: nonNegativeInteger(raw?.inboundStock),
     availableToSell: 0,
     safetyBuffer: nonNegativeInteger(raw?.safetyBuffer),
@@ -627,6 +628,7 @@ export function allocateInventoryToBuyer(
   };
 
   item.buyerAllocatedStock += quantity;
+  item.reservedStock = item.buyerAllocatedStock;
   items[itemIndex] = recomputeAvailableToSell(item);
   inventoryUnitIds.forEach((id) => {
     const unit = units.find((candidate) => candidate.inventoryUnitId === id)!;
@@ -773,6 +775,7 @@ export function commitSoldInventory(allocationId: string): { success: boolean; m
   item.physicalStock -= allocation.quantity;
   item.sellableStock -= allocation.quantity;
   item.buyerAllocatedStock -= allocation.quantity;
+  item.reservedStock = item.buyerAllocatedStock;
   Object.assign(item, recomputeAvailableToSell(item));
   allocation.status = 'SHIPPED';
   allocation.shippedAt = nowIso();
@@ -809,6 +812,7 @@ export function releaseBuyerAllocation(allocationId: string, isRestockable = tru
   const beforeATS = item.availableToSell;
   const beforePhysical = item.physicalStock;
   item.buyerAllocatedStock = Math.max(0, item.buyerAllocatedStock - allocation.quantity);
+  item.reservedStock = item.buyerAllocatedStock;
   if (!isRestockable) item.sellableStock = Math.max(0, item.sellableStock - allocation.quantity);
   items[itemIndex] = recomputeAvailableToSell(item);
 

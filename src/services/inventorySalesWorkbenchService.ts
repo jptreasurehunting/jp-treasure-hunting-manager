@@ -96,7 +96,7 @@ export function buildInventorySalesWorkbench(
       itemTitle: item.itemTitle,
       state: classification.state,
       physicalStock: item.physicalStock,
-      reservedStock: item.reservedStock,
+      reservedStock: item.buyerAllocatedStock ?? item.reservedStock ?? 0,
       availableToSell: item.availableToSell,
       unitCostJpy: item.unitCostJpy,
       sellableCostBasisJpy: item.unitCostJpy * item.availableToSell,

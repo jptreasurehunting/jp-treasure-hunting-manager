@@ -26,12 +26,20 @@ const DRAFT_STORAGE_KEY = 'jp_listing_preparation_drafts_v1';
 const GATE_STORAGE_KEY = 'jp_listing_publish_gate_records_v1';
 
 function makeItem(overrides: Partial<CentralInventoryItem> = {}): CentralInventoryItem {
+  const physicalStock = overrides.physicalStock ?? 2;
+  const buyerAllocatedStock = overrides.buyerAllocatedStock ?? overrides.reservedStock ?? 0;
+  const sellableStock = overrides.sellableStock ?? (overrides.availableToSell !== undefined ? overrides.availableToSell + buyerAllocatedStock : physicalStock);
+  const availableToSell = overrides.availableToSell ?? Math.max(0, sellableStock - buyerAllocatedStock - (overrides.safetyBuffer ?? 0));
+
   return {
     sku: overrides.sku ?? 'SKU-PUBLISH-001',
     itemTitle: overrides.itemTitle ?? 'Publish Gate Test Item',
-    physicalStock: overrides.physicalStock ?? 2,
-    reservedStock: overrides.reservedStock ?? 0,
-    availableToSell: overrides.availableToSell ?? 2,
+    physicalStock,
+    sellableStock,
+    buyerAllocatedStock,
+    inboundStock: overrides.inboundStock ?? 0,
+    reservedStock: buyerAllocatedStock,
+    availableToSell,
     safetyBuffer: overrides.safetyBuffer ?? 0,
     unitCostJpy: overrides.unitCostJpy ?? 2000,
     weightGrams: overrides.weightGrams ?? 120,

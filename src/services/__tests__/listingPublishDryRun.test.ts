@@ -21,12 +21,20 @@ if (typeof globalThis.localStorage === 'undefined') {
 }
 
 function makeItem(overrides: Partial<CentralInventoryItem> = {}): CentralInventoryItem {
+  const physicalStock = overrides.physicalStock ?? 3;
+  const buyerAllocatedStock = overrides.buyerAllocatedStock ?? overrides.reservedStock ?? 0;
+  const sellableStock = overrides.sellableStock ?? (overrides.availableToSell !== undefined ? overrides.availableToSell + buyerAllocatedStock : physicalStock);
+  const availableToSell = overrides.availableToSell ?? Math.max(0, sellableStock - buyerAllocatedStock - (overrides.safetyBuffer ?? 0));
+
   return {
     sku: overrides.sku ?? 'SKU-DRYRUN-001',
     itemTitle: overrides.itemTitle ?? 'Dry Run Test Item',
-    physicalStock: overrides.physicalStock ?? 3,
-    reservedStock: overrides.reservedStock ?? 0,
-    availableToSell: overrides.availableToSell ?? 3,
+    physicalStock,
+    sellableStock,
+    buyerAllocatedStock,
+    inboundStock: overrides.inboundStock ?? 0,
+    reservedStock: buyerAllocatedStock,
+    availableToSell,
     safetyBuffer: overrides.safetyBuffer ?? 0,
     unitCostJpy: overrides.unitCostJpy ?? 1800,
     weightGrams: overrides.weightGrams ?? 120,
