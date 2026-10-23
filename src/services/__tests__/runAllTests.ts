@@ -69,6 +69,7 @@ import { runOpportunityHunterTests } from './opportunityHunter.test';
 import { runOpportunityHunterPhase2Tests } from './opportunityHunterPhase2.test';
 import { runShippingDecisionEngineTests } from './shippingDecisionEngine.test';
 import { runShippingDecisionIntegrationTests } from './shippingDecisionIntegration.test';
+import { runPhotoCaptureTests } from './photoCapture.test';
 
 export interface MasterTestSummary {
   totalPassed: number;
@@ -76,7 +77,7 @@ export interface MasterTestSummary {
   suites: { name: string; passed: number; failed: number; log: string[]; }[];
 }
 
-export function runAllAppTests(): MasterTestSummary {
+export async function runAllAppTests(): Promise<MasterTestSummary> {
   const suites = [
     { name: 'eBay Sandbox Mutation Authorization Gate Tests', fn: runEbaySandboxMutationGateTests },
     { name: 'eBay Sandbox Connection Verification Tests', fn: runEbaySandboxVerificationTests },
@@ -125,9 +126,29 @@ export function runAllAppTests(): MasterTestSummary {
     { name: 'Air Shipping Quote Tests', fn: runAirShippingQuoteTests },
     { name: 'Shipping Method Registry Tests', fn: runShippingRegistryTests },
     { name: 'Shipping Template Tests', fn: runShippingTemplateTests },
-    { name: 'Zonos Portable Project Tests', fn: runZonosPortableTests }
+    { name: 'Zonos Portable Project Tests', fn: runZonosPortableTests },
+    { name: 'Pedal-Assisted Photo Capture & Automated Photo QA Tests', fn: runPhotoCaptureTests }
   ];
-  let totalPassed = 0; let totalFailed = 0;
-  const results = suites.map((s) => { const res = s.fn(); totalPassed += res.passed; totalFailed += res.failed; return { name: s.name, passed: res.passed, failed: res.failed, log: res.log }; });
-  return { totalPassed, totalFailed, suites: results };
+
+  let totalPassed = 0;
+  let totalFailed = 0;
+
+  const results = [];
+  for (const s of suites) {
+    const res = await s.fn();
+    totalPassed += res.passed;
+    totalFailed += res.failed;
+    results.push({
+      name: s.name,
+      passed: res.passed,
+      failed: res.failed,
+      log: res.log
+    });
+  }
+
+  return {
+    totalPassed,
+    totalFailed,
+    suites: results
+  };
 }

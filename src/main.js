@@ -655,6 +655,7 @@ function initEventListeners() {
   const tabRuleFreshness = document.getElementById('tabRuleFreshness');
   const tabShipmentReadiness = document.getElementById('tabShipmentReadiness');
   const tabShippingRouter = document.getElementById('tabShippingRouter');
+  const tabPhotoCapture = document.getElementById('tabPhotoCapture');
 
   const pageProfitCalculator = document.getElementById('pageProfitCalculator');
   const pageSellSimilar = document.getElementById('pageSellSimilar');
@@ -668,12 +669,13 @@ function initEventListeners() {
   const pageRuleFreshness = document.getElementById('pageRuleFreshness');
   const pageShipmentReadiness = document.getElementById('pageShipmentReadiness');
   const pageShippingRouter = document.getElementById('pageShippingRouter');
+  const pagePhotoCapture = document.getElementById('pagePhotoCapture');
 
   const switchTab = (activeTab, activePage) => {
-    [tabProfitCalculator, tabSellSimilar, tabZonosCustoms, tabBrandAsset, tabProjectHealth, tabMarketingStudio, tabSafeAutomation, tabOperationalKnowledge, tabKnowledgeOrchestrator, tabRuleFreshness, tabShipmentReadiness, tabShippingRouter].forEach(tab => {
+    [tabProfitCalculator, tabSellSimilar, tabZonosCustoms, tabBrandAsset, tabProjectHealth, tabMarketingStudio, tabSafeAutomation, tabOperationalKnowledge, tabKnowledgeOrchestrator, tabRuleFreshness, tabShipmentReadiness, tabShippingRouter, tabPhotoCapture].forEach(tab => {
       if (tab) tab.classList.remove('active');
     });
-    [pageProfitCalculator, pageSellSimilar, pageZonosCustoms, pageBrandAsset, pageProjectHealth, pageMarketingStudio, pageSafeAutomation, pageOperationalKnowledge, pageKnowledgeOrchestrator, pageRuleFreshness, pageShipmentReadiness, pageShippingRouter].forEach(page => {
+    [pageProfitCalculator, pageSellSimilar, pageZonosCustoms, pageBrandAsset, pageProjectHealth, pageMarketingStudio, pageSafeAutomation, pageOperationalKnowledge, pageKnowledgeOrchestrator, pageRuleFreshness, pageShipmentReadiness, pageShippingRouter, pagePhotoCapture].forEach(page => {
       if (page) page.classList.add('hidden');
     });
 
@@ -716,6 +718,9 @@ function initEventListeners() {
   }
   if (tabShippingRouter) {
     tabShippingRouter.addEventListener('click', () => switchTab(tabShippingRouter, pageShippingRouter));
+  }
+  if (tabPhotoCapture) {
+    tabPhotoCapture.addEventListener('click', () => switchTab(tabPhotoCapture, pagePhotoCapture));
   }
 }
 
