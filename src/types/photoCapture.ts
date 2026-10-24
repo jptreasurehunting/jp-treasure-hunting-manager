@@ -3,6 +3,7 @@
  */
 
 import type { InventoryUnit, SellableInventoryGate, InventoryUnitStatus } from './centralInventory';
+import type { SalesChannel } from './shippingRouter';
 
 export type PhotoAngle = 
   | 'FRONT'
@@ -188,3 +189,76 @@ export const REQUIRED_ANGLES: AngleGuide[] = [
   { angle: 'LABEL_TAG', labelJa: '銘板・タグ (Label/Tag)', labelEn: 'Serial / Label', description: 'シリアルナンバーや各種認証ラベルをズーム撮影', isRequired: false },
   { angle: 'DEFECT_DETAIL', labelJa: '傷・スレ詳細 (Defect)', labelEn: 'Defect Details', description: '目立つ傷や経年劣化箇所を接写撮影', isRequired: false }
 ];
+
+/**
+ * 出品準備用写真候補モデル (原本保護と補正後画像の対応関係を保持)
+ */
+export interface ListingPhotoCandidate {
+  photoId: string;
+  angle: PhotoAngle;
+  originalDataUrl: string;       // 原本写真 (Read-only evidence: 加工・上書き厳禁)
+  selectedListingUrl: string;    // 出品用選定画像 (AUTO_FIX補正済または合格画像)
+  isAutoFixed: boolean;          // 自動補正が適用されたか
+  autoFixCount: number;          // 補正適用回数
+  qaStatus: PhotoQaStatus;       // 'USE_AS_IS'
+  isHeroImageCandidate: boolean; // FRONTアングル等はメイン出品画像候補
+}
+
+/**
+ * 出品準備データ受け渡しの判定理由コード (Reason Codes)
+ */
+export type ListingPhotoHandoffReasonCode =
+  | 'READY_FOR_LISTING_DRAFT'        // 出品準備ドラフトへ引き渡し可能
+  | 'HOLD_UNCONFIRMED_ID'            // SKUまたはUnit IDが未指定/未確定
+  | 'HOLD_SKU_UNIT_MISMATCH'         // 指定SKU/Unit IDと在庫個体情報の不一致
+  | 'HOLD_CROSS_PRODUCT_POLLUTION'   // 撮影写真に別商品・別個体のタグが混入
+  | 'HOLD_QA_NOT_PASSED'             // RETAKEまたは未補正AUTO_FIXの写真が存在
+  | 'HOLD_INSUFFICIENT_ANGLES'       // 必須4アングル(正面/背面/左/右)が不足
+  | 'HOLD_DUPLICATE_REGISTRATION'    // 既に登録済み個体との競合・二重登録防止
+  | 'HOLD_STALE_SESSION'             // 撮影セッションの鮮度不一致・古い撮影結果
+  | 'HOLD_MIDWAY_CAPTURE_FAILURE';   // 撮影セッション途中中断・アダプター異常
+
+/**
+ * 出品準備データ受け渡し入力コンテキスト
+ */
+export interface PhotoListingHandoffInput {
+  targetContext?: PhotoCaptureTargetContext;
+  capturedPhotos: Record<PhotoAngle, CapturedPhoto | null>;
+  sessionId?: string;
+  sessionStartedAt?: string;
+  existingRegisteredUnitIds?: string[];
+  unitSnapshot?: InventoryUnit;
+  targetChannels?: SalesChannel[];
+  isMidwayAborted?: boolean;
+}
+
+/**
+ * 出品準備データ受け渡しの Dry Run プレビューモデル
+ * 本番の在庫・出品データ・実DBへは一切書き込まず、安全に差分と連携結果を検証します。
+ */
+export interface DryRunListingPhotoHandoff {
+  isDryRun: boolean;
+  handoffId: string;
+  sku: string;
+  inventoryUnitId: string;
+  sessionId?: string;
+  targetChannels: SalesChannel[];
+  canPrepareDraft: boolean;
+  reasonCode: ListingPhotoHandoffReasonCode;
+  reasonMessageJa: string;
+  heroPhoto: ListingPhotoCandidate | null;
+  galleryPhotos: ListingPhotoCandidate[];
+  totalPhotoCount: number;
+  evidencePreserved: boolean;
+  nonPhotoGatesUntouched: boolean;
+  overallListingEligible: boolean;
+  inventoryGateStatus: SellableInventoryGate;
+  draftPhotoPayloadPreview: {
+    sku: string;
+    inventoryUnitId: string;
+    channelCandidates: SalesChannel[];
+    primaryImageUrl: string | null;
+    additionalImageUrls: string[];
+    totalImageCount: number;
+  } | null;
+}

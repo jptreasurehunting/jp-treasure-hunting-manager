@@ -23,7 +23,20 @@ import {
   MockInventoryPhotoGateBridge
 } from '../photoCaptureService';
 import { CentralInventoryPhotoAdapter } from '../centralInventoryPhotoAdapter';
-import { CapturedPhoto, REQUIRED_ANGLES, PhotoQaIssue, PhotoCaptureTargetContext, InventoryPhotoGateSyncResult } from '../../types/photoCapture';
+import {
+  evaluatePhotoListingHandoff,
+  PhotoListingBridgeAdapter
+} from '../photoListingBridgeService';
+import {
+  CapturedPhoto,
+  REQUIRED_ANGLES,
+  PhotoQaIssue,
+  PhotoCaptureTargetContext,
+  InventoryPhotoGateSyncResult,
+  ListingPhotoCandidate,
+  ListingPhotoHandoffReasonCode,
+  DryRunListingPhotoHandoff
+} from '../../types/photoCapture';
 import type { InventoryUnit } from '../../types/centralInventory';
 
 export interface TestResult {
@@ -1129,6 +1142,351 @@ export async function runPhotoCaptureTests(): Promise<TestResult> {
   assert(
     doubleExec.success === true && doubleExec.preview.reasonCode === 'IDEMPOTENT_ALREADY_COMPLETED',
     'Test Y12-c: Double execution of executeSafeIntegration is safely idempotent'
+  );
+
+  // Test Z: Photo Capture, Inventory Gate & Listing Preparation Safe Handoff (STEP 24)
+  const handoffTargetContext: PhotoCaptureTargetContext = {
+    sku: 'SKU-CANON-AE1-SLV',
+    itemTitle: 'Canon AE-1 Silver',
+    inventoryUnitId: 'UNIT-HANDOFF-001',
+    isConfirmed: true
+  };
+
+  const handoffBaselineUnit: InventoryUnit = {
+    inventoryUnitId: 'UNIT-HANDOFF-001',
+    sku: 'SKU-CANON-AE1-SLV',
+    status: 'ON_HAND',
+    receivedAt: '2026-10-25T00:00:00Z',
+    sellableGate: {
+      identityVerified: false,
+      quantityVerified: false,
+      conditionVerified: false,
+      photoCaptureComplete: false,
+      photoQaComplete: false,
+      storageLocationRegistered: false
+    },
+    updatedAt: '2026-10-25T00:00:00Z'
+  };
+
+  const sessionStartTime = new Date().toISOString();
+
+  // Prepare photos with proper sku/inventoryUnitId tagging
+  const validHandoffPhotos = {
+    FRONT: {
+      ...allPassedPhotos.FRONT,
+      id: 'photo-front-001',
+      sku: 'SKU-CANON-AE1-SLV',
+      inventoryUnitId: 'UNIT-HANDOFF-001',
+      timestamp: sessionStartTime
+    },
+    BACK: {
+      ...allPassedPhotos.BACK,
+      id: 'photo-back-001',
+      sku: 'SKU-CANON-AE1-SLV',
+      inventoryUnitId: 'UNIT-HANDOFF-001',
+      timestamp: sessionStartTime
+    },
+    LEFT: {
+      ...allPassedPhotos.LEFT,
+      id: 'photo-left-001',
+      sku: 'SKU-CANON-AE1-SLV',
+      inventoryUnitId: 'UNIT-HANDOFF-001',
+      timestamp: sessionStartTime
+    },
+    RIGHT: {
+      ...allPassedPhotos.RIGHT,
+      id: 'photo-right-001',
+      sku: 'SKU-CANON-AE1-SLV',
+      inventoryUnitId: 'UNIT-HANDOFF-001',
+      timestamp: sessionStartTime
+    },
+    TOP: null,
+    LABEL_TAG: null,
+    DEFECT_DETAIL: null
+  };
+
+  // Test Z1: Valid Handoff with 4 USE_AS_IS photos (Success & Hero photo selection)
+  const validHandoff = evaluatePhotoListingHandoff({
+    targetContext: handoffTargetContext,
+    capturedPhotos: validHandoffPhotos,
+    sessionId: 'session-2026-001',
+    sessionStartedAt: sessionStartTime,
+    unitSnapshot: handoffBaselineUnit
+  });
+  assert(
+    validHandoff.reasonCode === 'READY_FOR_LISTING_DRAFT' && validHandoff.canPrepareDraft === true,
+    'Test Z1-a: evaluatePhotoListingHandoff returns READY_FOR_LISTING_DRAFT and canPrepareDraft === true for 4 valid USE_AS_IS photos'
+  );
+  assert(
+    validHandoff.heroPhoto !== null && validHandoff.heroPhoto.angle === 'FRONT' && validHandoff.heroPhoto.isHeroImageCandidate === true,
+    'Test Z1-b: FRONT view is designated as primary hero image candidate'
+  );
+  assert(
+    validHandoff.galleryPhotos.length === 4 && validHandoff.totalPhotoCount === 4,
+    'Test Z1-c: All 4 captured photos are mapped into gallery candidate list'
+  );
+  assert(
+    validHandoff.draftPhotoPayloadPreview !== null &&
+    validHandoff.draftPhotoPayloadPreview.channelCandidates.includes('eBay') &&
+    validHandoff.draftPhotoPayloadPreview.channelCandidates.includes('Shopee') &&
+    validHandoff.draftPhotoPayloadPreview.additionalImageUrls.length === 3,
+    'Test Z1-d: Draft photo payload preview contains eBay/Shopee channels and 3 additional images'
+  );
+  assert(
+    validHandoff.evidencePreserved === true && validHandoff.isDryRun === true,
+    'Test Z1-e: Dry run and evidence preservation confirmed'
+  );
+
+  // Test Z2: AUTO_FIX image selection without overwriting original photo evidence
+  const rawDarkUrlSample = generateMockImageDataUrl('FRONT', 'DARK');
+  const correctedUrlSample = generateMockImageDataUrl('FRONT', 'GOOD');
+  const autoFixedPhotos = {
+    ...validHandoffPhotos,
+    FRONT: {
+      ...validHandoffPhotos.FRONT,
+      originalDataUrl: rawDarkUrlSample,
+      dataUrl: correctedUrlSample,
+      autoFixCount: 1,
+      qaResult: { status: 'USE_AS_IS' as const, issues: [], metrics: { blurScore: 10, brightness: 120, framingCoverage: 85, glareScore: 5 }, suggestedAction: '合格' }
+    }
+  };
+  const autoFixHandoff = evaluatePhotoListingHandoff({
+    targetContext: handoffTargetContext,
+    capturedPhotos: autoFixedPhotos,
+    sessionId: 'session-2026-002',
+    sessionStartedAt: sessionStartTime
+  });
+  assert(
+    autoFixHandoff.heroPhoto !== null &&
+    autoFixHandoff.heroPhoto.isAutoFixed === true &&
+    autoFixHandoff.heroPhoto.originalDataUrl === rawDarkUrlSample &&
+    autoFixHandoff.heroPhoto.selectedListingUrl === correctedUrlSample,
+    'Test Z2-a: Listing candidate selects AUTO_FIX enhanced URL while originalDataUrl raw evidence remains completely intact'
+  );
+  assert(
+    autoFixHandoff.heroPhoto !== null && autoFixHandoff.heroPhoto.originalDataUrl !== autoFixHandoff.heroPhoto.selectedListingUrl,
+    'Test Z2-b: Raw evidence and selected listing image are cleanly differentiated without overwriting'
+  );
+
+  // Test Z3: HOLD on unconfirmed target context or empty identifiers
+  const unconfirmedHandoff = evaluatePhotoListingHandoff({
+    targetContext: { ...handoffTargetContext, isConfirmed: false },
+    capturedPhotos: validHandoffPhotos
+  });
+  assert(
+    unconfirmedHandoff.reasonCode === 'HOLD_UNCONFIRMED_ID' && unconfirmedHandoff.canPrepareDraft === false,
+    'Test Z3-a: Handoff returns HOLD_UNCONFIRMED_ID when targetContext.isConfirmed is false'
+  );
+  const emptySkuHandoff = evaluatePhotoListingHandoff({
+    targetContext: { ...handoffTargetContext, sku: '' },
+    capturedPhotos: validHandoffPhotos
+  });
+  assert(
+    emptySkuHandoff.reasonCode === 'HOLD_UNCONFIRMED_ID',
+    'Test Z3-b: Handoff returns HOLD_UNCONFIRMED_ID when SKU is empty'
+  );
+
+  // Test Z4: HOLD on SKU / inventoryUnitId mismatch with unitSnapshot
+  const mismatchUnitHandoff = evaluatePhotoListingHandoff({
+    targetContext: handoffTargetContext,
+    capturedPhotos: validHandoffPhotos,
+    unitSnapshot: { ...handoffBaselineUnit, inventoryUnitId: 'UNIT-DIFFERENT-999' }
+  });
+  assert(
+    mismatchUnitHandoff.reasonCode === 'HOLD_SKU_UNIT_MISMATCH' && mismatchUnitHandoff.canPrepareDraft === false,
+    'Test Z4-a: Handoff returns HOLD_SKU_UNIT_MISMATCH when inventoryUnitId does not match snapshot'
+  );
+  const mismatchSkuHandoff = evaluatePhotoListingHandoff({
+    targetContext: handoffTargetContext,
+    capturedPhotos: validHandoffPhotos,
+    unitSnapshot: { ...handoffBaselineUnit, sku: 'SKU-DIFFERENT-MODEL' }
+  });
+  assert(
+    mismatchSkuHandoff.reasonCode === 'HOLD_SKU_UNIT_MISMATCH',
+    'Test Z4-b: Handoff returns HOLD_SKU_UNIT_MISMATCH when SKU does not match snapshot'
+  );
+
+  // Test Z5: HOLD on cross-product / cross-unit photo pollution (異物混入検知)
+  const pollutedPhotos = {
+    ...validHandoffPhotos,
+    BACK: {
+      ...validHandoffPhotos.BACK,
+      sku: 'SKU-CROSS-CONTAMINATION-NIKON'
+    }
+  };
+  const pollutionHandoff = evaluatePhotoListingHandoff({
+    targetContext: handoffTargetContext,
+    capturedPhotos: pollutedPhotos
+  });
+  assert(
+    pollutionHandoff.reasonCode === 'HOLD_CROSS_PRODUCT_POLLUTION' && pollutionHandoff.canPrepareDraft === false,
+    'Test Z5-a: Handoff detects cross-product photo pollution (SKU mismatch on photo metadata)'
+  );
+  const unitPollutionPhotos = {
+    ...validHandoffPhotos,
+    LEFT: {
+      ...validHandoffPhotos.LEFT,
+      inventoryUnitId: 'UNIT-CROSS-CONTAMINATION-9999'
+    }
+  };
+  const unitPollutionHandoff = evaluatePhotoListingHandoff({
+    targetContext: handoffTargetContext,
+    capturedPhotos: unitPollutionPhotos
+  });
+  assert(
+    unitPollutionHandoff.reasonCode === 'HOLD_CROSS_PRODUCT_POLLUTION',
+    'Test Z5-b: Handoff detects cross-unit photo pollution (Unit ID mismatch on photo metadata)'
+  );
+
+  // Test Z6: HOLD on missing required angles
+  const incompleteHandoffPhotos = {
+    ...validHandoffPhotos,
+    BACK: null
+  };
+  const incompleteHandoff = evaluatePhotoListingHandoff({
+    targetContext: handoffTargetContext,
+    capturedPhotos: incompleteHandoffPhotos
+  });
+  assert(
+    incompleteHandoff.reasonCode === 'HOLD_INSUFFICIENT_ANGLES' && incompleteHandoff.canPrepareDraft === false,
+    'Test Z6: Handoff returns HOLD_INSUFFICIENT_ANGLES when any required angle is missing'
+  );
+
+  // Test Z7: HOLD on QA not passed (RETAKE or unapplied AUTO_FIX)
+  const retakeHandoffPhotos = {
+    ...validHandoffPhotos,
+    RIGHT: {
+      ...validHandoffPhotos.RIGHT,
+      qaResult: { status: 'RETAKE' as const, issues: [{ code: 'BLUR_DETECTED' as const, severity: 'ERROR' as const, message: 'ピンぼけ' }], metrics: { blurScore: 90, brightness: 120, framingCoverage: 80, glareScore: 5 }, suggestedAction: '再撮影' }
+    }
+  };
+  const retakeHandoff = evaluatePhotoListingHandoff({
+    targetContext: handoffTargetContext,
+    capturedPhotos: retakeHandoffPhotos
+  });
+  assert(
+    retakeHandoff.reasonCode === 'HOLD_QA_NOT_PASSED' && retakeHandoff.canPrepareDraft === false,
+    'Test Z7-a: Handoff returns HOLD_QA_NOT_PASSED when any required angle is RETAKE'
+  );
+  const pendingAutoFixHandoffPhotos = {
+    ...validHandoffPhotos,
+    LEFT: {
+      ...validHandoffPhotos.LEFT,
+      qaResult: { status: 'AUTO_FIX' as const, issues: [{ code: 'EXPOSURE_UNDER' as const, severity: 'WARNING' as const, message: '露出不足' }], metrics: { blurScore: 10, brightness: 50, framingCoverage: 80, glareScore: 5 }, suggestedAction: '自動補正' }
+    }
+  };
+  const pendingAutoFixHandoff = evaluatePhotoListingHandoff({
+    targetContext: handoffTargetContext,
+    capturedPhotos: pendingAutoFixHandoffPhotos
+  });
+  assert(
+    pendingAutoFixHandoff.reasonCode === 'HOLD_QA_NOT_PASSED',
+    'Test Z7-b: Handoff returns HOLD_QA_NOT_PASSED when any required angle remains in AUTO_FIX state'
+  );
+
+  // Test Z8: HOLD on duplicate registration conflict
+  const duplicateHandoff = evaluatePhotoListingHandoff({
+    targetContext: handoffTargetContext,
+    capturedPhotos: validHandoffPhotos,
+    existingRegisteredUnitIds: ['UNIT-HANDOFF-001']
+  });
+  assert(
+    duplicateHandoff.reasonCode === 'HOLD_DUPLICATE_REGISTRATION' && duplicateHandoff.canPrepareDraft === false,
+    'Test Z8: Handoff returns HOLD_DUPLICATE_REGISTRATION when unit ID exists in conflict registry'
+  );
+
+  // Test Z9: HOLD on stale session
+  const oldTimestamp = new Date(Date.now() - 1000 * 3600 * 48).toISOString(); // 48 hours ago
+  const stalePhotos = {
+    ...validHandoffPhotos,
+    FRONT: {
+      ...validHandoffPhotos.FRONT,
+      timestamp: oldTimestamp
+    }
+  };
+  const staleHandoff = evaluatePhotoListingHandoff({
+    targetContext: handoffTargetContext,
+    capturedPhotos: stalePhotos,
+    sessionStartedAt: sessionStartTime
+  });
+  assert(
+    staleHandoff.reasonCode === 'HOLD_STALE_SESSION' && staleHandoff.canPrepareDraft === false,
+    'Test Z9: Handoff returns HOLD_STALE_SESSION when photo timestamp predates session start'
+  );
+
+  // Test Z10: HOLD on midway capture / abort failure
+  const abortedHandoff = evaluatePhotoListingHandoff({
+    targetContext: handoffTargetContext,
+    capturedPhotos: validHandoffPhotos,
+    isMidwayAborted: true
+  });
+  assert(
+    abortedHandoff.reasonCode === 'HOLD_MIDWAY_CAPTURE_FAILURE' && abortedHandoff.canPrepareDraft === false,
+    'Test Z10: Handoff returns HOLD_MIDWAY_CAPTURE_FAILURE when isMidwayAborted is true'
+  );
+
+  // Test Z11: Non-photo gate preservation and overall listing eligibility isolation
+  // Part a: baseline unit with non-photo gates false
+  assert(
+    validHandoff.nonPhotoGatesUntouched === true,
+    'Test Z11-a: nonPhotoGatesUntouched flag is true'
+  );
+  assert(
+    validHandoff.inventoryGateStatus.photoCaptureComplete === true &&
+    validHandoff.inventoryGateStatus.photoQaComplete === true &&
+    validHandoff.inventoryGateStatus.identityVerified === false &&
+    validHandoff.inventoryGateStatus.quantityVerified === false &&
+    validHandoff.inventoryGateStatus.conditionVerified === false &&
+    validHandoff.inventoryGateStatus.storageLocationRegistered === false,
+    'Test Z11-b: Photo gates pass while non-photo gates remain strictly false'
+  );
+  assert(
+    validHandoff.overallListingEligible === false,
+    'Test Z11-c: overallListingEligible is false when non-photo gates are pending'
+  );
+
+  // Part b: fully qualified unit with all 6 gates passing
+  const fullyQualifiedUnit: InventoryUnit = {
+    ...handoffBaselineUnit,
+    sellableGate: {
+      identityVerified: true,
+      quantityVerified: true,
+      conditionVerified: true,
+      photoCaptureComplete: false,
+      photoQaComplete: false,
+      storageLocationRegistered: true
+    }
+  };
+  const fullyQualifiedHandoff = evaluatePhotoListingHandoff({
+    targetContext: handoffTargetContext,
+    capturedPhotos: validHandoffPhotos,
+    unitSnapshot: fullyQualifiedUnit
+  });
+  assert(
+    fullyQualifiedHandoff.overallListingEligible === true && fullyQualifiedHandoff.canPrepareDraft === true,
+    'Test Z11-d: overallListingEligible is true when all 6 gates are satisfied'
+  );
+
+  // Test Z12: PhotoListingBridgeAdapter modular class integration & pure in-memory operation
+  const bridgeAdapter = new PhotoListingBridgeAdapter({ existingRegisteredUnitIds: ['UNIT-PREV-001'] });
+  assert(bridgeAdapter.isDryRunOnly === true, 'Test Z12-a: PhotoListingBridgeAdapter is strictly dryRunOnly');
+
+  const adapterHandoff = bridgeAdapter.evaluateHandoff({
+    targetContext: handoffTargetContext,
+    capturedPhotos: validHandoffPhotos,
+    unitSnapshot: handoffBaselineUnit
+  });
+  assert(
+    adapterHandoff.canPrepareDraft === true && adapterHandoff.reasonCode === 'READY_FOR_LISTING_DRAFT',
+    'Test Z12-b: PhotoListingBridgeAdapter evaluates handoff successfully'
+  );
+  const conflictAdapterHandoff = bridgeAdapter.evaluateHandoff({
+    targetContext: { ...handoffTargetContext, inventoryUnitId: 'UNIT-PREV-001' },
+    capturedPhotos: validHandoffPhotos
+  });
+  assert(
+    conflictAdapterHandoff.reasonCode === 'HOLD_DUPLICATE_REGISTRATION',
+    'Test Z12-c: PhotoListingBridgeAdapter enforces pre-registered conflict rejection'
   );
 
   log.push(`\nSummary: ${passed} passed, ${failed} failed.`);

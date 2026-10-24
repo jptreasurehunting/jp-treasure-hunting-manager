@@ -19,7 +19,12 @@ import {
   MockInventoryPhotoGateBridge
 } from '../../services/photoCaptureService';
 import { CentralInventoryPhotoAdapter } from '../../services/centralInventoryPhotoAdapter';
-import { InventoryPhotoGateSyncResult, PhotoGateDryRunPreview } from '../../types/photoCapture';
+import { evaluatePhotoListingHandoff } from '../../services/photoListingBridgeService';
+import {
+  InventoryPhotoGateSyncResult,
+  PhotoGateDryRunPreview,
+  DryRunListingPhotoHandoff
+} from '../../types/photoCapture';
 
 interface PhotoCaptureCardProps {
   isTabActive?: boolean;
@@ -30,6 +35,7 @@ interface PhotoCaptureCardProps {
   integrationAdapter?: CentralInventoryPhotoAdapter;
   onPhotoGateEvaluated?: (gate: { photoCaptureComplete: boolean; photoQaComplete: boolean }) => void;
   onSyncToInventory?: (result: InventoryPhotoGateSyncResult) => void;
+  onListingHandoffEvaluated?: (handoff: DryRunListingPhotoHandoff) => void;
 }
 
 export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
@@ -40,7 +46,8 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
   inventoryBridge,
   integrationAdapter,
   onPhotoGateEvaluated,
-  onSyncToInventory
+  onSyncToInventory,
+  onListingHandoffEvaluated
 }) => {
   // State & Ref variables
   const [currentAngleIndex, setCurrentAngleIndex] = useState<number>(0);
@@ -68,6 +75,8 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
   const [evidenceViewMode, setEvidenceViewMode] = useState<'CORRECTED' | 'ORIGINAL'>('CORRECTED');
   const [dryRunPreview, setDryRunPreview] = useState<PhotoGateDryRunPreview | null>(null);
   const [showPreviewPanel, setShowPreviewPanel] = useState<boolean>(false);
+  const [listingHandoff, setListingHandoff] = useState<DryRunListingPhotoHandoff | null>(null);
+  const [showListingPanel, setShowListingPanel] = useState<boolean>(false);
 
   // Synchronous lock ref to prevent race conditions during rapid key events
   const isCapturingRef = useRef<boolean>(false);
@@ -180,6 +189,23 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
     setDryRunPreview(preview);
     setShowPreviewPanel(true);
     setStatusMessage(`🔍 Dry Run プレビュー: [${preview.reasonCode}] ${preview.reasonMessageJa}`);
+  };
+
+  // Manual trigger to generate Listing Preparation Photo Handoff Preview
+  const handleGenerateListingHandoff = () => {
+    if (!targetContext) {
+      setStatusMessage('⚠️ 撮影対象コンテキストが未指定のため出品準備プレビューを生成できません。');
+      return;
+    }
+    const handoff = evaluatePhotoListingHandoff({
+      targetContext,
+      capturedPhotos,
+      existingRegisteredUnitIds
+    });
+    setListingHandoff(handoff);
+    setShowListingPanel(true);
+    onListingHandoffEvaluated?.(handoff);
+    setStatusMessage(`📦 出品準備プレビュー: [${handoff.reasonCode}] ${handoff.reasonMessageJa}`);
   };
 
   // Manual trigger to sync photo gate to mock inventory unit
@@ -343,6 +369,24 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
               🔍 Dry Run プレビュー
             </button>
 
+            <button
+              type="button"
+              onClick={handleGenerateListingHandoff}
+              style={{
+                fontSize: '0.75rem',
+                padding: '0.3rem 0.65rem',
+                borderRadius: '6px',
+                fontWeight: 700,
+                background: '#1e293b',
+                color: '#c084fc',
+                border: '1px solid #9333ea',
+                cursor: 'pointer'
+              }}
+              title="本番出品や在庫DBを変更せず、出品ドラフト用写真候補とゲート状態を事前プレビューします"
+            >
+              📦 出品準備プレビュー
+            </button>
+
             {gateStatus.photoQaComplete && linkage.status === 'LINKED_STAGED' && (
               <button
                 type="button"
@@ -447,6 +491,80 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Listing Photo Handoff Preview Panel (Dry Run) */}
+        {showListingPanel && listingHandoff && (
+          <div
+            style={{
+              background: '#150f28',
+              border: listingHandoff.canPrepareDraft ? '1px solid #a855f7' : '1px solid #f59e0b',
+              borderRadius: '8px',
+              padding: '0.85rem 1rem',
+              marginBottom: '1rem',
+              fontSize: '0.82rem'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span
+                  style={{
+                    padding: '0.2rem 0.5rem',
+                    borderRadius: '4px',
+                    fontWeight: 700,
+                    background: listingHandoff.canPrepareDraft ? 'rgba(168,85,247,0.2)' : 'rgba(245,158,11,0.2)',
+                    color: listingHandoff.canPrepareDraft ? '#c084fc' : '#fbbf24',
+                    border: listingHandoff.canPrepareDraft ? '1px solid #a855f7' : '1px solid #f59e0b'
+                  }}
+                >
+                  [{listingHandoff.reasonCode}]
+                </span>
+                <span style={{ fontWeight: 600, color: '#f8fafc' }}>
+                  {listingHandoff.canPrepareDraft ? '出品ドラフト写真準備可能 (Dry Run PASS)' : '出品準備保留 (HOLD)'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowListingPanel(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem'
+                }}
+              >
+                ✕ 閉じる
+              </button>
+            </div>
+
+            <p style={{ margin: '0 0 0.5rem 0', color: '#e9d5ff' }}>
+              {listingHandoff.reasonMessageJa}
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.5rem', background: '#0b0617', padding: '0.6rem', borderRadius: '6px' }}>
+              <div>
+                <span style={{ color: '#94a3b8' }}>対象チャネル: </span>
+                <span style={{ color: '#c084fc', fontWeight: 600 }}>{listingHandoff.targetChannels.join(', ')}</span>
+              </div>
+              <div>
+                <span style={{ color: '#94a3b8' }}>メイン出品画像 (Hero): </span>
+                <span style={{ color: listingHandoff.heroPhoto ? '#34d399' : '#f87171', fontWeight: 600 }}>
+                  {listingHandoff.heroPhoto ? `正面 (${listingHandoff.heroPhoto.angle}) ${listingHandoff.heroPhoto.isAutoFixed ? '補正済' : '高画質原本'}` : '未選定'}
+                </span>
+              </div>
+              <div>
+                <span style={{ color: '#94a3b8' }}>写真候補総数: </span>
+                <span style={{ color: '#38bdf8', fontWeight: 600 }}>{listingHandoff.totalPhotoCount} 枚 (原本証拠保全: 済)</span>
+              </div>
+              <div>
+                <span style={{ color: '#94a3b8' }}>全体出品適格性 (6ゲート): </span>
+                <span style={{ color: listingHandoff.overallListingEligible ? '#34d399' : '#fbbf24', fontWeight: 600 }}>
+                  {listingHandoff.overallListingEligible ? '全適格 (READY)' : '検品・棚入ゲート待ち (HOLD)'}
+                </span>
+              </div>
+            </div>
           </div>
         )}
 
