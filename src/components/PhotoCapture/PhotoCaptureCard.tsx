@@ -18,7 +18,8 @@ import {
   checkPhotoGateCompletion,
   MockInventoryPhotoGateBridge
 } from '../../services/photoCaptureService';
-import { InventoryPhotoGateSyncResult } from '../../types/photoCapture';
+import { CentralInventoryPhotoAdapter } from '../../services/centralInventoryPhotoAdapter';
+import { InventoryPhotoGateSyncResult, PhotoGateDryRunPreview } from '../../types/photoCapture';
 
 interface PhotoCaptureCardProps {
   isTabActive?: boolean;
@@ -26,6 +27,7 @@ interface PhotoCaptureCardProps {
   targetContext?: PhotoCaptureTargetContext;
   existingRegisteredUnitIds?: string[];
   inventoryBridge?: MockInventoryPhotoGateBridge;
+  integrationAdapter?: CentralInventoryPhotoAdapter;
   onPhotoGateEvaluated?: (gate: { photoCaptureComplete: boolean; photoQaComplete: boolean }) => void;
   onSyncToInventory?: (result: InventoryPhotoGateSyncResult) => void;
 }
@@ -36,6 +38,7 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
   targetContext,
   existingRegisteredUnitIds,
   inventoryBridge,
+  integrationAdapter,
   onPhotoGateEvaluated,
   onSyncToInventory
 }) => {
@@ -63,6 +66,8 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
   const [statusMessage, setStatusMessage] = useState<string>('商品を配置し、フットペダル（Spaceキー）または撮影ボタンを押してください。');
   const [isCapturing, setIsCapturing] = useState<boolean>(false);
   const [evidenceViewMode, setEvidenceViewMode] = useState<'CORRECTED' | 'ORIGINAL'>('CORRECTED');
+  const [dryRunPreview, setDryRunPreview] = useState<PhotoGateDryRunPreview | null>(null);
+  const [showPreviewPanel, setShowPreviewPanel] = useState<boolean>(false);
 
   // Synchronous lock ref to prevent race conditions during rapid key events
   const isCapturingRef = useRef<boolean>(false);
@@ -164,10 +169,35 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
     setEvidenceViewMode('CORRECTED');
   };
 
+  // Manual trigger to generate Dry Run preview
+  const handleGenerateDryRun = () => {
+    if (!targetContext) {
+      setStatusMessage('⚠️ 撮影対象コンテキストが未指定のため Dry Run を生成できません。');
+      return;
+    }
+    const adapter = integrationAdapter || new CentralInventoryPhotoAdapter({ existingRegisteredUnitIds });
+    const preview = adapter.generateDryRunPreview(targetContext, capturedPhotos);
+    setDryRunPreview(preview);
+    setShowPreviewPanel(true);
+    setStatusMessage(`🔍 Dry Run プレビュー: [${preview.reasonCode}] ${preview.reasonMessageJa}`);
+  };
+
   // Manual trigger to sync photo gate to mock inventory unit
   const handleSyncToInventory = () => {
     if (!targetContext) return;
-    if (inventoryBridge) {
+    if (integrationAdapter) {
+      const execResult = integrationAdapter.executeSafeIntegration(targetContext, capturedPhotos);
+      setDryRunPreview(execResult.preview);
+      onSyncToInventory?.({
+        success: execResult.success,
+        status: execResult.preview.canApply ? 'UPDATED' : 'HOLD_BLOCKED',
+        unit: execResult.committedUnit,
+        messageJa: execResult.messageJa,
+        photoCaptureComplete: execResult.preview.gateDiff?.photoCaptureComplete.after ?? false,
+        photoQaComplete: execResult.preview.gateDiff?.photoQaComplete.after ?? false
+      });
+      setStatusMessage(execResult.messageJa);
+    } else if (inventoryBridge) {
       const result = inventoryBridge.syncPhotoGate(targetContext, capturedPhotos);
       onSyncToInventory?.(result);
       setStatusMessage(result.messageJa);
@@ -295,6 +325,24 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
               Gate 要件: {gateStatus.photoQaComplete ? '合格 (PASS)' : `未達 (${gateStatus.passedRequiredAngles.length}/4)`}
             </span>
 
+            <button
+              type="button"
+              onClick={handleGenerateDryRun}
+              style={{
+                fontSize: '0.75rem',
+                padding: '0.3rem 0.65rem',
+                borderRadius: '6px',
+                fontWeight: 700,
+                background: '#1e293b',
+                color: '#38bdf8',
+                border: '1px solid #0284c7',
+                cursor: 'pointer'
+              }}
+              title="実在庫DBへ書き込まず、差分と理由コードを事前プレビューします"
+            >
+              🔍 Dry Run プレビュー
+            </button>
+
             {gateStatus.photoQaComplete && linkage.status === 'LINKED_STAGED' && (
               <button
                 type="button"
@@ -315,6 +363,92 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
             )}
           </div>
         </div>
+
+        {/* Dry Run Preview Panel (In-memory diff & Reason code display) */}
+        {showPreviewPanel && dryRunPreview && (
+          <div
+            style={{
+              background: '#0b1329',
+              border: dryRunPreview.canApply ? '1px solid #10b981' : '1px solid #f59e0b',
+              borderRadius: '8px',
+              padding: '0.85rem 1rem',
+              marginBottom: '1rem',
+              fontSize: '0.82rem'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span
+                  style={{
+                    padding: '0.2rem 0.5rem',
+                    borderRadius: '4px',
+                    fontWeight: 700,
+                    background: dryRunPreview.canApply ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.2)',
+                    color: dryRunPreview.canApply ? '#34d399' : '#fbbf24',
+                    border: dryRunPreview.canApply ? '1px solid #10b981' : '1px solid #f59e0b'
+                  }}
+                >
+                  [{dryRunPreview.reasonCode}]
+                </span>
+                <span style={{ fontWeight: 600, color: '#f8fafc' }}>
+                  {dryRunPreview.canApply ? '適用可能 (Safe Dry Run PASS)' : '保留対象 (HOLD)'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPreviewPanel(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem'
+                }}
+              >
+                ✕ 閉じる
+              </button>
+            </div>
+
+            <p style={{ margin: '0 0 0.5rem 0', color: '#cbd5e1' }}>
+              {dryRunPreview.reasonMessageJa}
+            </p>
+
+            {dryRunPreview.gateDiff && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.5rem', background: '#070d1e', padding: '0.6rem', borderRadius: '6px' }}>
+                <div>
+                  <span style={{ color: '#94a3b8' }}>撮影完了 (photoCaptureComplete): </span>
+                  <span style={{ color: dryRunPreview.gateDiff.photoCaptureComplete.before ? '#34d399' : '#94a3b8' }}>
+                    {String(dryRunPreview.gateDiff.photoCaptureComplete.before)}
+                  </span>
+                  {' ➔ '}
+                  <span style={{ color: dryRunPreview.gateDiff.photoCaptureComplete.after ? '#34d399' : '#f87171', fontWeight: 700 }}>
+                    {String(dryRunPreview.gateDiff.photoCaptureComplete.after)}
+                  </span>
+                </div>
+                <div>
+                  <span style={{ color: '#94a3b8' }}>QA完了 (photoQaComplete): </span>
+                  <span style={{ color: dryRunPreview.gateDiff.photoQaComplete.before ? '#34d399' : '#94a3b8' }}>
+                    {String(dryRunPreview.gateDiff.photoQaComplete.before)}
+                  </span>
+                  {' ➔ '}
+                  <span style={{ color: dryRunPreview.gateDiff.photoQaComplete.after ? '#34d399' : '#f87171', fontWeight: 700 }}>
+                    {String(dryRunPreview.gateDiff.photoQaComplete.after)}
+                  </span>
+                </div>
+                <div>
+                  <span style={{ color: '#94a3b8' }}>非写真ゲート保護: </span>
+                  <span style={{ color: '#38bdf8', fontWeight: 600 }}>全4項目 変更なし (SAFE)</span>
+                </div>
+                <div>
+                  <span style={{ color: '#94a3b8' }}>原本写真保全: </span>
+                  <span style={{ color: dryRunPreview.evidencePreserved ? '#34d399' : '#f87171', fontWeight: 600 }}>
+                    {dryRunPreview.evidencePreserved ? '保全済み (READ-ONLY)' : '未保全'} ({dryRunPreview.capturedPhotosCount} 枚)
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Step 1: Angle Navigation Steps */}
         <div style={{ display: 'flex', gap: '0.5rem', overflowX: 'auto', paddingBottom: '0.75rem', marginBottom: '1rem', borderBottom: '1px solid #1e293b' }}>

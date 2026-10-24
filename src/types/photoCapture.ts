@@ -2,7 +2,7 @@
  * Types and Interfaces for Pedal-Assisted Photo Capture & Automated Photo QA MVP
  */
 
-import type { InventoryUnit } from './centralInventory';
+import type { InventoryUnit, SellableInventoryGate, InventoryUnitStatus } from './centralInventory';
 
 export type PhotoAngle = 
   | 'FRONT'
@@ -97,6 +97,62 @@ export interface InventoryPhotoGateSyncResult {
   messageJa: string;
   photoCaptureComplete: boolean;
   photoQaComplete: boolean;
+}
+
+/**
+ * 写真ゲートと在庫連携の判定理由コード (Reason Codes)
+ */
+export type PhotoGateSyncReasonCode =
+  | 'SUCCESS_EVALUATED'
+  | 'HOLD_UNCONFIRMED_CONTEXT'
+  | 'HOLD_UNIT_NOT_FOUND'
+  | 'HOLD_SKU_MISMATCH'
+  | 'HOLD_INCOMPLETE_ANGLES'
+  | 'HOLD_QA_RETAKE_REQUIRED'
+  | 'HOLD_AUTO_FIX_PENDING'
+  | 'HOLD_ALREADY_REGISTERED_CONFLICT'
+  | 'IDEMPOTENT_ALREADY_COMPLETED';
+
+/**
+ * 変更前後の比較が可能な Dry Run プレビューモデル
+ * 実在庫DBへ書き込まず、ゲート更新の影響範囲を事前検証します。
+ */
+export interface PhotoGateDryRunPreview {
+  isDryRun: boolean;
+  canApply: boolean;
+  reasonCode: PhotoGateSyncReasonCode;
+  reasonMessageJa: string;
+  before: {
+    inventoryUnitId: string;
+    sku: string;
+    status: InventoryUnitStatus;
+    sellableGate: SellableInventoryGate;
+    physicalStock?: number;
+    sellableStock?: number;
+    availableToSell?: number;
+  } | null;
+  after: {
+    inventoryUnitId: string;
+    sku: string;
+    status: InventoryUnitStatus;
+    sellableGate: SellableInventoryGate;
+    physicalStock?: number;
+    sellableStock?: number;
+    availableToSell?: number;
+  } | null;
+  gateDiff: {
+    photoCaptureComplete: { before: boolean; after: boolean };
+    photoQaComplete: { before: boolean; after: boolean };
+    identityVerified: { before: boolean; after: boolean; changed: boolean };
+    quantityVerified: { before: boolean; after: boolean; changed: boolean };
+    conditionVerified: { before: boolean; after: boolean; changed: boolean };
+    storageLocationRegistered: { before: boolean; after: boolean; changed: boolean };
+    statusChanged: boolean;
+    stockQuantitiesChanged: boolean;
+    nonPhotoGatesUntouched: boolean;
+  } | null;
+  evidencePreserved: boolean;
+  capturedPhotosCount: number;
 }
 
 export interface PhotoStorageRecord {

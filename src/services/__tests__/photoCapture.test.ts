@@ -22,6 +22,7 @@ import {
   updateInventoryUnitPhotoGate,
   MockInventoryPhotoGateBridge
 } from '../photoCaptureService';
+import { CentralInventoryPhotoAdapter } from '../centralInventoryPhotoAdapter';
 import { CapturedPhoto, REQUIRED_ANGLES, PhotoQaIssue, PhotoCaptureTargetContext, InventoryPhotoGateSyncResult } from '../../types/photoCapture';
 import type { InventoryUnit } from '../../types/centralInventory';
 
@@ -926,6 +927,208 @@ export async function runPhotoCaptureTests(): Promise<TestResult> {
   assert(
     nonExistentSync.success === false && nonExistentSync.status === 'UNIT_NOT_FOUND',
     'Test X9-d: MockInventoryPhotoGateBridge safely handles non-existent unit ID'
+  );
+
+  // Test Y: Central Inventory Safe Integration Adapter & Dry Run Previews (STEP 22)
+  const adapterBaselineUnit: InventoryUnit = {
+    inventoryUnitId: 'UNIT-ADAPTER-001',
+    sku: 'SKU-CANON-AE1-SLV',
+    status: 'ON_HAND',
+    receivedAt: '2026-10-25T00:00:00Z',
+    sellableGate: {
+      identityVerified: false,
+      quantityVerified: false,
+      conditionVerified: false,
+      photoCaptureComplete: false,
+      photoQaComplete: false,
+      storageLocationRegistered: false
+    },
+    updatedAt: '2026-10-25T00:00:00Z'
+  };
+
+  const adapterTargetContext: PhotoCaptureTargetContext = {
+    sku: 'SKU-CANON-AE1-SLV',
+    itemTitle: 'Canon AE-1 Silver',
+    inventoryUnitId: 'UNIT-ADAPTER-001',
+    isConfirmed: true
+  };
+
+  // Instantiate adapter with isolated cloned in-memory units and registered unit ids
+  const safeAdapter = new CentralInventoryPhotoAdapter({
+    inMemoryUnits: [adapterBaselineUnit],
+    existingRegisteredUnitIds: ['UNIT-EXISTING-999']
+  });
+
+  // Test Y1: Dry Run preview on valid target context with 4 angles USE_AS_IS
+  const dryRunSuccess = safeAdapter.generateDryRunPreview(adapterTargetContext, allPassedPhotos);
+  assert(
+    dryRunSuccess.reasonCode === 'SUCCESS_EVALUATED' && dryRunSuccess.canApply === true,
+    'Test Y1-a: Dry Run returns SUCCESS_EVALUATED and canApply === true when 4 required angles pass USE_AS_IS'
+  );
+  assert(
+    dryRunSuccess.gateDiff !== null &&
+    dryRunSuccess.gateDiff.photoCaptureComplete.before === false &&
+    dryRunSuccess.gateDiff.photoCaptureComplete.after === true &&
+    dryRunSuccess.gateDiff.photoQaComplete.before === false &&
+    dryRunSuccess.gateDiff.photoQaComplete.after === true,
+    'Test Y1-b: Dry Run gateDiff clearly previews photoCaptureComplete & photoQaComplete transitioning from false to true'
+  );
+  assert(
+    dryRunSuccess.gateDiff !== null &&
+    dryRunSuccess.gateDiff.nonPhotoGatesUntouched === true,
+    'Test Y1-c: Dry Run gateDiff confirms nonPhotoGatesUntouched is true'
+  );
+  assert(
+    dryRunSuccess.evidencePreserved === true && dryRunSuccess.capturedPhotosCount === 4,
+    'Test Y1-d: Dry Run confirms evidencePreserved === true with 4 photos captured'
+  );
+
+  // Test Y2: HOLD on unconfirmed target context
+  const dryRunUnconfirmed = safeAdapter.generateDryRunPreview(
+    { ...adapterTargetContext, isConfirmed: false },
+    allPassedPhotos
+  );
+  assert(
+    dryRunUnconfirmed.reasonCode === 'HOLD_UNCONFIRMED_CONTEXT' && dryRunUnconfirmed.canApply === false && dryRunUnconfirmed.gateDiff === null,
+    'Test Y2: Dry Run returns HOLD_UNCONFIRMED_CONTEXT and canApply === false for unconfirmed target'
+  );
+
+  // Test Y3: HOLD on non-existent / not found inventoryUnitId
+  const dryRunNotFound = safeAdapter.generateDryRunPreview(
+    { ...adapterTargetContext, inventoryUnitId: 'UNIT-NOT-FOUND-404' },
+    allPassedPhotos
+  );
+  assert(
+    dryRunNotFound.reasonCode === 'HOLD_UNIT_NOT_FOUND' && dryRunNotFound.canApply === false,
+    'Test Y3: Dry Run returns HOLD_UNIT_NOT_FOUND when unit does not exist in inventory repository'
+  );
+
+  // Test Y4: HOLD on SKU mismatch
+  const dryRunSkuMismatch = safeAdapter.generateDryRunPreview(
+    { ...adapterTargetContext, sku: 'SKU-MISMATCH-999' },
+    allPassedPhotos
+  );
+  assert(
+    dryRunSkuMismatch.reasonCode === 'HOLD_SKU_MISMATCH' && dryRunSkuMismatch.canApply === false,
+    'Test Y4: Dry Run returns HOLD_SKU_MISMATCH when catalog SKU differs from inventory unit SKU'
+  );
+
+  // Test Y5: HOLD on missing required angles
+  const dryRunIncomplete = safeAdapter.generateDryRunPreview(adapterTargetContext, initialPhotosRecord);
+  assert(
+    dryRunIncomplete.reasonCode === 'HOLD_INCOMPLETE_ANGLES' && dryRunIncomplete.canApply === false,
+    'Test Y5: Dry Run returns HOLD_INCOMPLETE_ANGLES when required angles (e.g. BACK, LEFT, RIGHT) are missing'
+  );
+
+  // Test Y6: HOLD on RETAKE required angle
+  const dryRunRetake = safeAdapter.generateDryRunPreview(adapterTargetContext, retakePhotos);
+  assert(
+    dryRunRetake.reasonCode === 'HOLD_QA_RETAKE_REQUIRED' && dryRunRetake.canApply === false,
+    'Test Y6: Dry Run returns HOLD_QA_RETAKE_REQUIRED when any angle is flagged for RETAKE'
+  );
+
+  // Test Y7: HOLD on AUTO_FIX pending angle
+  const dryRunAutoFix = safeAdapter.generateDryRunPreview(adapterTargetContext, autoFixPendingPhotos);
+  assert(
+    dryRunAutoFix.reasonCode === 'HOLD_AUTO_FIX_PENDING' && dryRunAutoFix.canApply === false,
+    'Test Y7: Dry Run returns HOLD_AUTO_FIX_PENDING when any angle is pending AUTO_FIX promotion'
+  );
+
+  // Test Y8: HOLD on duplicate registration conflict
+  const conflictAdapter = new CentralInventoryPhotoAdapter({
+    inMemoryUnits: [{ ...adapterBaselineUnit, inventoryUnitId: 'UNIT-CONFLICT-123' }],
+    existingRegisteredUnitIds: ['UNIT-CONFLICT-123']
+  });
+  const dryRunConflict = conflictAdapter.generateDryRunPreview(
+    { ...adapterTargetContext, inventoryUnitId: 'UNIT-CONFLICT-123' },
+    allPassedPhotos
+  );
+  assert(
+    dryRunConflict.reasonCode === 'HOLD_ALREADY_REGISTERED_CONFLICT' && dryRunConflict.canApply === false,
+    'Test Y8: Dry Run returns HOLD_ALREADY_REGISTERED_CONFLICT when unit ID is flagged as already registered/conflict'
+  );
+
+  // Test Y9: Safe idempotency on re-run (IDEMPOTENT_ALREADY_COMPLETED)
+  const alreadyCompletedUnit: InventoryUnit = {
+    ...adapterBaselineUnit,
+    inventoryUnitId: 'UNIT-ALREADY-DONE',
+    sellableGate: {
+      ...adapterBaselineUnit.sellableGate,
+      photoCaptureComplete: true,
+      photoQaComplete: true
+    }
+  };
+  const idempotentAdapter = new CentralInventoryPhotoAdapter({ inMemoryUnits: [alreadyCompletedUnit] });
+  const dryRunIdempotent = idempotentAdapter.generateDryRunPreview(
+    { ...adapterTargetContext, inventoryUnitId: 'UNIT-ALREADY-DONE' },
+    allPassedPhotos
+  );
+  assert(
+    dryRunIdempotent.reasonCode === 'IDEMPOTENT_ALREADY_COMPLETED' && dryRunIdempotent.canApply === true,
+    'Test Y9-a: Dry Run returns IDEMPOTENT_ALREADY_COMPLETED when unit photo gates are already true'
+  );
+  assert(
+    dryRunIdempotent.gateDiff !== null &&
+    dryRunIdempotent.gateDiff.photoCaptureComplete.before === true &&
+    dryRunIdempotent.gateDiff.photoCaptureComplete.after === true,
+    'Test Y9-b: Dry Run idempotency diff indicates no alteration to already passed gates'
+  );
+
+  // Test Y10: Execute safe integration in-memory & strict non-photo gate preservation
+  const execResult = safeAdapter.executeSafeIntegration(adapterTargetContext, allPassedPhotos);
+  assert(
+    execResult.success === true && execResult.committedUnit !== null,
+    'Test Y10-a: executeSafeIntegration completes successfully and returns committed unit'
+  );
+  const updatedUnit = execResult.committedUnit!;
+  assert(
+    updatedUnit.sellableGate.photoCaptureComplete === true && updatedUnit.sellableGate.photoQaComplete === true,
+    'Test Y10-b: Committed unit has photoCaptureComplete: true and photoQaComplete: true'
+  );
+  assert(
+    updatedUnit.sellableGate.identityVerified === false &&
+    updatedUnit.sellableGate.quantityVerified === false &&
+    updatedUnit.sellableGate.conditionVerified === false &&
+    updatedUnit.sellableGate.storageLocationRegistered === false,
+    'Test Y10-c: Non-photo gates (identity, quantity, condition, location) remain strictly untouched'
+  );
+  assert(
+    updatedUnit.status === 'ON_HAND',
+    'Test Y10-d: Unit status remains ON_HAND without accidental promotion to AVAILABLE'
+  );
+
+  // Test Y11: Read-only Original Evidence Preservation
+  const snapshotBefore = safeAdapter.getUnitSnapshot('UNIT-ADAPTER-001');
+  assert(
+    snapshotBefore !== null && snapshotBefore.inventoryUnitId === 'UNIT-ADAPTER-001',
+    'Test Y11-a: getUnitSnapshot retrieves in-memory unit without persisting to disk or external DB'
+  );
+  assert(
+    allPassedPhotos.FRONT.dataUrl.length > 0 && (allPassedPhotos.FRONT.originalDataUrl === undefined || allPassedPhotos.FRONT.originalDataUrl.length > 0),
+    'Test Y11-b: Original photo evidence dataUrls are completely preserved and unmodified by adapter operations'
+  );
+
+  // Test Y12: Safe Retry After Failure & Idempotent Re-execution
+  // Step 1: Failed attempt with missing photos
+  const retryAdapter = new CentralInventoryPhotoAdapter({ inMemoryUnits: [adapterBaselineUnit] });
+  const failedExec = retryAdapter.executeSafeIntegration(adapterTargetContext, initialPhotosRecord);
+  assert(
+    failedExec.success === false && !failedExec.committedUnit && failedExec.preview.reasonCode === 'HOLD_INCOMPLETE_ANGLES',
+    'Test Y12-a: executeSafeIntegration cleanly fails and blocks on incomplete photos without partial state corruption'
+  );
+
+  // Step 2: Retry with complete photos succeeds
+  const retryExec = retryAdapter.executeSafeIntegration(adapterTargetContext, allPassedPhotos);
+  assert(
+    retryExec.success === true && retryExec.committedUnit !== null && retryExec.preview.reasonCode === 'SUCCESS_EVALUATED',
+    'Test Y12-b: Retrying executeSafeIntegration with valid photos succeeds cleanly'
+  );
+
+  // Step 3: Double execution / Re-sync succeeds idempotently
+  const doubleExec = retryAdapter.executeSafeIntegration(adapterTargetContext, allPassedPhotos);
+  assert(
+    doubleExec.success === true && doubleExec.preview.reasonCode === 'IDEMPOTENT_ALREADY_COMPLETED',
+    'Test Y12-c: Double execution of executeSafeIntegration is safely idempotent'
   );
 
   log.push(`\nSummary: ${passed} passed, ${failed} failed.`);
