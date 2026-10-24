@@ -15,15 +15,19 @@ import {
   ICameraHardwareAdapter,
   executePhotoCaptureFlow,
   evaluatePhotoInventoryLinkage,
-  checkPhotoGateCompletion
+  checkPhotoGateCompletion,
+  MockInventoryPhotoGateBridge
 } from '../../services/photoCaptureService';
+import { InventoryPhotoGateSyncResult } from '../../types/photoCapture';
 
 interface PhotoCaptureCardProps {
   isTabActive?: boolean;
   cameraAdapter?: ICameraHardwareAdapter;
   targetContext?: PhotoCaptureTargetContext;
   existingRegisteredUnitIds?: string[];
+  inventoryBridge?: MockInventoryPhotoGateBridge;
   onPhotoGateEvaluated?: (gate: { photoCaptureComplete: boolean; photoQaComplete: boolean }) => void;
+  onSyncToInventory?: (result: InventoryPhotoGateSyncResult) => void;
 }
 
 export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
@@ -31,7 +35,9 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
   cameraAdapter,
   targetContext,
   existingRegisteredUnitIds,
-  onPhotoGateEvaluated
+  inventoryBridge,
+  onPhotoGateEvaluated,
+  onSyncToInventory
 }) => {
   // State & Ref variables
   const [currentAngleIndex, setCurrentAngleIndex] = useState<number>(0);
@@ -158,6 +164,18 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
     setEvidenceViewMode('CORRECTED');
   };
 
+  // Manual trigger to sync photo gate to mock inventory unit
+  const handleSyncToInventory = () => {
+    if (!targetContext) return;
+    if (inventoryBridge) {
+      const result = inventoryBridge.syncPhotoGate(targetContext, capturedPhotos);
+      onSyncToInventory?.(result);
+      setStatusMessage(result.messageJa);
+    } else {
+      setStatusMessage('ℹ️ モック在庫ブリッジが未設定のため、UIシミュレーションのみ実行されました。');
+    }
+  };
+
   // Calculate overall completion summary: ONLY count photos with status USE_AS_IS
   const completedCount = Object.values(capturedPhotos).filter((p) => p !== null && p.qaResult.status === 'USE_AS_IS').length;
   const requiredCount = REQUIRED_ANGLES.filter((a) => a.isRequired).length;
@@ -276,6 +294,25 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
             >
               Gate 要件: {gateStatus.photoQaComplete ? '合格 (PASS)' : `未達 (${gateStatus.passedRequiredAngles.length}/4)`}
             </span>
+
+            {gateStatus.photoQaComplete && linkage.status === 'LINKED_STAGED' && (
+              <button
+                type="button"
+                onClick={handleSyncToInventory}
+                style={{
+                  fontSize: '0.75rem',
+                  padding: '0.3rem 0.65rem',
+                  borderRadius: '6px',
+                  fontWeight: 700,
+                  background: '#059669',
+                  color: 'white',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                🔄 在庫ゲートへ写真合格を反映 (Mock Sync)
+              </button>
+            )}
           </div>
         </div>
 

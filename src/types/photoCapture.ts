@@ -2,6 +2,8 @@
  * Types and Interfaces for Pedal-Assisted Photo Capture & Automated Photo QA MVP
  */
 
+import type { InventoryUnit } from './centralInventory';
+
 export type PhotoAngle = 
   | 'FRONT'
   | 'BACK'
@@ -75,6 +77,26 @@ export interface PhotoCaptureTargetContext {
   inventoryUnitId?: string; // 実物個体管理番号 (Unit ID: 例 UNIT-2026-0042)
   serialNumber?: string;    // 個体シリアル番号 (現物に刻印された製造番号等)
   isConfirmed: boolean;     // 確定フラグ (falseの場合はUNLINKED_HOLDとなり本番反映を禁止)
+}
+
+/**
+ * 写真撮影結果と在庫ゲート(SellableInventoryGate)との連携ステータス
+ */
+export type InventoryPhotoGateStatus =
+  | 'UPDATED'           // 撮影・QA合格により在庫個体の写真ゲートが正常更新された
+  | 'IDEMPOTENT_NOOP'   // 既に合格済みのため安全にスキップ（冪等処理）
+  | 'HOLD_BLOCKED'      // コンテキスト未確定・保留中のため更新ブロック
+  | 'UNIT_NOT_FOUND'    // 指定の在庫個体が存在しない
+  | 'SKU_MISMATCH'      // 個体のSKUと指定SKUが不一致
+  | 'QA_INCOMPLETE';    // 必須アングルの撮影不足またはQA不合格
+
+export interface InventoryPhotoGateSyncResult {
+  success: boolean;
+  status: InventoryPhotoGateStatus;
+  unit?: InventoryUnit;
+  messageJa: string;
+  photoCaptureComplete: boolean;
+  photoQaComplete: boolean;
 }
 
 export interface PhotoStorageRecord {

@@ -18,9 +18,12 @@ import {
   validatePhotoItemAssociation,
   MockInMemoryPhotoStorageAdapter,
   evaluatePhotoInventoryLinkage,
-  checkPhotoGateCompletion
+  checkPhotoGateCompletion,
+  updateInventoryUnitPhotoGate,
+  MockInventoryPhotoGateBridge
 } from '../photoCaptureService';
-import { CapturedPhoto, REQUIRED_ANGLES, PhotoQaIssue, PhotoCaptureTargetContext } from '../../types/photoCapture';
+import { CapturedPhoto, REQUIRED_ANGLES, PhotoQaIssue, PhotoCaptureTargetContext, InventoryPhotoGateSyncResult } from '../../types/photoCapture';
+import type { InventoryUnit } from '../../types/centralInventory';
 
 export interface TestResult {
   name: string;
@@ -763,6 +766,166 @@ export async function runPhotoCaptureTests(): Promise<TestResult> {
   assert(
     completeGate.photoCaptureComplete === true && completeGate.photoQaComplete === true,
     'Test W7-c: checkPhotoGateCompletion passes both photoCaptureComplete and photoQaComplete when 4 required angles are USE_AS_IS'
+  );
+
+  // Test X: Sellable Inventory Gate Linkage, Safety Guards & Idempotency (STEP 20)
+  const baselineMockUnit: InventoryUnit = {
+    inventoryUnitId: 'UNIT-2026-GATE-001',
+    sku: 'SKU-CANON-AE1-SLV',
+    status: 'ON_HAND',
+    receivedAt: '2026-10-24T00:00:00Z',
+    sellableGate: {
+      identityVerified: false,
+      quantityVerified: false,
+      conditionVerified: false,
+      photoCaptureComplete: false,
+      photoQaComplete: false,
+      storageLocationRegistered: false
+    },
+    updatedAt: '2026-10-24T00:00:00Z'
+  };
+
+  const validTargetContext: PhotoCaptureTargetContext = {
+    sku: 'SKU-CANON-AE1-SLV',
+    itemTitle: 'Canon AE-1 Silver',
+    inventoryUnitId: 'UNIT-2026-GATE-001',
+    isConfirmed: true
+  };
+
+  // Test X1: Missing Angles Guard (撮影不足時に在庫データ未変更)
+  const incompleteResult = updateInventoryUnitPhotoGate(baselineMockUnit, validTargetContext, initialPhotosRecord);
+  assert(
+    incompleteResult.success === false && incompleteResult.status === 'QA_INCOMPLETE',
+    'Test X1-a: updateInventoryUnitPhotoGate rejects sync when required angles are missing (QA_INCOMPLETE)'
+  );
+  assert(
+    baselineMockUnit.sellableGate.photoCaptureComplete === false && baselineMockUnit.sellableGate.photoQaComplete === false,
+    'Test X1-b: baseline unit gate remains unmodified (false) on incomplete capture'
+  );
+
+  // Test X2: RETAKE Status Guard (再撮影必要時に在庫データ未変更)
+  const retakePhotos = {
+    ...allPassedPhotos,
+    RIGHT: {
+      ...unitPhoto,
+      angle: 'RIGHT' as const,
+      qaResult: { status: 'RETAKE' as const, issues: [{ code: 'BLUR_DETECTED' as const, severity: 'ERROR' as const, message: 'ピンぼけ' }], metrics: { blurScore: 80, brightness: 120, framingCoverage: 85, glareScore: 5 }, suggestedAction: '再撮影' }
+    }
+  };
+  const retakeResult = updateInventoryUnitPhotoGate(baselineMockUnit, validTargetContext, retakePhotos);
+  assert(
+    retakeResult.success === false && retakeResult.status === 'QA_INCOMPLETE' && (retakeResult.messageJa.includes('RETAKE') || retakeResult.messageJa.includes('要補正')),
+    'Test X2: updateInventoryUnitPhotoGate rejects sync when any required angle is RETAKE'
+  );
+
+  // Test X3: AUTO_FIX Unapplied Guard (自動補正未実行時に在庫データ未変更)
+  const autoFixPendingPhotos = {
+    ...allPassedPhotos,
+    BACK: {
+      ...unitPhoto,
+      angle: 'BACK' as const,
+      qaResult: { status: 'AUTO_FIX' as const, issues: [{ code: 'EXPOSURE_UNDER' as const, severity: 'WARNING' as const, message: '露出不足' }], metrics: { blurScore: 10, brightness: 60, framingCoverage: 85, glareScore: 5 }, suggestedAction: '自動補正' }
+    }
+  };
+  const autoFixPendingResult = updateInventoryUnitPhotoGate(baselineMockUnit, validTargetContext, autoFixPendingPhotos);
+  assert(
+    autoFixPendingResult.success === false && autoFixPendingResult.status === 'QA_INCOMPLETE',
+    'Test X3: updateInventoryUnitPhotoGate rejects sync when an angle is in AUTO_FIX state without promotion'
+  );
+
+  // Test X4: Mismatched Unit ID Guard (異なる個体ID時に在庫データ未変更)
+  const wrongUnitContext: PhotoCaptureTargetContext = {
+    sku: 'SKU-CANON-AE1-SLV',
+    inventoryUnitId: 'UNIT-2026-DIFFERENT-999',
+    isConfirmed: true
+  };
+  const wrongUnitResult = updateInventoryUnitPhotoGate(baselineMockUnit, wrongUnitContext, allPassedPhotos);
+  assert(
+    wrongUnitResult.success === false && wrongUnitResult.status === 'UNIT_NOT_FOUND',
+    'Test X4: updateInventoryUnitPhotoGate rejects sync when inventoryUnitId does not match target unit'
+  );
+
+  // Test X5: Mismatched SKU Guard (異なるSKU時に在庫データ未変更)
+  const wrongSkuContext: PhotoCaptureTargetContext = {
+    sku: 'SKU-DIFFERENT-MODEL',
+    inventoryUnitId: 'UNIT-2026-GATE-001',
+    isConfirmed: true
+  };
+  const wrongSkuResult = updateInventoryUnitPhotoGate(baselineMockUnit, wrongSkuContext, allPassedPhotos);
+  assert(
+    wrongSkuResult.success === false && wrongSkuResult.status === 'SKU_MISMATCH',
+    'Test X5: updateInventoryUnitPhotoGate rejects sync when SKU does not match target unit'
+  );
+
+  // Test X6: Unconfirmed Target Context HOLD Guard (未確定・HOLD時に在庫データ未変更)
+  const unconfirmedGateContext: PhotoCaptureTargetContext = {
+    sku: 'SKU-CANON-AE1-SLV',
+    inventoryUnitId: 'UNIT-2026-GATE-001',
+    isConfirmed: false
+  };
+  const unconfirmedGateResult = updateInventoryUnitPhotoGate(baselineMockUnit, unconfirmedGateContext, allPassedPhotos);
+  assert(
+    unconfirmedGateResult.success === false && unconfirmedGateResult.status === 'HOLD_BLOCKED',
+    'Test X6: updateInventoryUnitPhotoGate blocks sync (HOLD_BLOCKED) when targetContext.isConfirmed is false'
+  );
+
+  // Test X7: Successful Gate Promotion & Strict Gate Isolation (写真ゲートのみ合格、他ゲート非侵食)
+  const successResult = updateInventoryUnitPhotoGate(baselineMockUnit, validTargetContext, allPassedPhotos);
+  assert(
+    successResult.success === true && successResult.status === 'UPDATED' && successResult.unit !== undefined,
+    'Test X7-a: updateInventoryUnitPhotoGate succeeds and returns updated unit on full USE_AS_IS pass'
+  );
+  assert(
+    successResult.unit!.sellableGate.photoCaptureComplete === true && successResult.unit!.sellableGate.photoQaComplete === true,
+    'Test X7-b: updated unit has photoCaptureComplete: true and photoQaComplete: true'
+  );
+  assert(
+    successResult.unit!.sellableGate.identityVerified === false &&
+    successResult.unit!.sellableGate.quantityVerified === false &&
+    successResult.unit!.sellableGate.conditionVerified === false &&
+    successResult.unit!.sellableGate.storageLocationRegistered === false,
+    'Test X7-c: Non-photo gates (identity, quantity, condition, location) remain strictly untouched (false)'
+  );
+  assert(
+    successResult.unit!.status === 'ON_HAND',
+    'Test X7-d: Unit status remains ON_HAND (not promoted to AVAILABLE until non-photo gates are completed)'
+  );
+
+  // Test X8: Safe Re-execution Idempotency (同一個体の安全な再実行は冪等スキップ)
+  const idempotentResult = updateInventoryUnitPhotoGate(successResult.unit!, validTargetContext, allPassedPhotos);
+  assert(
+    idempotentResult.success === true && idempotentResult.status === 'IDEMPOTENT_NOOP',
+    'Test X8-a: Re-evaluating an already photo-passed unit returns IDEMPOTENT_NOOP'
+  );
+  assert(
+    idempotentResult.unit?.sellableGate.photoCaptureComplete === true && idempotentResult.unit?.sellableGate.photoQaComplete === true,
+    'Test X8-b: Idempotent unit preserves photo gate pass status'
+  );
+
+  // Test X9: MockInventoryPhotoGateBridge In-Memory Adapter Integration & State Isolation
+  const gateBridge = new MockInventoryPhotoGateBridge([baselineMockUnit]);
+  const bridgeSyncResult = gateBridge.syncPhotoGate(validTargetContext, allPassedPhotos);
+  assert(
+    bridgeSyncResult.success === true && bridgeSyncResult.status === 'UPDATED',
+    'Test X9-a: MockInventoryPhotoGateBridge safely syncs photo gate in memory'
+  );
+
+  const persistedUnit = gateBridge.getUnit('UNIT-2026-GATE-001');
+  assert(
+    persistedUnit !== null && persistedUnit.sellableGate.photoCaptureComplete === true && persistedUnit.sellableGate.photoQaComplete === true,
+    'Test X9-b: MockInventoryPhotoGateBridge retrieves updated unit with completed photo gates'
+  );
+
+  const bridgeRepeatSync = gateBridge.syncPhotoGate(validTargetContext, allPassedPhotos);
+  assert(
+    bridgeRepeatSync.status === 'IDEMPOTENT_NOOP',
+    'Test X9-c: MockInventoryPhotoGateBridge repeat sync is idempotent'
+  );
+
+  const nonExistentSync = gateBridge.syncPhotoGate({ sku: 'SKU-01', inventoryUnitId: 'UNIT-DOES-NOT-EXIST', isConfirmed: true }, allPassedPhotos);
+  assert(
+    nonExistentSync.success === false && nonExistentSync.status === 'UNIT_NOT_FOUND',
+    'Test X9-d: MockInventoryPhotoGateBridge safely handles non-existent unit ID'
   );
 
   log.push(`\nSummary: ${passed} passed, ${failed} failed.`);

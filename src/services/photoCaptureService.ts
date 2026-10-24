@@ -10,8 +10,11 @@ import {
   PhotoStorageRecord,
   PhotoLinkageStatus,
   PhotoCaptureTargetContext,
+  InventoryPhotoGateStatus,
+  InventoryPhotoGateSyncResult,
   REQUIRED_ANGLES
 } from '../types/photoCapture';
+import type { InventoryUnit } from '../types/centralInventory';
 
 /**
  * Current Hardware Validation Status Tracker
@@ -928,6 +931,163 @@ export function checkPhotoGateCompletion(
     missingRequiredAngles,
     rejectedRequiredAngles
   };
+}
+
+/**
+ * Safely evaluates and updates photo gates on a given InventoryUnit.
+ * Strictly guarantees:
+ * 1. Target context must be confirmed with matching SKU and Unit ID.
+ * 2. Only photoCaptureComplete and photoQaComplete are updated.
+ * 3. Non-photo gate conditions (identityVerified, quantityVerified, conditionVerified, storageLocationRegistered) are NEVER modified.
+ * 4. Re-evaluating the same unit is idempotent.
+ */
+export function updateInventoryUnitPhotoGate(
+  unit: InventoryUnit,
+  targetContext: PhotoCaptureTargetContext,
+  capturedPhotos: Record<PhotoAngle, CapturedPhoto | null>
+): InventoryPhotoGateSyncResult {
+  // 1. Target context validation
+  if (!targetContext || !targetContext.isConfirmed || !targetContext.sku?.trim() || !targetContext.inventoryUnitId?.trim()) {
+    return {
+      success: false,
+      status: 'HOLD_BLOCKED',
+      unit,
+      messageJa: '紐付け保留(HOLD): 商品カタログ番号(SKU)または実物個体管理番号(Unit ID)が未確定です。在庫データは変更されません。',
+      photoCaptureComplete: unit.sellableGate.photoCaptureComplete,
+      photoQaComplete: unit.sellableGate.photoQaComplete
+    };
+  }
+
+  // 2. Unit ID match
+  if (unit.inventoryUnitId !== targetContext.inventoryUnitId.trim()) {
+    return {
+      success: false,
+      status: 'UNIT_NOT_FOUND',
+      unit,
+      messageJa: `個体ID不一致: 対象個体(${unit.inventoryUnitId})とコンテキスト個体(${targetContext.inventoryUnitId})が異なります。`,
+      photoCaptureComplete: unit.sellableGate.photoCaptureComplete,
+      photoQaComplete: unit.sellableGate.photoQaComplete
+    };
+  }
+
+  // 3. SKU match
+  if (unit.sku !== targetContext.sku.trim()) {
+    return {
+      success: false,
+      status: 'SKU_MISMATCH',
+      unit,
+      messageJa: `商品カタログ番号(SKU)不一致: 個体のSKU(${unit.sku})と撮影指定SKU(${targetContext.sku})が異なります。`,
+      photoCaptureComplete: unit.sellableGate.photoCaptureComplete,
+      photoQaComplete: unit.sellableGate.photoQaComplete
+    };
+  }
+
+  // 4. Photo QA completion evaluation via checkPhotoGateCompletion
+  const gateCheck = checkPhotoGateCompletion(capturedPhotos);
+  if (!gateCheck.photoCaptureComplete || !gateCheck.photoQaComplete) {
+    const missing = gateCheck.missingRequiredAngles.join(', ');
+    const rejected = gateCheck.rejectedRequiredAngles.join(', ');
+    return {
+      success: false,
+      status: 'QA_INCOMPLETE',
+      unit,
+      messageJa: `写真品質ゲート未達: 必須4方向のうち未撮影(${missing || 'なし'})またはRETAKE/要補正(${rejected || 'なし'})が存在します。在庫ゲートは更新されません。`,
+      photoCaptureComplete: false,
+      photoQaComplete: false
+    };
+  }
+
+  // 5. Idempotent check: if already completed, do not re-dirty or alter
+  if (unit.sellableGate.photoCaptureComplete === true && unit.sellableGate.photoQaComplete === true) {
+    return {
+      success: true,
+      status: 'IDEMPOTENT_NOOP',
+      unit,
+      messageJa: `同一個体(${unit.inventoryUnitId})の写真撮影ゲートは既に合格済みです（冪等スキップ）。`,
+      photoCaptureComplete: true,
+      photoQaComplete: true
+    };
+  }
+
+  // 6. Safe immutable gate update (PRESERVE ALL OTHER GATES STRICTLY)
+  const updatedUnit: InventoryUnit = {
+    ...unit,
+    sellableGate: {
+      ...unit.sellableGate, // identityVerified, quantityVerified, conditionVerified, storageLocationRegistered preserved!
+      photoCaptureComplete: true,
+      photoQaComplete: true
+    },
+    updatedAt: new Date().toISOString()
+  };
+
+  return {
+    success: true,
+    status: 'UPDATED',
+    unit: updatedUnit,
+    messageJa: `✅ 実物個体(${unit.inventoryUnitId})の写真撮影ゲート(photoCaptureComplete: true, photoQaComplete: true)を合格へ更新しました。他ゲートは安全に保護されています。`,
+    photoCaptureComplete: true,
+    photoQaComplete: true
+  };
+}
+
+/**
+ * Safe In-Memory Mock Inventory Gate Bridge
+ * Provides an isolated mock adapter to test inventory gate synchronization
+ * without touching real databases or external services.
+ */
+export class MockInventoryPhotoGateBridge {
+  private unitsMap = new Map<string, InventoryUnit>();
+
+  constructor(initialUnits?: InventoryUnit[]) {
+    if (initialUnits) {
+      initialUnits.forEach((u) => this.unitsMap.set(u.inventoryUnitId, { ...u, sellableGate: { ...u.sellableGate } }));
+    }
+  }
+
+  public registerUnit(unit: InventoryUnit): void {
+    this.unitsMap.set(unit.inventoryUnitId, { ...unit, sellableGate: { ...unit.sellableGate } });
+  }
+
+  public getUnit(inventoryUnitId: string): InventoryUnit | null {
+    const unit = this.unitsMap.get(inventoryUnitId);
+    return unit ? { ...unit, sellableGate: { ...unit.sellableGate } } : null;
+  }
+
+  public getAllUnits(): InventoryUnit[] {
+    return Array.from(this.unitsMap.values()).map((u) => ({ ...u, sellableGate: { ...u.sellableGate } }));
+  }
+
+  public syncPhotoGate(
+    targetContext: PhotoCaptureTargetContext,
+    capturedPhotos: Record<PhotoAngle, CapturedPhoto | null>
+  ): InventoryPhotoGateSyncResult {
+    if (!targetContext?.inventoryUnitId) {
+      return {
+        success: false,
+        status: 'HOLD_BLOCKED',
+        messageJa: '実物個体管理番号(Unit ID)が指定されていません。',
+        photoCaptureComplete: false,
+        photoQaComplete: false
+      };
+    }
+
+    const existingUnit = this.unitsMap.get(targetContext.inventoryUnitId);
+    if (!existingUnit) {
+      return {
+        success: false,
+        status: 'UNIT_NOT_FOUND',
+        messageJa: `実物個体管理番号(${targetContext.inventoryUnitId})の在庫レコードが見つかりません。`,
+        photoCaptureComplete: false,
+        photoQaComplete: false
+      };
+    }
+
+    const result = updateInventoryUnitPhotoGate(existingUnit, targetContext, capturedPhotos);
+    if (result.success && result.unit && result.status === 'UPDATED') {
+      this.unitsMap.set(result.unit.inventoryUnitId, result.unit);
+    }
+    return result;
+  }
 }
 
 /**
