@@ -10,6 +10,11 @@ import {
   ListingDraftReviewInput,
   updateListingDraftReview
 } from '../../services/listingDraftReviewService';
+import {
+  resolveDraftPhotoPreview,
+  getDryRunPhotoHandoff
+} from '../../services/photoListingBridgeService';
+import type { DryRunListingPhotoHandoff } from '../../types/photoCapture';
 
 const panelStyle: React.CSSProperties = {
   background: 'rgba(15, 23, 42, 0.94)',
@@ -58,16 +63,29 @@ function toForm(draft?: ListingPreparationDraft): ListingDraftReviewInput {
   };
 }
 
-export function ListingDraftReviewPanel({ items }: { items: CentralInventoryItem[] }) {
+export interface ListingDraftReviewPanelProps {
+  items: CentralInventoryItem[];
+  photoHandoffs?: DryRunListingPhotoHandoff[];
+}
+
+export function ListingDraftReviewPanel({ items, photoHandoffs }: ListingDraftReviewPanelProps) {
   const [drafts, setDrafts] = useState<ListingPreparationDraft[]>(() => loadListingPreparationDrafts());
   const [selectedDraftId, setSelectedDraftId] = useState(() => drafts[0]?.draftId ?? '');
   const selectedDraft = drafts.find((draft) => draft.draftId === selectedDraftId) ?? drafts[0];
   const [form, setForm] = useState<ListingDraftReviewInput>(() => toForm(selectedDraft));
   const [message, setMessage] = useState('');
+  const [photoViewMode, setPhotoViewMode] = useState<'SELECTED' | 'ORIGINAL'>('SELECTED');
 
   const itemsBySku = useMemo(() => new Map(items.map((item) => [item.sku, item])), [items]);
   const selectedItem = selectedDraft ? itemsBySku.get(selectedDraft.sku) : undefined;
   const readiness = selectedDraft ? evaluateListingDraftReadiness(selectedDraft, selectedItem) : undefined;
+
+  // Resolve photo handoff preview for selected draft
+  const activeHandoff = photoHandoffs?.find((h) => h.sku === selectedDraft?.sku)
+    || (selectedDraft ? getDryRunPhotoHandoff(selectedDraft.sku) : undefined);
+  const photoPreview = selectedDraft
+    ? resolveDraftPhotoPreview(selectedDraft, activeHandoff)
+    : undefined;
 
   const reloadDrafts = () => {
     const next = loadListingPreparationDrafts();
@@ -137,6 +155,180 @@ export function ListingDraftReviewPanel({ items }: { items: CentralInventoryItem
           {selectedDraft && (
             <div style={{ padding: 12, borderRadius: 9, background: 'rgba(30, 41, 59, 0.72)', marginBottom: 14, color: '#cbd5e1', fontSize: 12 }}>
               <strong style={{ color: '#f8fafc' }}>{selectedDraft.targetChannel}</strong> / SKU {selectedDraft.sku} / 現在の販売可能在庫 {selectedItem?.availableToSell ?? '不明'} 件
+            </div>
+          )}
+
+          {/* Photo Capture Candidate Images Preview (Read-only Dry Run) */}
+          {photoPreview && (
+            <div
+              style={{
+                borderRadius: 10,
+                border: photoPreview.status === 'AVAILABLE_PREVIEW'
+                  ? '1px solid rgba(168, 85, 247, 0.4)'
+                  : photoPreview.status === 'HOLD_BLOCKED'
+                  ? '1px solid rgba(245, 158, 11, 0.4)'
+                  : '1px solid rgba(148, 163, 184, 0.25)',
+                background: 'rgba(15, 23, 42, 0.75)',
+                padding: 14,
+                marginBottom: 16
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: '#f8fafc' }}>
+                    📷 Photo Capture 出品写真候補プレビュー (読み取り専用)
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      padding: '3px 8px',
+                      borderRadius: 6,
+                      fontWeight: 800,
+                      background: photoPreview.status === 'AVAILABLE_PREVIEW'
+                        ? 'rgba(16, 185, 129, 0.2)'
+                        : photoPreview.status === 'HOLD_BLOCKED'
+                        ? 'rgba(245, 158, 11, 0.2)'
+                        : 'rgba(148, 163, 184, 0.2)',
+                      color: photoPreview.status === 'AVAILABLE_PREVIEW'
+                        ? '#34d399'
+                        : photoPreview.status === 'HOLD_BLOCKED'
+                        ? '#fbbf24'
+                        : '#94a3b8',
+                      border: photoPreview.status === 'AVAILABLE_PREVIEW'
+                        ? '1px solid #10b981'
+                        : photoPreview.status === 'HOLD_BLOCKED'
+                        ? '1px solid #f59e0b'
+                        : '1px solid #64748b'
+                    }}
+                  >
+                    {photoPreview.status === 'AVAILABLE_PREVIEW' && '✅ 候補写真準備完了 (Dry Run)'}
+                    {photoPreview.status === 'HOLD_BLOCKED' && `⚠️ 保留中 [${photoPreview.reasonCode}]`}
+                    {photoPreview.status === 'NO_PHOTOS_RECORDED' && 'ℹ️ 撮影データ未連携'}
+                  </span>
+                </div>
+
+                {photoPreview.canDisplayListingCandidate && (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <span style={{ fontSize: 11, color: '#94a3b8' }}>画像表示:</span>
+                    <button
+                      type="button"
+                      onClick={() => setPhotoViewMode('SELECTED')}
+                      style={{
+                        padding: '4px 8px',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        borderRadius: 5,
+                        border: photoViewMode === 'SELECTED' ? '1px solid #a855f7' : '1px solid #475569',
+                        background: photoViewMode === 'SELECTED' ? 'rgba(168, 85, 247, 0.25)' : '#1e293b',
+                        color: photoViewMode === 'SELECTED' ? '#d8b4fe' : '#94a3b8',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      出品候補 (補正済)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPhotoViewMode('ORIGINAL')}
+                      style={{
+                        padding: '4px 8px',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        borderRadius: 5,
+                        border: photoViewMode === 'ORIGINAL' ? '1px solid #38bdf8' : '1px solid #475569',
+                        background: photoViewMode === 'ORIGINAL' ? 'rgba(56, 189, 248, 0.25)' : '#1e293b',
+                        color: photoViewMode === 'ORIGINAL' ? '#7dd3fc' : '#94a3b8',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      証拠原本 (Raw)
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Status Message or HOLD explanation */}
+              {photoPreview.reasonMessageJa && (
+                <p style={{ margin: '0 0 10px 0', fontSize: 12, color: photoPreview.status === 'HOLD_BLOCKED' ? '#fde68a' : '#cbd5e1' }}>
+                  {photoPreview.reasonMessageJa}
+                </p>
+              )}
+
+              {/* Channel Constraints & Disclaimer Banner */}
+              <div style={{ padding: '8px 10px', borderRadius: 6, background: 'rgba(30, 41, 59, 0.65)', border: '1px solid rgba(148, 163, 184, 0.2)', marginBottom: 10, fontSize: 11, color: '#94a3b8', lineHeight: 1.5 }}>
+                <span style={{ color: '#c084fc', fontWeight: 700 }}>{photoPreview.channelConstraintsNote.channel} 規定目安: </span>
+                <span>上限 {photoPreview.channelConstraintsNote.maxImagesAllowed} 枚 / {photoPreview.channelConstraintsNote.aspectRatioGuideline}</span>
+                <div style={{ color: '#f87171', marginTop: 3 }}>{photoPreview.channelConstraintsNote.disclaimerJa}</div>
+              </div>
+
+              {/* Photos Gallery Display */}
+              {photoPreview.canDisplayListingCandidate && (
+                <div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 10 }}>
+                    {/* Hero Candidate (FRONT) */}
+                    {photoPreview.heroPhotoCandidate && (
+                      <div
+                        style={{
+                          border: '2px solid #a855f7',
+                          borderRadius: 8,
+                          padding: 6,
+                          background: 'rgba(88, 28, 135, 0.2)',
+                          textAlign: 'center'
+                        }}
+                      >
+                        <div style={{ fontSize: 10, fontWeight: 800, color: '#c084fc', marginBottom: 4 }}>
+                          🌟 メイン出品 (Hero)
+                        </div>
+                        <img
+                          src={photoViewMode === 'ORIGINAL' ? photoPreview.heroPhotoCandidate.originalDataUrl : photoPreview.heroPhotoCandidate.selectedListingUrl}
+                          alt="Hero candidate"
+                          style={{ width: '100%', height: 90, objectFit: 'cover', borderRadius: 4, background: '#020617' }}
+                        />
+                        <div style={{ fontSize: 10, color: '#e2e8f0', marginTop: 4, fontWeight: 700 }}>
+                          {photoPreview.heroPhotoCandidate.angle}
+                        </div>
+                        <div style={{ fontSize: 9, color: photoPreview.heroPhotoCandidate.isAutoFixed ? '#34d399' : '#94a3b8' }}>
+                          {photoPreview.heroPhotoCandidate.isAutoFixed ? '✨ AUTO_FIX補正' : '原本USE_AS_IS'}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Additional Gallery Candidates */}
+                    {photoPreview.galleryPhotoCandidates
+                      .filter((c) => c.angle !== photoPreview.heroPhotoCandidate?.angle)
+                      .map((candidate, idx) => (
+                        <div
+                          key={candidate.photoId || `${candidate.angle}-${idx}`}
+                          style={{
+                            border: '1px solid rgba(148, 163, 184, 0.3)',
+                            borderRadius: 8,
+                            padding: 6,
+                            background: 'rgba(30, 41, 59, 0.5)',
+                            textAlign: 'center'
+                          }}
+                        >
+                          <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 4 }}>
+                            追加画像 #{idx + 1}
+                          </div>
+                          <img
+                            src={photoViewMode === 'ORIGINAL' ? candidate.originalDataUrl : candidate.selectedListingUrl}
+                            alt={candidate.angle}
+                            style={{ width: '100%', height: 90, objectFit: 'cover', borderRadius: 4, background: '#020617' }}
+                          />
+                          <div style={{ fontSize: 10, color: '#e2e8f0', marginTop: 4, fontWeight: 600 }}>
+                            {candidate.angle}
+                          </div>
+                          <div style={{ fontSize: 9, color: candidate.isAutoFixed ? '#34d399' : '#94a3b8' }}>
+                            {candidate.isAutoFixed ? '✨ 補正済' : '原本'}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+
+                  <div style={{ marginTop: 8, fontSize: 11, color: '#64748b' }}>
+                    ※ 撮影された未加工の原本写真は証拠情報として保持されており、出品用の加工・補正処理によって上書きされることはありません。
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

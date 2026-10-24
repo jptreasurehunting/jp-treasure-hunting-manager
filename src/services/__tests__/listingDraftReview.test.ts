@@ -7,6 +7,13 @@ import {
   evaluateListingDraftReadiness,
   updateListingDraftReview
 } from '../listingDraftReviewService';
+import {
+  resolveDraftPhotoPreview,
+  registerDryRunPhotoHandoff,
+  clearDryRunPhotoHandoffs,
+  getChannelPhotoConstraints
+} from '../photoListingBridgeService';
+import type { DryRunListingPhotoHandoff } from '../../types/photoCapture';
 
 if (typeof globalThis.localStorage === 'undefined') {
   const store: Record<string, string> = {};
@@ -140,6 +147,152 @@ export function runListingDraftReviewTests(): { passed: number; failed: number; 
 
   const missingItemReadiness = evaluateListingDraftReadiness(complete.draft!, undefined);
   assert(!missingItemReadiness.canAdvanceToFinalReview && missingItemReadiness.blockingReasonsJa.some((reason) => reason.includes('中央在庫SKU')), 'Test 11: Missing central inventory blocks advancement');
+
+  // Photo Capture Listing Candidate Preview Tests (STEP 26)
+  clearDryRunPhotoHandoffs();
+
+  // Test 12: NO_PHOTOS_RECORDED when no handoff is registered
+  const unlinkedPreview = resolveDraftPhotoPreview({ sku: 'SKU-UNLINKED-999', targetChannel: 'eBay' });
+  assert(
+    unlinkedPreview.status === 'NO_PHOTOS_RECORDED' && unlinkedPreview.canDisplayListingCandidate === false,
+    'Test 12: resolveDraftPhotoPreview returns NO_PHOTOS_RECORDED for SKU without photo handoff'
+  );
+
+  // Sample Mock Dry Run Handoff
+  const sampleHandoff: DryRunListingPhotoHandoff = {
+    isDryRun: true,
+    handoffId: 'test-handoff-001',
+    sku: draft.sku,
+    inventoryUnitId: 'UNIT-DRAFT-001',
+    targetChannels: ['eBay', 'Shopee'],
+    canPrepareDraft: true,
+    reasonCode: 'READY_FOR_LISTING_DRAFT',
+    reasonMessageJa: '撮影QA合格: 写真候補準備完了',
+    heroPhoto: {
+      photoId: 'photo-hero-01',
+      angle: 'FRONT',
+      originalDataUrl: 'data:image/jpeg;base64,RAW_FRONT_EVIDENCE',
+      selectedListingUrl: 'data:image/jpeg;base64,ENHANCED_FRONT_LISTING',
+      isAutoFixed: true,
+      autoFixCount: 1,
+      qaStatus: 'USE_AS_IS',
+      isHeroImageCandidate: true
+    },
+    galleryPhotos: [
+      {
+        photoId: 'photo-hero-01',
+        angle: 'FRONT',
+        originalDataUrl: 'data:image/jpeg;base64,RAW_FRONT_EVIDENCE',
+        selectedListingUrl: 'data:image/jpeg;base64,ENHANCED_FRONT_LISTING',
+        isAutoFixed: true,
+        autoFixCount: 1,
+        qaStatus: 'USE_AS_IS',
+        isHeroImageCandidate: true
+      },
+      {
+        photoId: 'photo-back-01',
+        angle: 'BACK',
+        originalDataUrl: 'data:image/jpeg;base64,RAW_BACK_EVIDENCE',
+        selectedListingUrl: 'data:image/jpeg;base64,RAW_BACK_EVIDENCE',
+        isAutoFixed: false,
+        autoFixCount: 0,
+        qaStatus: 'USE_AS_IS',
+        isHeroImageCandidate: false
+      }
+    ],
+    totalPhotoCount: 2,
+    evidencePreserved: true,
+    nonPhotoGatesUntouched: true,
+    overallListingEligible: false,
+    inventoryGateStatus: {
+      identityVerified: false,
+      quantityVerified: false,
+      conditionVerified: false,
+      photoCaptureComplete: true,
+      photoQaComplete: true,
+      storageLocationRegistered: false
+    },
+    draftPhotoPayloadPreview: {
+      sku: draft.sku,
+      inventoryUnitId: 'UNIT-DRAFT-001',
+      channelCandidates: ['eBay', 'Shopee'],
+      primaryImageUrl: 'data:image/jpeg;base64,ENHANCED_FRONT_LISTING',
+      additionalImageUrls: ['data:image/jpeg;base64,RAW_BACK_EVIDENCE'],
+      totalImageCount: 2
+    }
+  };
+
+  // Test 13: AVAILABLE_PREVIEW with valid handoff & hero photo candidate
+  registerDryRunPhotoHandoff(sampleHandoff);
+  const ebayPreview = resolveDraftPhotoPreview(draft);
+  assert(
+    ebayPreview.status === 'AVAILABLE_PREVIEW' && ebayPreview.canDisplayListingCandidate === true,
+    'Test 13-a: resolveDraftPhotoPreview resolves AVAILABLE_PREVIEW for registered SKU'
+  );
+  assert(
+    ebayPreview.heroPhotoCandidate !== null && ebayPreview.heroPhotoCandidate.angle === 'FRONT',
+    'Test 13-b: Front view is designated as primary hero image candidate'
+  );
+  assert(
+    ebayPreview.galleryPhotoCandidates.length === 2,
+    'Test 13-c: Gallery photo candidates list includes all 2 photos'
+  );
+
+  // Test 14: Original raw evidence preservation without mutation
+  assert(
+    ebayPreview.heroPhotoCandidate?.originalDataUrl === 'data:image/jpeg;base64,RAW_FRONT_EVIDENCE' &&
+    ebayPreview.heroPhotoCandidate?.selectedListingUrl === 'data:image/jpeg;base64,ENHANCED_FRONT_LISTING' &&
+    ebayPreview.evidencePreserved === true,
+    'Test 14: Original raw evidence is preserved and separated from enhanced listing URL'
+  );
+
+  // Test 15: Cross-SKU pollution detection & rejection
+  const mismatchedHandoffPreview = resolveDraftPhotoPreview(
+    { sku: 'SKU-DIFFERENT-MODEL', targetChannel: 'eBay' },
+    sampleHandoff
+  );
+  assert(
+    mismatchedHandoffPreview.status === 'HOLD_BLOCKED' &&
+    mismatchedHandoffPreview.reasonCode === 'HOLD_CROSS_PRODUCT_POLLUTION' &&
+    mismatchedHandoffPreview.canDisplayListingCandidate === false,
+    'Test 15: Cross-SKU pollution between draft SKU and photo handoff SKU is rejected with HOLD'
+  );
+
+  // Test 16: HOLD status display when handoff is blocked
+  const blockedHandoff: DryRunListingPhotoHandoff = {
+    ...sampleHandoff,
+    canPrepareDraft: false,
+    reasonCode: 'HOLD_INSUFFICIENT_ANGLES',
+    reasonMessageJa: '撮影不足: 必須4アングルが不足しています'
+  };
+  const blockedPreview = resolveDraftPhotoPreview(draft, blockedHandoff);
+  assert(
+    blockedPreview.status === 'HOLD_BLOCKED' &&
+    blockedPreview.reasonCode === 'HOLD_INSUFFICIENT_ANGLES' &&
+    blockedPreview.canDisplayListingCandidate === false,
+    'Test 16: Blocked handoff preserves HOLD reason code and blocks candidate display'
+  );
+
+  // Test 17: Channel constraints customization (eBay vs Shopee) and non-guarantee disclaimers
+  const ebayConstraints = getChannelPhotoConstraints('eBay');
+  const shopeeConstraints = getChannelPhotoConstraints('Shopee');
+  assert(
+    ebayConstraints.maxImagesAllowed === 24 && (ebayConstraints.disclaimerJa.includes('保証するものではありません') || false),
+    'Test 17-a: eBay photo constraints set to max 24 with explicit non-guarantee disclaimer'
+  );
+  assert(
+    shopeeConstraints.maxImagesAllowed === 9 && (shopeeConstraints.aspectRatioGuideline.includes('正方形') || false),
+    'Test 17-b: Shopee photo constraints set to max 9 with square ratio guideline'
+  );
+
+  // Test 18: In-memory registry isolation without localStorage mutation
+  const initialStorageLength = Object.keys(localStorage).length;
+  registerDryRunPhotoHandoff({ ...sampleHandoff, sku: 'SKU-EPHEMERAL-01' });
+  clearDryRunPhotoHandoffs();
+  assert(
+    Object.keys(localStorage).length === initialStorageLength,
+    'Test 18: In-memory registry operations do not mutate localStorage'
+  );
 
   localStorage.removeItem(STORAGE_KEY);
   return { passed, failed, log };

@@ -250,7 +250,7 @@ export function evaluatePhotoListingHandoff(input: PhotoListingHandoffInput): Dr
     totalImageCount: candidateList.length
   };
 
-  return {
+  const result: DryRunListingPhotoHandoff = {
     isDryRun: true,
     handoffId,
     sku,
@@ -269,6 +269,9 @@ export function evaluatePhotoListingHandoff(input: PhotoListingHandoffInput): Dr
     inventoryGateStatus: updatedGate,
     draftPhotoPayloadPreview
   };
+
+  registerDryRunPhotoHandoff(result);
+  return result;
 }
 
 /**
@@ -288,9 +291,174 @@ export class PhotoListingBridgeAdapter {
       ? Array.from(new Set([...this.existingRegisteredUnitIds, ...input.existingRegisteredUnitIds]))
       : Array.from(this.existingRegisteredUnitIds);
 
-    return evaluatePhotoListingHandoff({
+    const result = evaluatePhotoListingHandoff({
       ...input,
       existingRegisteredUnitIds: combinedRegistered
     });
+    registerDryRunPhotoHandoff(result);
+    return result;
   }
+}
+
+/**
+ * 出品ドラフト画面向け写真プレビュー情報モデル (読み取り専用)
+ */
+export interface DraftPhotoPreviewSummary {
+  sku: string;
+  inventoryUnitId?: string;
+  targetChannel: SalesChannel;
+  status: 'AVAILABLE_PREVIEW' | 'HOLD_BLOCKED' | 'NO_PHOTOS_RECORDED';
+  canDisplayListingCandidate: boolean;
+  reasonCode?: ListingPhotoHandoffReasonCode;
+  reasonMessageJa?: string;
+  heroPhotoCandidate: ListingPhotoCandidate | null;
+  galleryPhotoCandidates: ListingPhotoCandidate[];
+  totalPhotoCount: number;
+  evidencePreserved: boolean;
+  nonPhotoGatesUntouched: boolean;
+  overallListingEligible: boolean;
+  channelConstraintsNote: {
+    channel: SalesChannel;
+    maxImagesAllowed: number;
+    aspectRatioGuideline: string;
+    disclaimerJa: string;
+  };
+}
+
+/**
+ * 販売チャネル別の安全な画像制約ガイドライン（情報提供のみ・出品保証はしない）
+ */
+export function getChannelPhotoConstraints(channel: SalesChannel): {
+  channel: SalesChannel;
+  maxImagesAllowed: number;
+  aspectRatioGuideline: string;
+  disclaimerJa: string;
+} {
+  if (channel === 'eBay') {
+    return {
+      channel: 'eBay',
+      maxImagesAllowed: 24,
+      aspectRatioGuideline: '長辺1600px以上推奨 (最小500px) / 白抜き・単色クリーン背景推奨',
+      disclaimerJa: '※本表示は写真候補の確認用プレビューです。Listing Publish GateおよびeBay出品ポリシーの審査通過を保証するものではありません。'
+    };
+  }
+  if (channel === 'Shopee') {
+    return {
+      channel: 'Shopee',
+      maxImagesAllowed: 9,
+      aspectRatioGuideline: '正方形 1:1 比率推奨 (500x500px以上、最大2MB) / 主画像は商品単体',
+      disclaimerJa: '※本表示は写真候補の確認用プレビューです。Shopee現地マーケットプレイス規制・出品適格性を保証するものではありません。'
+    };
+  }
+  return {
+    channel,
+    maxImagesAllowed: 12,
+    aspectRatioGuideline: '高解像度写真推奨',
+    disclaimerJa: '※本表示は写真候補の確認用プレビューです。各販売チャネルの出品適格性を保証するものではありません。'
+  };
+}
+
+/**
+ * In-memory Registry for Dry Run Photo Handoffs.
+ * Strictly operates in memory with zero localStorage or DB writes.
+ */
+const inMemoryHandoffRegistry = new Map<string, DryRunListingPhotoHandoff>();
+
+export function registerDryRunPhotoHandoff(handoff: DryRunListingPhotoHandoff): void {
+  if (handoff.sku) {
+    inMemoryHandoffRegistry.set(handoff.sku, handoff);
+  }
+}
+
+export function getDryRunPhotoHandoff(sku: string): DryRunListingPhotoHandoff | undefined {
+  return inMemoryHandoffRegistry.get(sku);
+}
+
+export function clearDryRunPhotoHandoffs(): void {
+  inMemoryHandoffRegistry.clear();
+}
+
+/**
+ * 出品ドラフトのSKUおよびチャネルに対する写真プレビュー状態を解決します。
+ * 本番DBや永続ストレージへの書き込みを一切行いません。
+ */
+export function resolveDraftPhotoPreview(
+  draft: { sku: string; targetChannel: SalesChannel },
+  handoff?: DryRunListingPhotoHandoff
+): DraftPhotoPreviewSummary {
+  const constraints = getChannelPhotoConstraints(draft.targetChannel);
+  const resolvedHandoff = handoff || getDryRunPhotoHandoff(draft.sku);
+
+  if (!resolvedHandoff) {
+    return {
+      sku: draft.sku,
+      targetChannel: draft.targetChannel,
+      status: 'NO_PHOTOS_RECORDED',
+      canDisplayListingCandidate: false,
+      reasonMessageJa: `SKU (${draft.sku}) に紐付く確定済み写真データがありません。Photo Capture画面で撮影・QA合格を実行してください。`,
+      heroPhotoCandidate: null,
+      galleryPhotoCandidates: [],
+      totalPhotoCount: 0,
+      evidencePreserved: true,
+      nonPhotoGatesUntouched: true,
+      overallListingEligible: false,
+      channelConstraintsNote: constraints
+    };
+  }
+
+  // Cross-SKU pollution check between draft and handoff
+  if (resolvedHandoff.sku && resolvedHandoff.sku !== draft.sku) {
+    return {
+      sku: draft.sku,
+      inventoryUnitId: resolvedHandoff.inventoryUnitId,
+      targetChannel: draft.targetChannel,
+      status: 'HOLD_BLOCKED',
+      canDisplayListingCandidate: false,
+      reasonCode: 'HOLD_CROSS_PRODUCT_POLLUTION',
+      reasonMessageJa: `SKU不一致警告 (HOLD): 下書きSKU (${draft.sku}) と撮影写真SKU (${resolvedHandoff.sku}) が一致しません。混同防止のためプレビューをブロックします。`,
+      heroPhotoCandidate: null,
+      galleryPhotoCandidates: [],
+      totalPhotoCount: resolvedHandoff.totalPhotoCount,
+      evidencePreserved: true,
+      nonPhotoGatesUntouched: true,
+      overallListingEligible: false,
+      channelConstraintsNote: constraints
+    };
+  }
+
+  if (!resolvedHandoff.canPrepareDraft) {
+    return {
+      sku: draft.sku,
+      inventoryUnitId: resolvedHandoff.inventoryUnitId,
+      targetChannel: draft.targetChannel,
+      status: 'HOLD_BLOCKED',
+      canDisplayListingCandidate: false,
+      reasonCode: resolvedHandoff.reasonCode,
+      reasonMessageJa: resolvedHandoff.reasonMessageJa,
+      heroPhotoCandidate: null,
+      galleryPhotoCandidates: [],
+      totalPhotoCount: resolvedHandoff.totalPhotoCount,
+      evidencePreserved: resolvedHandoff.evidencePreserved,
+      nonPhotoGatesUntouched: resolvedHandoff.nonPhotoGatesUntouched,
+      overallListingEligible: false,
+      channelConstraintsNote: constraints
+    };
+  }
+
+  return {
+    sku: draft.sku,
+    inventoryUnitId: resolvedHandoff.inventoryUnitId,
+    targetChannel: draft.targetChannel,
+    status: 'AVAILABLE_PREVIEW',
+    canDisplayListingCandidate: true,
+    reasonCode: resolvedHandoff.reasonCode,
+    reasonMessageJa: resolvedHandoff.reasonMessageJa,
+    heroPhotoCandidate: resolvedHandoff.heroPhoto,
+    galleryPhotoCandidates: resolvedHandoff.galleryPhotos,
+    totalPhotoCount: resolvedHandoff.totalPhotoCount,
+    evidencePreserved: resolvedHandoff.evidencePreserved,
+    nonPhotoGatesUntouched: resolvedHandoff.nonPhotoGatesUntouched,
+    overallListingEligible: resolvedHandoff.overallListingEligible,
+    channelConstraintsNote: constraints
+  };
 }
