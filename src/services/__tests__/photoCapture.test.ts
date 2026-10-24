@@ -13,9 +13,14 @@ import {
   generateMockImageDataUrl,
   ICameraHardwareAdapter,
   executePhotoCaptureFlow,
-  PixelImageData
+  PixelImageData,
+  HARDWARE_STATUS,
+  validatePhotoItemAssociation,
+  MockInMemoryPhotoStorageAdapter,
+  evaluatePhotoInventoryLinkage,
+  checkPhotoGateCompletion
 } from '../photoCaptureService';
-import { CapturedPhoto, REQUIRED_ANGLES, PhotoQaIssue } from '../../types/photoCapture';
+import { CapturedPhoto, REQUIRED_ANGLES, PhotoQaIssue, PhotoCaptureTargetContext } from '../../types/photoCapture';
 
 export interface TestResult {
   name: string;
@@ -502,6 +507,263 @@ export async function runPhotoCaptureTests(): Promise<TestResult> {
 
   assert(retryResult.success === true && retryResult.photo !== undefined, 'Test M5: Subsequent capture attempt succeeds normally after previous failure');
   assert(failureLockRef.current === false, 'Test M6: Lock is unlocked after successful retry');
+
+  // Test P: HARDWARE_PENDING Management & Hardware-Free Safety (Priority 2)
+  assert(HARDWARE_STATUS.camera === 'HARDWARE_PENDING', 'Test P1: Camera hardware status is explicitly HARDWARE_PENDING when physical camera is absent');
+  assert(HARDWARE_STATUS.footPedal === 'HARDWARE_PENDING', 'Test P2: Foot pedal hardware status is explicitly HARDWARE_PENDING when physical pedal is absent');
+  const mockAdapterAvailability = await mockWorkingAdapter.isHardwareAvailable();
+  assert(mockAdapterAvailability === false, 'Test P3: Virtual mock camera adapter explicitly declares isHardwareAvailable() === false');
+
+  // Test Q: Key Repeat Suppression & Modifier Key Clash Prevention (Priority 3)
+  let repeatTriggerCount = 0;
+  const repeatListener = new PedalInputListener({ enabled: true, triggerKey: 'Space', keyLabel: 'Space' }, () => {
+    repeatTriggerCount++;
+  });
+  (globalThis as any).document = mockDocWithActiveTab;
+  (repeatListener as any).lastTriggerTime = 0;
+
+  // OS key repeat (holding Space bar down)
+  const repeatEventRes = repeatListener.handleKeyDown({ key: ' ', code: 'Space', repeat: true });
+  assert(repeatEventRes === false && repeatTriggerCount === 0, 'Test Q1: Keydown with repeat === true (long press) is suppressed to prevent runaway captures');
+
+  // Modifier key combinations (Ctrl + Space, Alt + Space, Meta + Space)
+  (repeatListener as any).lastTriggerTime = 0;
+  const ctrlSpaceRes = repeatListener.handleKeyDown({ key: ' ', code: 'Space', ctrlKey: true });
+  assert(ctrlSpaceRes === false && repeatTriggerCount === 0, 'Test Q2: Ctrl + Space is suppressed to avoid clashing with OS/IME shortcuts');
+
+  (repeatListener as any).lastTriggerTime = 0;
+  const altSpaceRes = repeatListener.handleKeyDown({ key: ' ', code: 'Space', altKey: true });
+  assert(altSpaceRes === false && repeatTriggerCount === 0, 'Test Q3: Alt + Space is suppressed to avoid clashing with system window menu shortcuts');
+
+  (repeatListener as any).lastTriggerTime = 0;
+  const metaSpaceRes = repeatListener.handleKeyDown({ key: ' ', code: 'Space', metaKey: true });
+  assert(metaSpaceRes === false && repeatTriggerCount === 0, 'Test Q4: Meta (Command) + Space is suppressed to avoid clashing with launcher shortcuts');
+  (globalThis as any).document = oldDoc;
+
+  // Test S: Product ID & Inventory Unit ID Association & Confusion Guard (Priority 6)
+  const itemSessionLockRef = { current: false };
+  const itemCaptureResult = await executePhotoCaptureFlow({
+    isCapturingRef: itemSessionLockRef,
+    currentAngle: 'FRONT',
+    adapter: mockWorkingAdapter,
+    existingPhotos: {} as any,
+    itemId: 'SKU-VINTAGE-CAMERA-001',
+    inventoryId: 'UNIT-INV-7788'
+  });
+
+  assert(itemCaptureResult.success === true && itemCaptureResult.photo?.itemId === 'SKU-VINTAGE-CAMERA-001', 'Test S1: Captured photo correctly records specified Product ID (itemId)');
+  assert(itemCaptureResult.photo?.inventoryId === 'UNIT-INV-7788', 'Test S2: Captured photo correctly records specified Inventory Unit ID (inventoryId)');
+
+  const validAssociation = validatePhotoItemAssociation(itemCaptureResult.photo!, 'SKU-VINTAGE-CAMERA-001', 'UNIT-INV-7788');
+  assert(validAssociation.isValid === true, 'Test S3: validatePhotoItemAssociation passes when item and inventory IDs match');
+
+  const mismatchedAssociation = validatePhotoItemAssociation(itemCaptureResult.photo!, 'SKU-DIFFERENT-PRODUCT-999', 'UNIT-INV-7788');
+  assert(mismatchedAssociation.isValid === false && (mismatchedAssociation.reason?.includes('商品ID不一致') ?? false), 'Test S4: validatePhotoItemAssociation catches Product ID mismatch to prevent photo mixing');
+
+  // Test T: Original Photo Preservation across Multiple AUTO_FIX Operations (Priority 5)
+  const darkSampleUrl = generateMockImageDataUrl('FRONT', 'DARK');
+  const darkQaSample = evaluatePhotoQuality(analyzeImageMetrics(darkSampleUrl));
+  const multiFixPhoto: CapturedPhoto = {
+    id: 'test-multi-fix-1',
+    angle: 'FRONT',
+    timestamp: new Date().toISOString(),
+    dataUrl: darkSampleUrl,
+    qaResult: darkQaSample
+  };
+
+  const firstFix = applyAutoFixToPhoto(multiFixPhoto);
+  assert(firstFix.originalDataUrl === darkSampleUrl, 'Test T1: First AUTO_FIX application securely stores originalDataUrl');
+  assert(firstFix.autoFixCount === 1, 'Test T2: First AUTO_FIX sets autoFixCount to 1');
+
+  // Apply AUTO_FIX a second time simulated on the already fixed photo
+  const secondFix = applyAutoFixToPhoto({ ...firstFix, qaResult: darkQaSample });
+  assert(secondFix.originalDataUrl === darkSampleUrl, 'Test T3: Subsequent AUTO_FIX preserves first originalDataUrl without overwriting original evidence');
+
+  // Test U: Pure In-Memory Mock Storage Adapter Validation (Priority 7)
+  const mockStorage = new MockInMemoryPhotoStorageAdapter();
+  const storageSaveResult = await mockStorage.savePhotos({
+    itemId: 'SKU-VINTAGE-CAMERA-001',
+    inventoryId: 'UNIT-INV-7788',
+    photos: { FRONT: itemCaptureResult.photo! },
+    updatedAt: new Date().toISOString()
+  });
+  assert(storageSaveResult.success === true, 'Test U1: MockInMemoryPhotoStorageAdapter successfully saves photos in memory');
+
+  const loadedRecord = await mockStorage.getPhotos('SKU-VINTAGE-CAMERA-001', 'UNIT-INV-7788');
+  assert(loadedRecord !== null && loadedRecord.photos.FRONT?.id === itemCaptureResult.photo?.id, 'Test U2: MockInMemoryPhotoStorageAdapter retrieves saved photos matching itemId & inventoryId');
+
+  const emptyItemSave = await mockStorage.savePhotos({ itemId: '', photos: {}, updatedAt: '' });
+  assert(emptyItemSave.success === false && (emptyItemSave.error?.includes('未指定') ?? false), 'Test U3: MockInMemoryPhotoStorageAdapter rejects save when itemId is empty');
+
+  // Test V: Extreme Bounds, Pitch Black & Blinding White Fail-Safe (Priority 8)
+  const pitchBlackQa = evaluatePhotoQuality({ blurScore: 10, brightness: 0, framingCoverage: 80, glareScore: 5 });
+  assert(pitchBlackQa.status === 'RETAKE' && pitchBlackQa.issues.some((i: PhotoQaIssue) => i.code === 'EXPOSURE_UNDER' && i.severity === 'ERROR'), 'Test V1: Pitch-black (brightness = 0) evaluates to RETAKE + EXPOSURE_UNDER ERROR');
+
+  const blindingWhiteQa = evaluatePhotoQuality({ blurScore: 10, brightness: 255, framingCoverage: 80, glareScore: 5 });
+  assert(blindingWhiteQa.status === 'RETAKE' && blindingWhiteQa.issues.some((i: PhotoQaIssue) => i.code === 'EXPOSURE_OVER' && i.severity === 'ERROR'), 'Test V2: Blinding white (brightness = 255) evaluates to RETAKE + EXPOSURE_OVER ERROR');
+
+  const extremeBlurQa = evaluatePhotoQuality({ blurScore: 100, brightness: 120, framingCoverage: 80, glareScore: 5 });
+  assert(extremeBlurQa.status === 'RETAKE' && extremeBlurQa.issues.some((i: PhotoQaIssue) => i.code === 'BLUR_DETECTED' && i.severity === 'ERROR'), 'Test V3: Extreme blur (blurScore = 100) evaluates to RETAKE + BLUR_DETECTED ERROR');
+
+  const extremeGlareQa = evaluatePhotoQuality({ blurScore: 10, brightness: 120, framingCoverage: 80, glareScore: 100 });
+  assert(extremeGlareQa.status === 'RETAKE' && extremeGlareQa.issues.some((i: PhotoQaIssue) => i.code === 'GLARE_DETECTED' && i.severity === 'ERROR'), 'Test V4: Extreme glare (glareScore = 100) evaluates to RETAKE + GLARE_DETECTED ERROR');
+
+  const emptyStringMetrics = analyzeImageMetrics('');
+  const emptyStringQa = evaluatePhotoQuality(emptyStringMetrics);
+  assert(Number.isNaN(emptyStringMetrics.brightness) && emptyStringQa.status === 'RETAKE', 'Test V5: Empty string input metrics return NaN and fail safe to RETAKE');
+
+  // Test W: Product Master, Inventory Unit, Evidence Preservation & Linkage Safety (STEP 18)
+  // Test W1: Cross-Unit & Cross-SKU Mismatch Prevention (誤紐付け防止)
+  const unitPhoto: CapturedPhoto = {
+    id: 'test-unit-photo-001',
+    angle: 'FRONT',
+    timestamp: new Date().toISOString(),
+    dataUrl: generateMockImageDataUrl('FRONT', 'GOOD'),
+    qaResult: { status: 'USE_AS_IS', issues: [], metrics: { blurScore: 10, brightness: 120, framingCoverage: 85, glareScore: 5 }, suggestedAction: '合格' },
+    sku: 'SKU-CANON-AE1-SLV',
+    itemId: 'SKU-CANON-AE1-SLV',
+    inventoryUnitId: 'UNIT-2026-0001',
+    inventoryId: 'UNIT-2026-0001'
+  };
+
+  const crossUnitCheck = validatePhotoItemAssociation(unitPhoto, 'SKU-CANON-AE1-SLV', 'UNIT-2026-0002');
+  assert(
+    crossUnitCheck.isValid === false && (crossUnitCheck.reason?.includes('Unit ID') ?? false),
+    'Test W1-a: validatePhotoItemAssociation catches physical inventory unit mismatch (UNIT-0001 vs UNIT-0002)'
+  );
+
+  const crossSkuCheck = validatePhotoItemAssociation(unitPhoto, 'SKU-NIKON-FM2-BLK', 'UNIT-2026-0001');
+  assert(
+    crossSkuCheck.isValid === false && (crossSkuCheck.reason?.includes('SKU') ?? false),
+    'Test W1-b: validatePhotoItemAssociation catches product catalog SKU mismatch (CANON vs NIKON)'
+  );
+
+  // Test W2: Unconfirmed HOLD Protection (架空ID・未確定時の本番反映保留)
+  const unconfirmedContext: PhotoCaptureTargetContext = {
+    sku: 'SKU-CANON-AE1-SLV',
+    inventoryUnitId: 'UNIT-2026-0042',
+    isConfirmed: false
+  };
+  const unconfirmedHold = evaluatePhotoInventoryLinkage(unconfirmedContext);
+  assert(
+    unconfirmedHold.status === 'UNLINKED_HOLD' && unconfirmedHold.canBindToInventory === false,
+    'Test W2-a: evaluatePhotoInventoryLinkage returns UNLINKED_HOLD when isConfirmed is false'
+  );
+
+  const missingSkuHold = evaluatePhotoInventoryLinkage({ sku: '', inventoryUnitId: 'UNIT-2026-0042', isConfirmed: true });
+  assert(
+    missingSkuHold.status === 'UNLINKED_HOLD' && missingSkuHold.canBindToInventory === false,
+    'Test W2-b: evaluatePhotoInventoryLinkage returns UNLINKED_HOLD when SKU is missing'
+  );
+
+  const undefinedContextHold = evaluatePhotoInventoryLinkage(undefined);
+  assert(
+    undefinedContextHold.status === 'UNLINKED_HOLD' && undefinedContextHold.canBindToInventory === false,
+    'Test W2-c: evaluatePhotoInventoryLinkage returns UNLINKED_HOLD when targetContext is undefined'
+  );
+
+  // Test W3: Duplicate Registration Guard (二重登録・誤上書き防止)
+  const existingUnits = ['UNIT-2026-0001', 'UNIT-2026-0042'];
+  const duplicateCheck = evaluatePhotoInventoryLinkage(
+    { sku: 'SKU-CANON-AE1-SLV', inventoryUnitId: 'UNIT-2026-0042', isConfirmed: true },
+    existingUnits
+  );
+  assert(
+    duplicateCheck.status === 'ALREADY_REGISTERED' && duplicateCheck.canBindToInventory === false,
+    'Test W3: evaluatePhotoInventoryLinkage blocks duplicate registration when Unit ID already exists in repository'
+  );
+
+  // Test W4: Valid Staged Linkage (紐付け確定・登録準備完了)
+  const stagedCheck = evaluatePhotoInventoryLinkage(
+    { sku: 'SKU-CANON-AE1-SLV', itemTitle: 'Canon AE-1 Silver', inventoryUnitId: 'UNIT-2026-0099', serialNumber: 'SN-998877', isConfirmed: true },
+    existingUnits
+  );
+  assert(
+    stagedCheck.status === 'LINKED_STAGED' && stagedCheck.canBindToInventory === true,
+    'Test W4: evaluatePhotoInventoryLinkage allows LINKED_STAGED for new confirmed unit'
+  );
+
+  // Test W5: Original Photo Preservation across 3 Consecutive AUTO_FIX Cycles (原本上書き防止・証拠保全)
+  const rawDarkUrl = generateMockImageDataUrl('FRONT', 'DARK');
+  const rawDarkQa = evaluatePhotoQuality(analyzeImageMetrics(rawDarkUrl));
+  const rawPhoto: CapturedPhoto = {
+    id: 'test-raw-evidence-1',
+    angle: 'FRONT',
+    timestamp: new Date().toISOString(),
+    dataUrl: rawDarkUrl,
+    qaResult: rawDarkQa
+  };
+
+  const fixCycle1 = applyAutoFixToPhoto(rawPhoto);
+  assert(fixCycle1.originalDataUrl === rawDarkUrl, 'Test W5-a: Cycle 1 AUTO_FIX preserves raw originalDataUrl');
+
+  const fixCycle2 = applyAutoFixToPhoto({ ...fixCycle1, qaResult: rawDarkQa });
+  assert(fixCycle2.originalDataUrl === rawDarkUrl, 'Test W5-b: Cycle 2 AUTO_FIX keeps originalDataUrl intact without intermediate mutation');
+
+  const fixCycle3 = applyAutoFixToPhoto({ ...fixCycle2, qaResult: rawDarkQa });
+  assert(fixCycle3.originalDataUrl === rawDarkUrl && fixCycle3.autoFixCount === 3, 'Test W5-c: Cycle 3 AUTO_FIX still retains initial raw evidence with autoFixCount 3');
+
+  // Test W6: Interrupted Capture Session Cleanup & Pollution Prevention (撮影中断時の安全リカバリー)
+  const crashingAdapter: ICameraHardwareAdapter = {
+    isHardwareAvailable: async () => false,
+    capturePhoto: async () => {
+      throw new Error('CAMERA_DISCONNECTED_MIDWAY');
+    }
+  };
+  const sessionLockRef = { current: false };
+  let interruptedStatus = '';
+  const initialPhotosRecord = {
+    FRONT: unitPhoto,
+    BACK: null,
+    LEFT: null,
+    RIGHT: null,
+    TOP: null,
+    LABEL_TAG: null,
+    DEFECT_DETAIL: null
+  };
+
+  const interruptedResult = await executePhotoCaptureFlow({
+    isCapturingRef: sessionLockRef,
+    currentAngle: 'BACK',
+    adapter: crashingAdapter,
+    existingPhotos: initialPhotosRecord,
+    sku: 'SKU-CANON-AE1-SLV',
+    inventoryUnitId: 'UNIT-2026-0001',
+    onStateUpdate: (st) => {
+      if (st.statusMessage) interruptedStatus = st.statusMessage;
+    }
+  });
+
+  assert(interruptedResult.success === false, 'Test W6-a: executePhotoCaptureFlow returns success === false when adapter throws');
+  assert(sessionLockRef.current === false, 'Test W6-b: isCapturingRef is unlocked (false) in finally block after crash');
+  assert(interruptedStatus.includes('CAMERA_DISCONNECTED_MIDWAY'), 'Test W6-c: error message is reported clearly in status message');
+  assert(initialPhotosRecord.BACK === null, 'Test W6-d: incomplete/corrupt photo is not injected into capturedPhotos on failure');
+
+  // Test W7: Sellable Inventory Gate Alignment (checkPhotoGateCompletion)
+  const incompleteGate = checkPhotoGateCompletion(initialPhotosRecord);
+  assert(
+    incompleteGate.photoCaptureComplete === false && incompleteGate.photoQaComplete === false,
+    'Test W7-a: checkPhotoGateCompletion returns false when required angles are missing'
+  );
+  assert(
+    incompleteGate.missingRequiredAngles.includes('BACK') && incompleteGate.missingRequiredAngles.includes('LEFT'),
+    'Test W7-b: missing required angles are accurately reported'
+  );
+
+  const allPassedPhotos = {
+    FRONT: { ...unitPhoto, qaResult: { status: 'USE_AS_IS' as const, issues: [], metrics: { blurScore: 10, brightness: 120, framingCoverage: 85, glareScore: 5 }, suggestedAction: '合格' } },
+    BACK: { ...unitPhoto, angle: 'BACK' as const, qaResult: { status: 'USE_AS_IS' as const, issues: [], metrics: { blurScore: 10, brightness: 120, framingCoverage: 85, glareScore: 5 }, suggestedAction: '合格' } },
+    LEFT: { ...unitPhoto, angle: 'LEFT' as const, qaResult: { status: 'USE_AS_IS' as const, issues: [], metrics: { blurScore: 10, brightness: 120, framingCoverage: 85, glareScore: 5 }, suggestedAction: '合格' } },
+    RIGHT: { ...unitPhoto, angle: 'RIGHT' as const, qaResult: { status: 'USE_AS_IS' as const, issues: [], metrics: { blurScore: 10, brightness: 120, framingCoverage: 85, glareScore: 5 }, suggestedAction: '合格' } },
+    TOP: null,
+    LABEL_TAG: null,
+    DEFECT_DETAIL: null
+  };
+  const completeGate = checkPhotoGateCompletion(allPassedPhotos);
+  assert(
+    completeGate.photoCaptureComplete === true && completeGate.photoQaComplete === true,
+    'Test W7-c: checkPhotoGateCompletion passes both photoCaptureComplete and photoQaComplete when 4 required angles are USE_AS_IS'
+  );
 
   log.push(`\nSummary: ${passed} passed, ${failed} failed.`);
 

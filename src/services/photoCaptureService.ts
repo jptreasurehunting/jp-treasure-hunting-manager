@@ -1,12 +1,29 @@
-import type {
+import {
   PhotoAngle,
   PhotoQaStatus,
   PhotoQaIssue,
   PhotoQaMetrics,
   PhotoQaResult,
   CapturedPhoto,
-  PedalTriggerConfig
+  PedalTriggerConfig,
+  HardwareValidationStatus,
+  PhotoStorageRecord,
+  PhotoLinkageStatus,
+  PhotoCaptureTargetContext,
+  REQUIRED_ANGLES
 } from '../types/photoCapture';
+
+/**
+ * Current Hardware Validation Status Tracker
+ * Explicitly tracks whether physical hardware has been verified or is pending.
+ */
+export const HARDWARE_STATUS: {
+  camera: HardwareValidationStatus;
+  footPedal: HardwareValidationStatus;
+} = {
+  camera: 'HARDWARE_PENDING',
+  footPedal: 'HARDWARE_PENDING'
+};
 
 /**
  * Unified Threshold Constants for Quality Evaluation & AUTO_FIX Correction
@@ -484,12 +501,14 @@ export function applyAutoFixToPhoto(photo: CapturedPhoto): CapturedPhoto {
   }
 
   const originalDataUrl = photo.originalDataUrl || photo.dataUrl;
+  const autoFixCount = (photo.autoFixCount || 0) + 1;
   const imageData = extractImageDataFromInput(originalDataUrl);
 
   if (!imageData) {
     return {
       ...photo,
       originalDataUrl,
+      autoFixCount,
       qaResult: {
         ...photo.qaResult,
         status: 'RETAKE',
@@ -578,6 +597,7 @@ export function applyAutoFixToPhoto(photo: CapturedPhoto): CapturedPhoto {
     return {
       ...photo,
       originalDataUrl,
+      autoFixCount,
       qaResult: {
         ...photo.qaResult,
         autoFixApplied: false,
@@ -591,6 +611,7 @@ export function applyAutoFixToPhoto(photo: CapturedPhoto): CapturedPhoto {
       ...photo,
       dataUrl: transformedDataUrl,
       originalDataUrl,
+      autoFixCount,
       qaResult: {
         ...reEvaluatedResult,
         autoFixApplied: true,
@@ -604,6 +625,7 @@ export function applyAutoFixToPhoto(photo: CapturedPhoto): CapturedPhoto {
       ...photo,
       dataUrl: transformedDataUrl,
       originalDataUrl,
+      autoFixCount,
       qaResult: {
         ...reEvaluatedResult,
         autoFixApplied: false,
@@ -616,6 +638,7 @@ export function applyAutoFixToPhoto(photo: CapturedPhoto): CapturedPhoto {
     ...photo,
     dataUrl: transformedDataUrl,
     originalDataUrl,
+    autoFixCount,
     qaResult: {
       ...reEvaluatedResult,
       autoFixApplied: false,
@@ -732,6 +755,11 @@ export async function executePhotoCaptureFlow(options: {
   simulatedPreset?: 'GOOD' | 'BLURRY' | 'DARK' | 'GLARE';
   adapter: ICameraHardwareAdapter;
   existingPhotos: Record<PhotoAngle, CapturedPhoto | null>;
+  itemId?: string;
+  inventoryId?: string;
+  sku?: string;
+  inventoryUnitId?: string;
+  targetContext?: PhotoCaptureTargetContext;
   onStateUpdate?: (partialState: Partial<PhotoCaptureFlowState>) => void;
 }): Promise<{ success: boolean; photo?: CapturedPhoto; error?: Error }> {
   if (options.isCapturingRef.current) {
@@ -746,6 +774,18 @@ export async function executePhotoCaptureFlow(options: {
       options.currentAngle,
       options.simulatedPreset || 'GOOD'
     );
+
+    const resolvedSku = options.sku || options.targetContext?.sku || options.itemId;
+    const resolvedUnitId = options.inventoryUnitId || options.targetContext?.inventoryUnitId || options.inventoryId;
+
+    if (resolvedSku) {
+      photo.sku = resolvedSku;
+      photo.itemId = resolvedSku;
+    }
+    if (resolvedUnitId) {
+      photo.inventoryUnitId = resolvedUnitId;
+      photo.inventoryId = resolvedUnitId;
+    }
 
     const updatedPhotos = {
       ...options.existingPhotos,
@@ -776,6 +816,159 @@ export async function executePhotoCaptureFlow(options: {
   } finally {
     options.isCapturingRef.current = false;
     options.onStateUpdate?.({ isCapturing: false });
+  }
+}
+
+/**
+ * Validate that captured photo matches expected Product ID / Inventory Item Unit ID
+ * Prevents photos of different physical products or inventory units from being mixed up.
+ */
+export function validatePhotoItemAssociation(
+  photo: CapturedPhoto,
+  expectedItemId: string,
+  expectedInventoryId?: string
+): { isValid: boolean; reason?: string } {
+  const photoSku = photo.sku || photo.itemId;
+  const photoUnitId = photo.inventoryUnitId || photo.inventoryId;
+
+  if (photoSku && photoSku !== expectedItemId) {
+    return {
+      isValid: false,
+      reason: `商品カタログ番号(SKU)不一致（商品ID不一致）: 撮影写真のSKU(${photoSku})が指定SKU(${expectedItemId})と異なります。`
+    };
+  }
+  if (expectedInventoryId && photoUnitId && photoUnitId !== expectedInventoryId) {
+    return {
+      isValid: false,
+      reason: `実物個体管理番号(Unit ID)不一致（在庫個体ID不一致）: 撮影写真の個体ID(${photoUnitId})が指定個体ID(${expectedInventoryId})と異なります。`
+    };
+  }
+  return { isValid: true };
+}
+
+/**
+ * Evaluate Photo & Inventory Linkage Safety
+ * Ensures that photos are not bound to fictitious IDs or unconfirmed inventory units.
+ * Prevents accidental overwrite of already registered units.
+ */
+export function evaluatePhotoInventoryLinkage(
+  targetContext?: PhotoCaptureTargetContext,
+  existingRegisteredUnitIds?: string[]
+): {
+  status: PhotoLinkageStatus;
+  canBindToInventory: boolean;
+  reasonJa: string;
+} {
+  if (!targetContext || !targetContext.isConfirmed || !targetContext.sku?.trim() || !targetContext.inventoryUnitId?.trim()) {
+    const missing: string[] = [];
+    if (!targetContext?.sku?.trim()) missing.push('商品カタログ番号 (SKU)');
+    if (!targetContext?.inventoryUnitId?.trim()) missing.push('実物個体管理番号 (Unit ID)');
+    if (targetContext && !targetContext.isConfirmed) missing.push('確定ステータス (isConfirmed)');
+
+    return {
+      status: 'UNLINKED_HOLD',
+      canBindToInventory: false,
+      reasonJa: `紐付け保留中 (UNLINKED_HOLD): ${missing.join('、')} が未確定です。撮影テストは可能ですが、架空IDの登録や誤登録を防ぐため本番在庫への自動反映を保留しています。`
+    };
+  }
+
+  const unitId = targetContext.inventoryUnitId.trim();
+  if (existingRegisteredUnitIds && existingRegisteredUnitIds.includes(unitId)) {
+    return {
+      status: 'ALREADY_REGISTERED',
+      canBindToInventory: false,
+      reasonJa: `二重登録防止 (ALREADY_REGISTERED): 実物個体管理番号 (${unitId}) は既に写真登録済みです。上書き・重複登録を防止するため、紐付けをブロックしました。`
+    };
+  }
+
+  return {
+    status: 'LINKED_STAGED',
+    canBindToInventory: true,
+    reasonJa: `紐付け準備完了 (LINKED_STAGED): 商品カタログ番号: ${targetContext.sku} / 実物個体管理番号: ${targetContext.inventoryUnitId} の撮影データを安全に本番在庫へ登録可能です。`
+  };
+}
+
+/**
+ * Check Photo Gate Completion for Sellable Inventory Gate
+ * Evaluates whether all required angles are captured and have passed QA (status === 'USE_AS_IS').
+ * Directly provides photoCaptureComplete and photoQaComplete to SellableInventoryGate in centralInventory.
+ */
+export function checkPhotoGateCompletion(
+  capturedPhotos: Record<PhotoAngle, CapturedPhoto | null>
+): {
+  photoCaptureComplete: boolean;
+  photoQaComplete: boolean;
+  passedRequiredAngles: PhotoAngle[];
+  missingRequiredAngles: PhotoAngle[];
+  rejectedRequiredAngles: PhotoAngle[];
+} {
+  const requiredAngles = REQUIRED_ANGLES.filter((g) => g.isRequired).map((g) => g.angle);
+  const passedRequiredAngles: PhotoAngle[] = [];
+  const missingRequiredAngles: PhotoAngle[] = [];
+  const rejectedRequiredAngles: PhotoAngle[] = [];
+
+  for (const angle of requiredAngles) {
+    const photo = capturedPhotos[angle];
+    if (!photo) {
+      missingRequiredAngles.push(angle);
+    } else if (photo.qaResult.status === 'USE_AS_IS') {
+      passedRequiredAngles.push(angle);
+    } else {
+      rejectedRequiredAngles.push(angle);
+    }
+  }
+
+  const photoCaptureComplete = missingRequiredAngles.length === 0;
+  const photoQaComplete = photoCaptureComplete && rejectedRequiredAngles.length === 0;
+
+  return {
+    photoCaptureComplete,
+    photoQaComplete,
+    passedRequiredAngles,
+    missingRequiredAngles,
+    rejectedRequiredAngles
+  };
+}
+
+/**
+ * Photo Storage Adapter Interface
+ * Pure interface for future persistent storage without triggering production external APIs or remote storage.
+ */
+export interface IPhotoStorageAdapter {
+  savePhotos(record: PhotoStorageRecord): Promise<{ success: boolean; error?: string }>;
+  getPhotos(itemId: string, inventoryId?: string): Promise<PhotoStorageRecord | null>;
+}
+
+/**
+ * Safe In-Memory Mock Storage Adapter
+ * Keeps data strictly in memory during dev/test without writing to disk or network.
+ */
+export class MockInMemoryPhotoStorageAdapter implements IPhotoStorageAdapter {
+  private storage = new Map<string, PhotoStorageRecord>();
+
+  private makeKey(itemId: string, inventoryId?: string): string {
+    return `${itemId}::${inventoryId || 'default'}`;
+  }
+
+  async savePhotos(record: PhotoStorageRecord): Promise<{ success: boolean; error?: string }> {
+    const sku = record.sku || record.itemId;
+    const unitId = record.inventoryUnitId || record.inventoryId;
+    if (!sku || sku.trim() === '') {
+      return { success: false, error: '商品カタログ番号（SKU / itemId）が未指定です。' };
+    }
+    this.storage.set(this.makeKey(sku, unitId), {
+      ...record,
+      sku,
+      itemId: sku,
+      inventoryUnitId: unitId,
+      inventoryId: unitId,
+      updatedAt: new Date().toISOString()
+    });
+    return { success: true };
+  }
+
+  async getPhotos(itemId: string, inventoryId?: string): Promise<PhotoStorageRecord | null> {
+    return this.storage.get(this.makeKey(itemId, inventoryId)) || null;
   }
 }
 
@@ -821,8 +1014,26 @@ export class PedalInputListener {
     this.isListening = false;
   }
 
-  public handleKeyDown(event: { key: string; code?: string; preventDefault?: () => void }): boolean {
+  public handleKeyDown(event: {
+    key: string;
+    code?: string;
+    preventDefault?: () => void;
+    repeat?: boolean;
+    ctrlKey?: boolean;
+    altKey?: boolean;
+    metaKey?: boolean;
+  }): boolean {
     if (!this.config.enabled) return false;
+
+    // Suppress rapid key-repeat on long press (1 press = 1 photo, prevents accidental duplicate shots)
+    if (event.repeat) {
+      return false;
+    }
+
+    // Suppress trigger when modifier keys (Ctrl/Alt/Meta) are active (prevents clash with system/browser shortcuts)
+    if (event.ctrlKey || event.altKey || event.metaKey) {
+      return false;
+    }
 
     if (typeof document !== 'undefined') {
       const photoPageElem = document.getElementById('pagePhotoCapture');

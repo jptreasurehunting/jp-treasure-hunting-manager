@@ -4,7 +4,8 @@ import {
   CapturedPhoto,
   REQUIRED_ANGLES,
   AngleGuide,
-  PedalTriggerConfig
+  PedalTriggerConfig,
+  PhotoCaptureTargetContext
 } from '../../types/photoCapture';
 import {
   applyAutoFixToPhoto,
@@ -12,15 +13,26 @@ import {
   PedalInputListener,
   generateMockImageDataUrl,
   ICameraHardwareAdapter,
-  executePhotoCaptureFlow
+  executePhotoCaptureFlow,
+  evaluatePhotoInventoryLinkage,
+  checkPhotoGateCompletion
 } from '../../services/photoCaptureService';
 
 interface PhotoCaptureCardProps {
   isTabActive?: boolean;
   cameraAdapter?: ICameraHardwareAdapter;
+  targetContext?: PhotoCaptureTargetContext;
+  existingRegisteredUnitIds?: string[];
+  onPhotoGateEvaluated?: (gate: { photoCaptureComplete: boolean; photoQaComplete: boolean }) => void;
 }
 
-export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({ isTabActive = true, cameraAdapter }) => {
+export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
+  isTabActive = true,
+  cameraAdapter,
+  targetContext,
+  existingRegisteredUnitIds,
+  onPhotoGateEvaluated
+}) => {
   // State & Ref variables
   const [currentAngleIndex, setCurrentAngleIndex] = useState<number>(0);
   const [capturedPhotos, setCapturedPhotos] = useState<Record<PhotoAngle, CapturedPhoto | null>>({
@@ -44,12 +56,24 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({ isTabActive 
   const [isPedalPressedAnimation, setIsPedalPressedAnimation] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<string>('商品を配置し、フットペダル（Spaceキー）または撮影ボタンを押してください。');
   const [isCapturing, setIsCapturing] = useState<boolean>(false);
+  const [evidenceViewMode, setEvidenceViewMode] = useState<'CORRECTED' | 'ORIGINAL'>('CORRECTED');
 
   // Synchronous lock ref to prevent race conditions during rapid key events
   const isCapturingRef = useRef<boolean>(false);
 
   const currentAngleGuide: AngleGuide = REQUIRED_ANGLES[currentAngleIndex];
   const activePhoto = capturedPhotos[currentAngleGuide.angle];
+
+  // Evaluate linkage safety & Sellable Inventory Gate alignment
+  const linkage = evaluatePhotoInventoryLinkage(targetContext, existingRegisteredUnitIds);
+  const gateStatus = checkPhotoGateCompletion(capturedPhotos);
+
+  useEffect(() => {
+    onPhotoGateEvaluated?.({
+      photoCaptureComplete: gateStatus.photoCaptureComplete,
+      photoQaComplete: gateStatus.photoQaComplete
+    });
+  }, [capturedPhotos, onPhotoGateEvaluated]);
 
   // Keep pedalConfig isTabActive in sync
   useEffect(() => {
@@ -80,6 +104,9 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({ isTabActive 
       simulatedPreset,
       adapter,
       existingPhotos: capturedPhotos,
+      sku: targetContext?.sku,
+      inventoryUnitId: targetContext?.inventoryUnitId,
+      targetContext,
       onStateUpdate: (update) => {
         if (update.isCapturing !== undefined) setIsCapturing(update.isCapturing);
         if (update.capturedPhotos !== undefined) setCapturedPhotos(update.capturedPhotos);
@@ -120,6 +147,7 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({ isTabActive 
   const handleNextAngle = () => {
     if (currentAngleIndex < REQUIRED_ANGLES.length - 1) {
       setCurrentAngleIndex((prev) => prev + 1);
+      setEvidenceViewMode('CORRECTED');
       setStatusMessage(`次の撮影角度【${REQUIRED_ANGLES[currentAngleIndex + 1].labelJa}】に移動しました。`);
     }
   };
@@ -127,6 +155,7 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({ isTabActive 
   // Select angle directly
   const handleSelectAngle = (idx: number) => {
     setCurrentAngleIndex(idx);
+    setEvidenceViewMode('CORRECTED');
   };
 
   // Calculate overall completion summary: ONLY count photos with status USE_AS_IS
@@ -170,6 +199,86 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({ isTabActive 
 
       {/* Main Grid Content */}
       <div style={{ background: '#0f172a', padding: '1.25rem', borderRadius: '0 0 12px 12px', border: '1px solid #334155', borderTop: 'none' }}>
+        {/* Step 0: Target Context Header (商品カタログ番号 vs 実物個体管理番号 分離表示) */}
+        <div style={{ background: '#1e293b', padding: '0.85rem 1.15rem', borderRadius: '8px', marginBottom: '1rem', border: '1px solid #334155', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.25rem', alignItems: 'center' }}>
+            <div>
+              <span style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block' }}>商品カタログ番号 (SKU)</span>
+              <strong style={{ fontSize: '0.95rem', color: targetContext?.sku ? '#38bdf8' : '#64748b' }}>
+                {targetContext?.sku || '未指定 (HOLD)'}
+              </strong>
+            </div>
+            <div>
+              <span style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block' }}>商品名</span>
+              <span style={{ fontSize: '0.9rem', color: '#f8fafc', fontWeight: 600 }}>
+                {targetContext?.itemTitle || '未登録'}
+              </span>
+            </div>
+            <div style={{ borderLeft: '1px solid #475569', paddingLeft: '1.25rem' }}>
+              <span style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block' }}>実物個体管理番号 (Unit ID)</span>
+              <strong style={{ fontSize: '0.95rem', color: targetContext?.inventoryUnitId ? '#34d399' : '#64748b' }}>
+                {targetContext?.inventoryUnitId || '未指定 (HOLD)'}
+              </strong>
+            </div>
+            {targetContext?.serialNumber && (
+              <div>
+                <span style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block' }}>個体刻印シリアル</span>
+                <span style={{ fontSize: '0.85rem', color: '#cbd5e1' }}>
+                  {targetContext.serialNumber}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <span
+              style={{
+                fontSize: '0.75rem',
+                padding: '0.3rem 0.65rem',
+                borderRadius: '6px',
+                fontWeight: 700,
+                background:
+                  linkage.status === 'LINKED_STAGED'
+                    ? 'rgba(16,185,129,0.2)'
+                    : linkage.status === 'ALREADY_REGISTERED'
+                    ? 'rgba(239,68,68,0.2)'
+                    : 'rgba(245,158,11,0.2)',
+                color:
+                  linkage.status === 'LINKED_STAGED'
+                    ? '#34d399'
+                    : linkage.status === 'ALREADY_REGISTERED'
+                    ? '#f87171'
+                    : '#fbbf24',
+                border:
+                  linkage.status === 'LINKED_STAGED'
+                    ? '1px solid #10b981'
+                    : linkage.status === 'ALREADY_REGISTERED'
+                    ? '1px solid #ef4444'
+                    : '1px solid #f59e0b'
+              }}
+            >
+              {linkage.status === 'LINKED_STAGED' && '🟢 紐付け確定 (LINKED_STAGED)'}
+              {linkage.status === 'ALREADY_REGISTERED' && '🚫 登録済み (ALREADY_REGISTERED)'}
+              {linkage.status === 'UNLINKED_HOLD' && '⚠️ 紐付け保留中 (UNLINKED_HOLD)'}
+              {linkage.status === 'MISMATCH_ERROR' && '❌ 個体不一致 (MISMATCH_ERROR)'}
+            </span>
+
+            <span
+              style={{
+                fontSize: '0.75rem',
+                padding: '0.3rem 0.65rem',
+                borderRadius: '6px',
+                fontWeight: 700,
+                background: gateStatus.photoQaComplete ? 'rgba(16,185,129,0.2)' : '#1e293b',
+                color: gateStatus.photoQaComplete ? '#34d399' : '#94a3b8',
+                border: gateStatus.photoQaComplete ? '1px solid #10b981' : '1px solid #475569'
+              }}
+            >
+              Gate 要件: {gateStatus.photoQaComplete ? '合格 (PASS)' : `未達 (${gateStatus.passedRequiredAngles.length}/4)`}
+            </span>
+          </div>
+        </div>
+
         {/* Step 1: Angle Navigation Steps */}
         <div style={{ display: 'flex', gap: '0.5rem', overflowX: 'auto', paddingBottom: '0.75rem', marginBottom: '1rem', borderBottom: '1px solid #1e293b' }}>
           {REQUIRED_ANGLES.map((guide, idx) => {
@@ -234,11 +343,61 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({ isTabActive 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: '1.25rem' }}>
           {/* Left Viewport Frame */}
           <div style={{ background: '#020617', padding: '1rem', borderRadius: '10px', border: '1px solid #1e293b', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', position: 'relative', minHeight: '380px' }}>
+            {/* Minimal Evidence Preservation Comparison Bar */}
+            {activePhoto?.originalDataUrl && (
+              <div style={{ marginBottom: '0.65rem', display: 'flex', gap: '0.5rem', background: '#090d16', padding: '0.35rem', borderRadius: '8px', border: '1px solid #334155' }}>
+                <button
+                  type="button"
+                  onClick={() => setEvidenceViewMode('CORRECTED')}
+                  style={{
+                    padding: '0.3rem 0.75rem',
+                    fontSize: '0.75rem',
+                    fontWeight: 700,
+                    borderRadius: '6px',
+                    border: 'none',
+                    background: evidenceViewMode === 'CORRECTED' ? '#0284c7' : 'transparent',
+                    color: evidenceViewMode === 'CORRECTED' ? '#ffffff' : '#94a3b8',
+                    cursor: 'pointer'
+                  }}
+                >
+                  📸 補正後画像 (USE_AS_IS)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEvidenceViewMode('ORIGINAL')}
+                  style={{
+                    padding: '0.3rem 0.75rem',
+                    fontSize: '0.75rem',
+                    fontWeight: 700,
+                    borderRadius: '6px',
+                    border: 'none',
+                    background: evidenceViewMode === 'ORIGINAL' ? '#b45309' : 'transparent',
+                    color: evidenceViewMode === 'ORIGINAL' ? '#ffffff' : '#94a3b8',
+                    cursor: 'pointer'
+                  }}
+                >
+                  🛡️ 補正前原本 (証拠保全: 変更不可)
+                </button>
+              </div>
+            )}
+
             <img
-              src={activePhoto ? activePhoto.dataUrl : generateMockImageDataUrl(currentAngleGuide.angle, simulatedPreset)}
+              src={
+                activePhoto
+                  ? (evidenceViewMode === 'ORIGINAL' && activePhoto.originalDataUrl
+                      ? activePhoto.originalDataUrl
+                      : activePhoto.dataUrl)
+                  : generateMockImageDataUrl(currentAngleGuide.angle, simulatedPreset)
+              }
               alt="Camera Preview"
               style={{ width: '100%', maxHeight: '320px', borderRadius: '8px', objectFit: 'contain' }}
             />
+
+            {evidenceViewMode === 'ORIGINAL' && activePhoto?.originalDataUrl && (
+              <div style={{ marginTop: '0.4rem', fontSize: '0.75rem', color: '#fbbf24', background: 'rgba(245,158,11,0.15)', padding: '0.3rem 0.75rem', borderRadius: '6px', border: '1px solid rgba(245,158,11,0.3)', width: '100%', textAlign: 'center' }}>
+                🛡️ 補正前原本画像（改ざん不可・証拠保全）: 撮影時の生データを保護表示しています
+              </div>
+            )}
 
             {/* Visual Pedals Trigger Overlay Flash */}
             {isPedalPressedAnimation && (
