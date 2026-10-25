@@ -70,6 +70,7 @@ import { runOpportunityHunterPhase2Tests } from './opportunityHunterPhase2.test'
 import { runShippingDecisionEngineTests } from './shippingDecisionEngine.test';
 import { runShippingDecisionIntegrationTests } from './shippingDecisionIntegration.test';
 import { runPhotoCaptureTests } from './photoCapture.test';
+import { runListingPipelineE2ETests } from './listingPipelineE2E.test';
 
 export interface MasterTestSummary {
   totalPassed: number;
@@ -127,7 +128,8 @@ export async function runAllAppTests(): Promise<MasterTestSummary> {
     { name: 'Shipping Method Registry Tests', fn: runShippingRegistryTests },
     { name: 'Shipping Template Tests', fn: runShippingTemplateTests },
     { name: 'Zonos Portable Project Tests', fn: runZonosPortableTests },
-    { name: 'Pedal-Assisted Photo Capture & Automated Photo QA Tests', fn: runPhotoCaptureTests }
+    { name: 'Pedal-Assisted Photo Capture & Automated Photo QA Tests', fn: runPhotoCaptureTests },
+    { name: 'Listing Pipeline End-to-End Simulation Tests', fn: runListingPipelineE2ETests }
   ];
 
   let totalPassed = 0;
