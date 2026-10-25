@@ -21,6 +21,11 @@ import {
 import { CentralInventoryPhotoAdapter } from '../../services/centralInventoryPhotoAdapter';
 import { evaluatePhotoListingHandoff } from '../../services/photoListingBridgeService';
 import {
+  PhotoCaptureStashService,
+  globalPhotoCaptureStashService,
+  StashSessionSummary
+} from '../../services/photoCaptureStashService';
+import {
   InventoryPhotoGateSyncResult,
   PhotoGateDryRunPreview,
   DryRunListingPhotoHandoff
@@ -84,6 +89,15 @@ export const TARGET_CONTEXT_PRESETS: TargetContextPreset[] = [
   }
 ];
 
+interface SwitchConfirmModalState {
+  isOpen: boolean;
+  pendingContext: PhotoCaptureTargetContext | null;
+  currentPhotoCount: number;
+  currentUsableCount: number;
+  mode: 'CONFIRM_STASH_OR_DISCARD' | 'CONFIRM_DISCARD_FINAL' | 'UNCONFIRMED_WARN';
+  errorMessage?: string | null;
+}
+
 interface PhotoCaptureCardProps {
   isTabActive?: boolean;
   cameraAdapter?: ICameraHardwareAdapter;
@@ -91,6 +105,7 @@ interface PhotoCaptureCardProps {
   existingRegisteredUnitIds?: string[];
   inventoryBridge?: MockInventoryPhotoGateBridge;
   integrationAdapter?: CentralInventoryPhotoAdapter;
+  stashService?: PhotoCaptureStashService;
   onPhotoGateEvaluated?: (gate: { photoCaptureComplete: boolean; photoQaComplete: boolean }) => void;
   onSyncToInventory?: (result: InventoryPhotoGateSyncResult) => void;
   onListingHandoffEvaluated?: (handoff: DryRunListingPhotoHandoff) => void;
@@ -103,10 +118,14 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
   existingRegisteredUnitIds,
   inventoryBridge,
   integrationAdapter,
+  stashService,
   onPhotoGateEvaluated,
   onSyncToInventory,
   onListingHandoffEvaluated
 }) => {
+  // Stash Service Instance (Isolated or Global Singleton)
+  const activeStashService = stashService || globalPhotoCaptureStashService;
+
   // State & Ref variables
   const [currentAngleIndex, setCurrentAngleIndex] = useState<number>(0);
   const [capturedPhotos, setCapturedPhotos] = useState<Record<PhotoAngle, CapturedPhoto | null>>({
@@ -123,41 +142,217 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
     targetContext || TARGET_CONTEXT_PRESETS[0].context
   );
 
+  const [switchModal, setSwitchModal] = useState<SwitchConfirmModalState>({
+    isOpen: false,
+    pendingContext: null,
+    currentPhotoCount: 0,
+    currentUsableCount: 0,
+    mode: 'CONFIRM_STASH_OR_DISCARD',
+    errorMessage: null
+  });
+
+  const [stashedSummaries, setStashedSummaries] = useState<StashSessionSummary[]>(() =>
+    activeStashService.listSummaries()
+  );
+  const [showStashDrawer, setShowStashDrawer] = useState<boolean>(false);
+
+  // Auto-restore on mount if active context has stashed data
+  useEffect(() => {
+    if (activeTargetContext && activeTargetContext.isConfirmed && activeStashService.hasStash(activeTargetContext)) {
+      const hasLocalPhotos = Object.values(capturedPhotos).some((p) => p !== null);
+      if (!hasLocalPhotos) {
+        const res = activeStashService.restorePhotos(activeTargetContext);
+        if (res.success && res.session) {
+          setCapturedPhotos(res.session.capturedPhotos);
+          setCurrentAngleIndex(res.session.currentAngleIndex);
+          setDryRunPreview(res.session.dryRunPreview);
+          setShowPreviewPanel(Boolean(res.session.dryRunPreview));
+          setListingHandoff(res.session.listingHandoff);
+          setShowListingPanel(Boolean(res.session.listingHandoff));
+          setStatusMessage(res.messageJa);
+        }
+      }
+    }
+  }, []);
+
   useEffect(() => {
     if (targetContext) {
       setActiveTargetContext(targetContext);
     }
   }, [targetContext]);
 
-  // Context switch handler with Cross-SKU pollution prevention
+  // Internal helper to apply a context switch with restore or clean reset
+  const applyContextSwitch = (newContext: PhotoCaptureTargetContext) => {
+    if (newContext.isConfirmed && activeStashService.hasStash(newContext)) {
+      const restoreResult = activeStashService.restorePhotos(newContext);
+      if (restoreResult.success && restoreResult.session) {
+        setCapturedPhotos(restoreResult.session.capturedPhotos);
+        setCurrentAngleIndex(restoreResult.session.currentAngleIndex);
+        setDryRunPreview(restoreResult.session.dryRunPreview);
+        setShowPreviewPanel(Boolean(restoreResult.session.dryRunPreview));
+        setListingHandoff(restoreResult.session.listingHandoff);
+        setShowListingPanel(Boolean(restoreResult.session.listingHandoff));
+        setStatusMessage(restoreResult.messageJa);
+        setActiveTargetContext(newContext);
+        setStashedSummaries(activeStashService.listSummaries());
+        return;
+      }
+    }
+
+    // Clean reset for new context (no existing stash)
+    setCapturedPhotos({
+      FRONT: null,
+      BACK: null,
+      LEFT: null,
+      RIGHT: null,
+      TOP: null,
+      LABEL_TAG: null,
+      DEFECT_DETAIL: null
+    });
+    setCurrentAngleIndex(0);
+    setDryRunPreview(null);
+    setShowPreviewPanel(false);
+    setListingHandoff(null);
+    setShowListingPanel(false);
+    setStatusMessage(
+      newContext.isConfirmed
+        ? `🔄 撮影対象を【${newContext.sku} (${newContext.inventoryUnitId})】に切り替えました。`
+        : '⚠️ 撮影対象を未選択に設定しました。紐付け保留（UNLINKED_HOLD）状態です。'
+    );
+    setActiveTargetContext(newContext);
+    setStashedSummaries(activeStashService.listSummaries());
+  };
+
+  // Safe Context Switch Handler with Unsaved Photo Protection & Modal Guard
   const handleSwitchTargetContext = (newContext: PhotoCaptureTargetContext) => {
     const isDifferent =
       newContext.sku !== activeTargetContext.sku ||
       newContext.inventoryUnitId !== activeTargetContext.inventoryUnitId;
 
-    if (isDifferent) {
-      // 異なる商品への切替時の混入防止: 撮影写真とプレビューを安全にクリア
-      setCapturedPhotos({
-        FRONT: null,
-        BACK: null,
-        LEFT: null,
-        RIGHT: null,
-        TOP: null,
-        LABEL_TAG: null,
-        DEFECT_DETAIL: null
-      });
-      setCurrentAngleIndex(0);
-      setDryRunPreview(null);
-      setShowPreviewPanel(false);
-      setListingHandoff(null);
-      setShowListingPanel(false);
-      setStatusMessage(
-        newContext.isConfirmed
-          ? `🔄 撮影対象を【${newContext.sku} (${newContext.inventoryUnitId})】に切り替えました。別商品混入防止のため、既存写真を安全にリセットしました。`
-          : '⚠️ 撮影対象を未選択に設定しました。紐付け保留（UNLINKED_HOLD）状態です。'
-      );
+    if (!isDifferent) {
+      // Re-selecting same context is idempotent, keep current photos untouched
+      return;
     }
-    setActiveTargetContext(newContext);
+
+    const currentNonNullPhotos = Object.values(capturedPhotos).filter((p) => p !== null);
+    const photoCount = currentNonNullPhotos.length;
+
+    if (photoCount === 0) {
+      // No unsaved photos in current context, switch directly
+      applyContextSwitch(newContext);
+      return;
+    }
+
+    // Unsaved photos exist! Do NOT silently erase. Open safe selection modal.
+    const usableCount = currentNonNullPhotos.filter((p) => p.qaResult.status === 'USE_AS_IS').length;
+    if (!activeTargetContext.isConfirmed) {
+      setSwitchModal({
+        isOpen: true,
+        pendingContext: newContext,
+        currentPhotoCount: photoCount,
+        currentUsableCount: usableCount,
+        mode: 'UNCONFIRMED_WARN',
+        errorMessage: null
+      });
+    } else {
+      setSwitchModal({
+        isOpen: true,
+        pendingContext: newContext,
+        currentPhotoCount: photoCount,
+        currentUsableCount: usableCount,
+        mode: 'CONFIRM_STASH_OR_DISCARD',
+        errorMessage: null
+      });
+    }
+  };
+
+  // Modal Action: Stash and Switch (Recommended)
+  const handleModalStashAndSwitch = () => {
+    const stashRes = activeStashService.stashPhotos({
+      targetContext: activeTargetContext,
+      capturedPhotos,
+      currentAngleIndex,
+      dryRunPreview,
+      listingHandoff
+    });
+
+    if (!stashRes.success) {
+      // Stash failed (e.g. capacity exceeded or integrity issue): STOP switch, do not erase!
+      setSwitchModal((prev) => ({
+        ...prev,
+        errorMessage: stashRes.messageJa
+      }));
+      return;
+    }
+
+    const pending = switchModal.pendingContext!;
+    setSwitchModal({
+      isOpen: false,
+      pendingContext: null,
+      currentPhotoCount: 0,
+      currentUsableCount: 0,
+      mode: 'CONFIRM_STASH_OR_DISCARD',
+      errorMessage: null
+    });
+    applyContextSwitch(pending);
+  };
+
+  // Modal Action: Cancel Switch
+  const handleModalCancel = () => {
+    setSwitchModal({
+      isOpen: false,
+      pendingContext: null,
+      currentPhotoCount: 0,
+      currentUsableCount: 0,
+      mode: 'CONFIRM_STASH_OR_DISCARD',
+      errorMessage: null
+    });
+    setStatusMessage('ℹ️ 商品の切り替えをキャンセルし、現在の撮影セッションを保持しました。');
+  };
+
+  // Modal Action: Prompt Explicit Discard Confirmation
+  const handleModalPromptDiscard = () => {
+    setSwitchModal((prev) => ({
+      ...prev,
+      mode: 'CONFIRM_DISCARD_FINAL',
+      errorMessage: null
+    }));
+  };
+
+  // Modal Action: Execute Discard and Switch
+  const handleModalExecuteDiscard = () => {
+    const pending = switchModal.pendingContext!;
+    setSwitchModal({
+      isOpen: false,
+      pendingContext: null,
+      currentPhotoCount: 0,
+      currentUsableCount: 0,
+      mode: 'CONFIRM_STASH_OR_DISCARD',
+      errorMessage: null
+    });
+    applyContextSwitch(pending);
+    setStatusMessage(`⚠️ 【${activeTargetContext.sku}】の未保存写真を破棄し、【${pending.sku || '未選択'}】に切り替えました。`);
+  };
+
+  // Drawer Action: Discard stashed entry
+  const handleDiscardStashedSession = (sku: string, unitId: string) => {
+    activeStashService.discardStashedSession(sku, unitId);
+    setStashedSummaries(activeStashService.listSummaries());
+    setStatusMessage(`🗑️ 【${sku} (${unitId})】の一時退避データを破棄しました。`);
+  };
+
+  // Drawer Action: Resume stashed session directly
+  const handleResumeFromDrawer = (summary: StashSessionSummary) => {
+    const target = TARGET_CONTEXT_PRESETS.find(
+      (p) => p.context.sku === summary.sku && p.context.inventoryUnitId === summary.inventoryUnitId
+    )?.context || {
+      sku: summary.sku,
+      inventoryUnitId: summary.inventoryUnitId,
+      itemTitle: summary.itemTitle,
+      isConfirmed: true
+    };
+    handleSwitchTargetContext(target);
+    setShowStashDrawer(false);
   };
 
   const [pedalConfig, setPedalConfig] = useState<PedalTriggerConfig>({
@@ -564,6 +759,30 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
               </button>
             )}
 
+            {/* Stash Drawer Toggle Button */}
+            <button
+              type="button"
+              onClick={() => setShowStashDrawer(!showStashDrawer)}
+              style={{
+                background: stashedSummaries.length > 0 ? 'rgba(59, 130, 246, 0.2)' : 'rgba(51, 65, 85, 0.4)',
+                color: stashedSummaries.length > 0 ? '#60a5fa' : '#94a3b8',
+                border: stashedSummaries.length > 0 ? '1px solid #3b82f6' : '1px solid #475569',
+                borderRadius: '6px',
+                padding: '4px 10px',
+                fontSize: '0.78rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem'
+              }}
+              title="メモリ内一時退避セッション一覧を表示"
+            >
+              <span>💾</span>
+              <span>一時退避中: {stashedSummaries.length} 個体</span>
+              <span style={{ fontSize: '0.7rem' }}>{showStashDrawer ? '▲ 閉じる' : '▼ 一覧'}</span>
+            </button>
+
             <div style={{ marginLeft: 'auto' }}>
               <a
                 href="./inventory-sales.html"
@@ -580,6 +799,100 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
               </a>
             </div>
           </div>
+
+          {/* Stash Drawer Panel */}
+          {showStashDrawer && (
+            <div
+              style={{
+                marginTop: '0.75rem',
+                padding: '0.75rem 1rem',
+                background: '#0a0f1d',
+                border: '1px solid #2563eb',
+                borderRadius: '8px',
+                fontSize: '0.8rem'
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                <span style={{ fontWeight: 700, color: '#60a5fa' }}>
+                  💾 メモリ内一時退避セッション一覧（{stashedSummaries.length} 個体）
+                </span>
+                <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                  上限: {activeStashService.maxEntries} 個体
+                </span>
+              </div>
+
+              {stashedSummaries.length === 0 ? (
+                <p style={{ margin: 0, color: '#94a3b8', fontSize: '0.78rem' }}>
+                  現在一時退避されている写真データはありません。撮影途中で商品・個体を切り替えると自動退避されます。
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {stashedSummaries.map((s) => (
+                    <div
+                      key={s.stashKey}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        background: '#1e293b',
+                        padding: '0.5rem 0.75rem',
+                        borderRadius: '6px',
+                        border: '1px solid #334155',
+                        flexWrap: 'wrap',
+                        gap: '0.5rem'
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#f8fafc' }}>
+                          {s.sku} <span style={{ color: '#94a3b8', fontWeight: 400 }}>({s.inventoryUnitId})</span>
+                        </div>
+                        <div style={{ fontSize: '0.72rem', color: '#cbd5e1' }}>
+                          写真: {s.photoCount} 枚（合格: {s.usableCount} 枚） | 退避日時: {new Date(s.stashedAt).toLocaleTimeString()}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.4rem' }}>
+                        <button
+                          type="button"
+                          onClick={() => handleResumeFromDrawer(s)}
+                          style={{
+                            background: '#2563eb',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            padding: '3px 8px',
+                            fontSize: '0.72rem',
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          🔄 撮影再開
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDiscardStashedSession(s.sku, s.inventoryUnitId)}
+                          style={{
+                            background: 'rgba(239, 68, 68, 0.15)',
+                            color: '#f87171',
+                            border: '1px solid rgba(239, 68, 68, 0.4)',
+                            borderRadius: '4px',
+                            padding: '3px 8px',
+                            fontSize: '0.72rem',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          🗑️ 破棄
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ marginTop: '0.6rem', padding: '0.4rem 0.6rem', background: '#020617', borderRadius: '4px', fontSize: '0.72rem', color: '#fbbf24', border: '1px solid rgba(251, 191, 36, 0.3)' }}>
+                ⚠️ <strong>【一時退避（In-Memory Stash）について】</strong> これは同一ブラウザセッション内の一時退避領域です。正式な証拠保存（Evidence Vault）や在庫DBではありません。ページ更新、タブ終了、ブラウザ終了によりデータは消失します。
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Dry Run Preview Panel (In-memory diff & Reason code display) */}
@@ -1184,6 +1497,324 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Safe Switch & Unsaved Photo Protection Modal */}
+      {switchModal.isOpen && switchModal.pendingContext && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '1rem'
+          }}
+        >
+          <div
+            style={{
+              background: '#0f172a',
+              border: switchModal.mode === 'CONFIRM_DISCARD_FINAL' ? '2px solid #ef4444' : '2px solid #3b82f6',
+              borderRadius: '12px',
+              padding: '1.5rem',
+              maxWidth: '560px',
+              width: '100%',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
+              color: '#f8fafc'
+            }}
+          >
+            {/* Modal Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+              <div
+                style={{
+                  background: switchModal.mode === 'CONFIRM_DISCARD_FINAL' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(59, 130, 246, 0.2)',
+                  color: switchModal.mode === 'CONFIRM_DISCARD_FINAL' ? '#f87171' : '#60a5fa',
+                  padding: '0.6rem',
+                  borderRadius: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <span style={{ fontSize: '1.4rem' }}>{switchModal.mode === 'CONFIRM_DISCARD_FINAL' ? '⚠️' : '💾'}</span>
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700 }}>
+                  {switchModal.mode === 'CONFIRM_DISCARD_FINAL'
+                    ? '未保存写真の破棄確認'
+                    : switchModal.mode === 'UNCONFIRMED_WARN'
+                    ? '未確定コンテキストの写真保護警告'
+                    : '未保存写真の一時退避と商品切り替え'}
+                </h3>
+                <p style={{ margin: 0, fontSize: '0.8rem', color: '#94a3b8' }}>
+                  別商品への写真混入防止 &amp; 撮影データの安全な退避
+                </p>
+              </div>
+            </div>
+
+            {/* Error Message if Stash failed */}
+            {switchModal.errorMessage && (
+              <div
+                style={{
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  border: '1px solid #ef4444',
+                  borderRadius: '6px',
+                  padding: '0.6rem 0.8rem',
+                  marginBottom: '1rem',
+                  fontSize: '0.82rem',
+                  color: '#fca5a5'
+                }}
+              >
+                <strong>❌ 退避不可:</strong> {switchModal.errorMessage}
+              </div>
+            )}
+
+            {/* Target Item Details Box */}
+            <div
+              style={{
+                background: '#1e293b',
+                borderRadius: '8px',
+                padding: '0.85rem 1rem',
+                marginBottom: '1rem',
+                fontSize: '0.82rem',
+                border: '1px solid #334155'
+              }}
+            >
+              <div style={{ marginBottom: '0.4rem' }}>
+                <span style={{ color: '#94a3b8' }}>現在の対象: </span>
+                <strong style={{ color: '#f8fafc' }}>
+                  {activeTargetContext.sku || '未確定 (UNLINKED_HOLD)'}
+                </strong>
+                {activeTargetContext.inventoryUnitId && (
+                  <span style={{ color: '#cbd5e1' }}> ({activeTargetContext.inventoryUnitId})</span>
+                )}
+              </div>
+              <div style={{ marginBottom: '0.4rem' }}>
+                <span style={{ color: '#94a3b8' }}>撮影済み写真: </span>
+                <strong style={{ color: '#38bdf8' }}>{switchModal.currentPhotoCount} 枚</strong>
+                <span style={{ color: '#94a3b8' }}>
+                  {' '}(合格 USE_AS_IS: <strong style={{ color: '#34d399' }}>{switchModal.currentUsableCount}</strong> 枚)
+                </span>
+              </div>
+              <div>
+                <span style={{ color: '#94a3b8' }}>切替先: </span>
+                <strong style={{ color: '#c084fc' }}>
+                  {switchModal.pendingContext.sku || '未選択 (HOLD)'}
+                </strong>
+                {switchModal.pendingContext.inventoryUnitId && (
+                  <span style={{ color: '#cbd5e1' }}> ({switchModal.pendingContext.inventoryUnitId})</span>
+                )}
+              </div>
+            </div>
+
+            {/* Mode-specific Explanations & Action Buttons */}
+            {switchModal.mode === 'CONFIRM_STASH_OR_DISCARD' && (
+              <>
+                <p style={{ fontSize: '0.83rem', color: '#cbd5e1', lineHeight: '1.45', marginBottom: '1rem' }}>
+                  現在の撮影データをメモリ内に一時退避すると、後からこの個体に戻った際に撮影途中から再開できます。
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                  {/* Default / Primary Recommended Action */}
+                  <button
+                    type="button"
+                    onClick={handleModalStashAndSwitch}
+                    style={{
+                      background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+                      color: '#ffffff',
+                      border: '1px solid #3b82f6',
+                      borderRadius: '8px',
+                      padding: '0.75rem 1rem',
+                      fontSize: '0.9rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.5rem',
+                      boxShadow: '0 4px 6px -1px rgba(37, 99, 235, 0.4)'
+                    }}
+                  >
+                    <span>💾</span> 一時退避して切り替える（推奨）
+                  </button>
+
+                  {/* Secondary Action: Cancel Switch */}
+                  <button
+                    type="button"
+                    onClick={handleModalCancel}
+                    style={{
+                      background: '#334155',
+                      color: '#cbd5e1',
+                      border: '1px solid #475569',
+                      borderRadius: '8px',
+                      padding: '0.6rem 1rem',
+                      fontSize: '0.85rem',
+                      fontWeight: 600,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    ❌ 切り替えをキャンセル（現在の撮影を継続）
+                  </button>
+
+                  {/* Destructive Action: Discard prompt */}
+                  <div style={{ textAlign: 'center', marginTop: '0.4rem' }}>
+                    <button
+                      type="button"
+                      onClick={handleModalPromptDiscard}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#f87171',
+                        fontSize: '0.76rem',
+                        textDecoration: 'underline',
+                        cursor: 'pointer',
+                        padding: '4px'
+                      }}
+                    >
+                      🗑️ 未保存写真を破棄して切り替える...
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {switchModal.mode === 'CONFIRM_DISCARD_FINAL' && (
+              <>
+                <div
+                  style={{
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    border: '1px solid #ef4444',
+                    borderRadius: '8px',
+                    padding: '0.75rem',
+                    marginBottom: '1rem',
+                    fontSize: '0.82rem',
+                    color: '#fca5a5'
+                  }}
+                >
+                  ⚠️ <strong>【不可逆なデータ消去の警告】</strong>
+                  <br />
+                  SKU: <strong>{activeTargetContext.sku}</strong> の撮影済み写真（原本および補正後画像 {switchModal.currentPhotoCount} 枚）はメモリから完全に消去され、復元できなくなります。
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                  {/* Default Action: Keep Data / Cancel */}
+                  <button
+                    type="button"
+                    onClick={handleModalCancel}
+                    style={{
+                      flex: 1,
+                      background: '#2563eb',
+                      color: '#ffffff',
+                      border: '1px solid #3b82f6',
+                      borderRadius: '8px',
+                      padding: '0.7rem 1rem',
+                      fontSize: '0.85rem',
+                      fontWeight: 700,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    🛡️ キャンセル（破棄せずデータを保持）
+                  </button>
+
+                  {/* Danger Action */}
+                  <button
+                    type="button"
+                    onClick={handleModalExecuteDiscard}
+                    style={{
+                      background: 'rgba(239, 68, 68, 0.2)',
+                      color: '#f87171',
+                      border: '1px solid #ef4444',
+                      borderRadius: '8px',
+                      padding: '0.7rem 1rem',
+                      fontSize: '0.85rem',
+                      fontWeight: 700,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    🗑️ 破棄を実行して切り替え
+                  </button>
+                </div>
+              </>
+            )}
+
+            {switchModal.mode === 'UNCONFIRMED_WARN' && (
+              <>
+                <div
+                  style={{
+                    background: 'rgba(245, 158, 11, 0.15)',
+                    border: '1px solid #f59e0b',
+                    borderRadius: '8px',
+                    padding: '0.75rem',
+                    marginBottom: '1rem',
+                    fontSize: '0.82rem',
+                    color: '#fcd34d'
+                  }}
+                >
+                  ⚠️ 現在の撮影写真は商品カタログ番号（SKU）および実物個体IDが未確定（UNLINKED_HOLD）のため、他商品への誤紐付け防止のためメモリ一時退避が禁止されています。
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                  {/* Default Action: Cancel */}
+                  <button
+                    type="button"
+                    onClick={handleModalCancel}
+                    style={{
+                      flex: 1,
+                      background: '#334155',
+                      color: '#ffffff',
+                      border: '1px solid #475569',
+                      borderRadius: '8px',
+                      padding: '0.7rem 1rem',
+                      fontSize: '0.85rem',
+                      fontWeight: 700,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    🛡️ キャンセル（未確定のまま撮影継続）
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleModalExecuteDiscard}
+                    style={{
+                      background: 'rgba(239, 68, 68, 0.2)',
+                      color: '#f87171',
+                      border: '1px solid #ef4444',
+                      borderRadius: '8px',
+                      padding: '0.7rem 1rem',
+                      fontSize: '0.85rem',
+                      fontWeight: 700,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    🗑️ 未確定写真を破棄して切り替え
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Truthful Disclosure Banner */}
+            <div
+              style={{
+                marginTop: '1rem',
+                paddingTop: '0.75rem',
+                borderTop: '1px solid rgba(148, 163, 184, 0.15)',
+                fontSize: '0.72rem',
+                color: '#94a3b8',
+                lineHeight: '1.4'
+              }}
+            >
+              ℹ️ <strong>【一時退避（In-Memory Stash）について】</strong>
+              {' '}これは同一ブラウザセッション内の一時退避領域です。正式な証拠保存（Evidence Vault）や在庫DBではありません。ページ更新、タブ終了、ブラウザ終了によりデータは消失します。
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

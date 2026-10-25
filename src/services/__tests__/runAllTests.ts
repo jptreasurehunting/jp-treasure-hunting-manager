@@ -72,6 +72,7 @@ import { runShippingDecisionIntegrationTests } from './shippingDecisionIntegrati
 import { runPhotoCaptureTests } from './photoCapture.test';
 import { runListingPipelineE2ETests } from './listingPipelineE2E.test';
 import { runUiNavigationDiagnosticsTests } from './uiNavigationDiagnostics.test';
+import { runPhotoCaptureStashTests } from './photoCaptureStash.test';
 
 export interface MasterTestSummary {
   totalPassed: number;
@@ -131,7 +132,8 @@ export async function runAllAppTests(): Promise<MasterTestSummary> {
     { name: 'Zonos Portable Project Tests', fn: runZonosPortableTests },
     { name: 'Pedal-Assisted Photo Capture & Automated Photo QA Tests', fn: runPhotoCaptureTests },
     { name: 'Listing Pipeline End-to-End Simulation Tests', fn: runListingPipelineE2ETests },
-    { name: 'UI Navigation & Operational Diagnostics Tests', fn: runUiNavigationDiagnosticsTests }
+    { name: 'UI Navigation & Operational Diagnostics Tests', fn: runUiNavigationDiagnosticsTests },
+    { name: 'Photo Capture In-Memory Stash & Resume Safety Tests', fn: runPhotoCaptureStashTests }
   ];
 
   let totalPassed = 0;
