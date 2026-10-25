@@ -722,6 +722,15 @@ function initEventListeners() {
   if (tabPhotoCapture) {
     tabPhotoCapture.addEventListener('click', () => switchTab(tabPhotoCapture, pagePhotoCapture));
   }
+
+  // ハッシュルーティング対応 (#photoCapture での写真撮影タブ自動アクティブ化)
+  const handleHashRoute = () => {
+    if (window.location.hash === '#photoCapture' && tabPhotoCapture && pagePhotoCapture) {
+      switchTab(tabPhotoCapture, pagePhotoCapture);
+    }
+  };
+  handleHashRoute();
+  window.addEventListener('hashchange', handleHashRoute);
 }
 
 // ドキュメントロード時の初期化処理

@@ -13,7 +13,18 @@
       <strong style="font-size:18px;">JP Treasure Hunting Manager</strong>
       <span style="margin-left:10px;color:#94a3b8;">在庫販売ワークベンチ</span>
     </div>
-    <a href="./index.html" style="color:#93c5fd;text-decoration:none;font-weight:700;">← Managerへ戻る</a>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <span style="font-size:12px;background:rgba(59,130,246,0.15);color:#38bdf8;border:1px solid rgba(56,189,248,0.3);padding:4px 10px;border-radius:6px;font-weight:600;">
+        🛡️ Mock/Dry Run モード (本番書込・API送信停止中)
+      </span>
+      <span style="font-size:12px;background:#1e293b;color:#94a3b8;border:1px solid #475569;padding:4px 10px;border-radius:6px;font-weight:600;">
+        📷 HARDWARE_PENDING
+      </span>
+      <a href="./index.html#photoCapture" style="color:#d8b4fe;text-decoration:none;font-weight:700;font-size:13px;border:1px solid #9333ea;padding:5px 12px;border-radius:6px;background:rgba(147,51,234,0.18);display:inline-flex;align-items:center;gap:5px;">
+        <span>📸</span> 写真撮影 (Photo Capture) へ ↗
+      </a>
+      <a href="./index.html" style="color:#93c5fd;text-decoration:none;font-weight:700;font-size:13px;margin-left:6px;">← Managerへ戻る</a>
+    </div>
   </header>
   <main id="inventory-sales-root"></main>
   <script type="module" src="./src/mountInventorySales.tsx"></script>

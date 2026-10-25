@@ -71,6 +71,7 @@ import { runShippingDecisionEngineTests } from './shippingDecisionEngine.test';
 import { runShippingDecisionIntegrationTests } from './shippingDecisionIntegration.test';
 import { runPhotoCaptureTests } from './photoCapture.test';
 import { runListingPipelineE2ETests } from './listingPipelineE2E.test';
+import { runUiNavigationDiagnosticsTests } from './uiNavigationDiagnostics.test';
 
 export interface MasterTestSummary {
   totalPassed: number;
@@ -129,7 +130,8 @@ export async function runAllAppTests(): Promise<MasterTestSummary> {
     { name: 'Shipping Template Tests', fn: runShippingTemplateTests },
     { name: 'Zonos Portable Project Tests', fn: runZonosPortableTests },
     { name: 'Pedal-Assisted Photo Capture & Automated Photo QA Tests', fn: runPhotoCaptureTests },
-    { name: 'Listing Pipeline End-to-End Simulation Tests', fn: runListingPipelineE2ETests }
+    { name: 'Listing Pipeline End-to-End Simulation Tests', fn: runListingPipelineE2ETests },
+    { name: 'UI Navigation & Operational Diagnostics Tests', fn: runUiNavigationDiagnosticsTests }
   ];
 
   let totalPassed = 0;

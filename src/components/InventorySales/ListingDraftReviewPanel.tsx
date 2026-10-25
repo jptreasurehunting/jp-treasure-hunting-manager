@@ -253,6 +253,30 @@ export function ListingDraftReviewPanel({ items, photoHandoffs }: ListingDraftRe
                 </p>
               )}
 
+              {/* Navigation link to Photo Capture when photos are missing */}
+              {photoPreview.status === 'NO_PHOTOS_RECORDED' && (
+                <div style={{ marginBottom: 12 }}>
+                  <a
+                    href="./index.html#photoCapture"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '6px 12px',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      borderRadius: 6,
+                      background: 'rgba(147, 51, 234, 0.2)',
+                      color: '#d8b4fe',
+                      border: '1px solid #9333ea',
+                      textDecoration: 'none'
+                    }}
+                  >
+                    <span>📸</span> Photo Capture画面で写真撮影・QAを開始する ↗
+                  </a>
+                </div>
+              )}
+
               {/* Channel Constraints & Disclaimer Banner */}
               <div style={{ padding: '8px 10px', borderRadius: 6, background: 'rgba(30, 41, 59, 0.65)', border: '1px solid rgba(148, 163, 184, 0.2)', marginBottom: 10, fontSize: 11, color: '#94a3b8', lineHeight: 1.5 }}>
                 <span style={{ color: '#c084fc', fontWeight: 700 }}>{photoPreview.channelConstraintsNote.channel} 規定目安: </span>

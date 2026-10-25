@@ -26,6 +26,64 @@ import {
   DryRunListingPhotoHandoff
 } from '../../types/photoCapture';
 
+export interface TargetContextPreset {
+  id: string;
+  label: string;
+  context: PhotoCaptureTargetContext;
+}
+
+export const TARGET_CONTEXT_PRESETS: TargetContextPreset[] = [
+  {
+    id: 'NONE',
+    label: '【未選択 / 紐付け保留中】(UNLINKED_HOLD)',
+    context: { isConfirmed: false, sku: '', inventoryUnitId: '', itemTitle: '未選択' }
+  },
+  {
+    id: 'MOCK_E2E',
+    label: 'MOCK-E2E-CAM-001 | ビンテージ一眼レフカメラ (UNIT-CAM-001-A)',
+    context: {
+      sku: 'MOCK-E2E-CAM-001',
+      inventoryUnitId: 'MOCK-UNIT-CAM-001-A',
+      itemTitle: '【模擬テスト】ビンテージ一眼レフカメラ E2E検証個体',
+      serialNumber: 'SN-E2E-998811',
+      isConfirmed: true
+    }
+  },
+  {
+    id: 'WATCH_STRAP',
+    label: 'SKU-WATCH-STRAP-01 | 本革NATOストラップ 20mm (UNIT-2026-0042)',
+    context: {
+      sku: 'SKU-WATCH-STRAP-01',
+      inventoryUnitId: 'UNIT-2026-0042',
+      itemTitle: '本革NATOストラップ 20mm ダークブラウン',
+      serialNumber: 'STRAP-BROWN-042',
+      isConfirmed: true
+    }
+  },
+  {
+    id: 'SEIKO_5',
+    label: 'SKU-VINTAGE-SEIKO-01 | セイコー 5 アクタス 自動巻 (UNIT-2026-0089)',
+    context: {
+      sku: 'SKU-VINTAGE-SEIKO-01',
+      inventoryUnitId: 'UNIT-2026-0089',
+      itemTitle: 'セイコー 5 アクタス 自動巻 1974年製',
+      serialNumber: '4D1289',
+      isConfirmed: true
+    }
+  },
+  {
+    id: 'LEICA_LENS',
+    label: 'SKU-CAMERA-LENS-01 | ズミクロン 50mm F2 3rd (UNIT-2026-0105)',
+    context: {
+      sku: 'SKU-CAMERA-LENS-01',
+      inventoryUnitId: 'UNIT-2026-0105',
+      itemTitle: 'ライカ ズミクロン 50mm F2 第3世代',
+      serialNumber: '3201058',
+      isConfirmed: true
+    }
+  }
+];
+
 interface PhotoCaptureCardProps {
   isTabActive?: boolean;
   cameraAdapter?: ICameraHardwareAdapter;
@@ -61,6 +119,47 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
     DEFECT_DETAIL: null
   });
 
+  const [activeTargetContext, setActiveTargetContext] = useState<PhotoCaptureTargetContext>(
+    targetContext || TARGET_CONTEXT_PRESETS[0].context
+  );
+
+  useEffect(() => {
+    if (targetContext) {
+      setActiveTargetContext(targetContext);
+    }
+  }, [targetContext]);
+
+  // Context switch handler with Cross-SKU pollution prevention
+  const handleSwitchTargetContext = (newContext: PhotoCaptureTargetContext) => {
+    const isDifferent =
+      newContext.sku !== activeTargetContext.sku ||
+      newContext.inventoryUnitId !== activeTargetContext.inventoryUnitId;
+
+    if (isDifferent) {
+      // 異なる商品への切替時の混入防止: 撮影写真とプレビューを安全にクリア
+      setCapturedPhotos({
+        FRONT: null,
+        BACK: null,
+        LEFT: null,
+        RIGHT: null,
+        TOP: null,
+        LABEL_TAG: null,
+        DEFECT_DETAIL: null
+      });
+      setCurrentAngleIndex(0);
+      setDryRunPreview(null);
+      setShowPreviewPanel(false);
+      setListingHandoff(null);
+      setShowListingPanel(false);
+      setStatusMessage(
+        newContext.isConfirmed
+          ? `🔄 撮影対象を【${newContext.sku} (${newContext.inventoryUnitId})】に切り替えました。別商品混入防止のため、既存写真を安全にリセットしました。`
+          : '⚠️ 撮影対象を未選択に設定しました。紐付け保留（UNLINKED_HOLD）状態です。'
+      );
+    }
+    setActiveTargetContext(newContext);
+  };
+
   const [pedalConfig, setPedalConfig] = useState<PedalTriggerConfig>({
     enabled: true,
     triggerKey: 'Space',
@@ -85,7 +184,7 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
   const activePhoto = capturedPhotos[currentAngleGuide.angle];
 
   // Evaluate linkage safety & Sellable Inventory Gate alignment
-  const linkage = evaluatePhotoInventoryLinkage(targetContext, existingRegisteredUnitIds);
+  const linkage = evaluatePhotoInventoryLinkage(activeTargetContext, existingRegisteredUnitIds);
   const gateStatus = checkPhotoGateCompletion(capturedPhotos);
 
   useEffect(() => {
@@ -124,9 +223,9 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
       simulatedPreset,
       adapter,
       existingPhotos: capturedPhotos,
-      sku: targetContext?.sku,
-      inventoryUnitId: targetContext?.inventoryUnitId,
-      targetContext,
+      sku: activeTargetContext?.sku,
+      inventoryUnitId: activeTargetContext?.inventoryUnitId,
+      targetContext: activeTargetContext,
       onStateUpdate: (update) => {
         if (update.isCapturing !== undefined) setIsCapturing(update.isCapturing);
         if (update.capturedPhotos !== undefined) setCapturedPhotos(update.capturedPhotos);
@@ -180,12 +279,12 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
 
   // Manual trigger to generate Dry Run preview
   const handleGenerateDryRun = () => {
-    if (!targetContext) {
-      setStatusMessage('⚠️ 撮影対象コンテキストが未指定のため Dry Run を生成できません。');
+    if (!activeTargetContext || !activeTargetContext.isConfirmed) {
+      setStatusMessage('⚠️ 撮影対象コンテキストが未確定のため Dry Run を生成できません。');
       return;
     }
     const adapter = integrationAdapter || new CentralInventoryPhotoAdapter({ existingRegisteredUnitIds });
-    const preview = adapter.generateDryRunPreview(targetContext, capturedPhotos);
+    const preview = adapter.generateDryRunPreview(activeTargetContext, capturedPhotos);
     setDryRunPreview(preview);
     setShowPreviewPanel(true);
     setStatusMessage(`🔍 Dry Run プレビュー: [${preview.reasonCode}] ${preview.reasonMessageJa}`);
@@ -193,12 +292,12 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
 
   // Manual trigger to generate Listing Preparation Photo Handoff Preview
   const handleGenerateListingHandoff = () => {
-    if (!targetContext) {
-      setStatusMessage('⚠️ 撮影対象コンテキストが未指定のため出品準備プレビューを生成できません。');
+    if (!activeTargetContext || !activeTargetContext.isConfirmed) {
+      setStatusMessage('⚠️ 撮影対象コンテキストが未確定のため出品準備プレビューを生成できません。');
       return;
     }
     const handoff = evaluatePhotoListingHandoff({
-      targetContext,
+      targetContext: activeTargetContext,
       capturedPhotos,
       existingRegisteredUnitIds
     });
@@ -210,9 +309,9 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
 
   // Manual trigger to sync photo gate to mock inventory unit
   const handleSyncToInventory = () => {
-    if (!targetContext) return;
+    if (!activeTargetContext) return;
     if (integrationAdapter) {
-      const execResult = integrationAdapter.executeSafeIntegration(targetContext, capturedPhotos);
+      const execResult = integrationAdapter.executeSafeIntegration(activeTargetContext, capturedPhotos);
       setDryRunPreview(execResult.preview);
       onSyncToInventory?.({
         success: execResult.success,
@@ -224,7 +323,7 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
       });
       setStatusMessage(execResult.messageJa);
     } else if (inventoryBridge) {
-      const result = inventoryBridge.syncPhotoGate(targetContext, capturedPhotos);
+      const result = inventoryBridge.syncPhotoGate(activeTargetContext, capturedPhotos);
       onSyncToInventory?.(result);
       setStatusMessage(result.messageJa);
     } else {
@@ -260,13 +359,19 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '0.8rem', padding: '0.3rem 0.75rem', borderRadius: '20px', background: pedalConfig.enabled && isTabActive ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)', color: pedalConfig.enabled && isTabActive ? '#34d399' : '#f87171', border: '1px solid rgba(52,211,153,0.3)', fontWeight: 600 }}>
             🦶 ペダル連動: {pedalConfig.triggerKey} {isTabActive ? '(有効)' : '(他タブ停止中)'}
           </span>
           {/* Explicit Status for Hardware Validation Pending */}
           <span style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem', background: '#090d16', color: '#94a3b8', border: '1px solid #334155', borderRadius: '6px', fontWeight: 600 }}>
-            🚫 実機WebRTCカメラ: Hardware Validation 待ち (モック動作中)
+            📷 HARDWARE_PENDING (モック動作中)
+          </span>
+          <span style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem', background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: '6px', fontWeight: 600 }}>
+            🛡️ Mock / Dry Run
+          </span>
+          <span style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem', background: 'rgba(239, 68, 68, 0.1)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', fontWeight: 600 }}>
+            🚫 Publish Disabled
           </span>
         </div>
       </div>
@@ -274,137 +379,206 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
       {/* Main Grid Content */}
       <div style={{ background: '#0f172a', padding: '1.25rem', borderRadius: '0 0 12px 12px', border: '1px solid #334155', borderTop: 'none' }}>
         {/* Step 0: Target Context Header (商品カタログ番号 vs 実物個体管理番号 分離表示) */}
-        <div style={{ background: '#1e293b', padding: '0.85rem 1.15rem', borderRadius: '8px', marginBottom: '1rem', border: '1px solid #334155', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.25rem', alignItems: 'center' }}>
-            <div>
-              <span style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block' }}>商品カタログ番号 (SKU)</span>
-              <strong style={{ fontSize: '0.95rem', color: targetContext?.sku ? '#38bdf8' : '#64748b' }}>
-                {targetContext?.sku || '未指定 (HOLD)'}
-              </strong>
-            </div>
-            <div>
-              <span style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block' }}>商品名</span>
-              <span style={{ fontSize: '0.9rem', color: '#f8fafc', fontWeight: 600 }}>
-                {targetContext?.itemTitle || '未登録'}
-              </span>
-            </div>
-            <div style={{ borderLeft: '1px solid #475569', paddingLeft: '1.25rem' }}>
-              <span style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block' }}>実物個体管理番号 (Unit ID)</span>
-              <strong style={{ fontSize: '0.95rem', color: targetContext?.inventoryUnitId ? '#34d399' : '#64748b' }}>
-                {targetContext?.inventoryUnitId || '未指定 (HOLD)'}
-              </strong>
-            </div>
-            {targetContext?.serialNumber && (
+        <div style={{ background: '#1e293b', padding: '0.85rem 1.15rem', borderRadius: '8px', marginBottom: '1rem', border: '1px solid #334155' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.25rem', alignItems: 'center' }}>
               <div>
-                <span style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block' }}>個体刻印シリアル</span>
-                <span style={{ fontSize: '0.85rem', color: '#cbd5e1' }}>
-                  {targetContext.serialNumber}
+                <span style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block' }}>商品カタログ番号 (SKU)</span>
+                <strong style={{ fontSize: '0.95rem', color: activeTargetContext?.sku ? '#38bdf8' : '#64748b' }}>
+                  {activeTargetContext?.sku || '未指定 (HOLD)'}
+                </strong>
+              </div>
+              <div>
+                <span style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block' }}>商品名</span>
+                <span style={{ fontSize: '0.9rem', color: '#f8fafc', fontWeight: 600 }}>
+                  {activeTargetContext?.itemTitle || '未登録'}
                 </span>
               </div>
-            )}
-          </div>
+              <div style={{ borderLeft: '1px solid #475569', paddingLeft: '1.25rem' }}>
+                <span style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block' }}>実物個体管理番号 (Unit ID)</span>
+                <strong style={{ fontSize: '0.95rem', color: activeTargetContext?.inventoryUnitId ? '#34d399' : '#64748b' }}>
+                  {activeTargetContext?.inventoryUnitId || '未指定 (HOLD)'}
+                </strong>
+              </div>
+              {activeTargetContext?.serialNumber && (
+                <div>
+                  <span style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block' }}>個体刻印シリアル</span>
+                  <span style={{ fontSize: '0.85rem', color: '#cbd5e1' }}>
+                    {activeTargetContext.serialNumber}
+                  </span>
+                </div>
+              )}
+            </div>
 
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            <span
-              style={{
-                fontSize: '0.75rem',
-                padding: '0.3rem 0.65rem',
-                borderRadius: '6px',
-                fontWeight: 700,
-                background:
-                  linkage.status === 'LINKED_STAGED'
-                    ? 'rgba(16,185,129,0.2)'
-                    : linkage.status === 'ALREADY_REGISTERED'
-                    ? 'rgba(239,68,68,0.2)'
-                    : 'rgba(245,158,11,0.2)',
-                color:
-                  linkage.status === 'LINKED_STAGED'
-                    ? '#34d399'
-                    : linkage.status === 'ALREADY_REGISTERED'
-                    ? '#f87171'
-                    : '#fbbf24',
-                border:
-                  linkage.status === 'LINKED_STAGED'
-                    ? '1px solid #10b981'
-                    : linkage.status === 'ALREADY_REGISTERED'
-                    ? '1px solid #ef4444'
-                    : '1px solid #f59e0b'
-              }}
-            >
-              {linkage.status === 'LINKED_STAGED' && '🟢 紐付け確定 (LINKED_STAGED)'}
-              {linkage.status === 'ALREADY_REGISTERED' && '🚫 登録済み (ALREADY_REGISTERED)'}
-              {linkage.status === 'UNLINKED_HOLD' && '⚠️ 紐付け保留中 (UNLINKED_HOLD)'}
-              {linkage.status === 'MISMATCH_ERROR' && '❌ 個体不一致 (MISMATCH_ERROR)'}
-            </span>
-
-            <span
-              style={{
-                fontSize: '0.75rem',
-                padding: '0.3rem 0.65rem',
-                borderRadius: '6px',
-                fontWeight: 700,
-                background: gateStatus.photoQaComplete ? 'rgba(16,185,129,0.2)' : '#1e293b',
-                color: gateStatus.photoQaComplete ? '#34d399' : '#94a3b8',
-                border: gateStatus.photoQaComplete ? '1px solid #10b981' : '1px solid #475569'
-              }}
-            >
-              Gate 要件: {gateStatus.photoQaComplete ? '合格 (PASS)' : `未達 (${gateStatus.passedRequiredAngles.length}/4)`}
-            </span>
-
-            <button
-              type="button"
-              onClick={handleGenerateDryRun}
-              style={{
-                fontSize: '0.75rem',
-                padding: '0.3rem 0.65rem',
-                borderRadius: '6px',
-                fontWeight: 700,
-                background: '#1e293b',
-                color: '#38bdf8',
-                border: '1px solid #0284c7',
-                cursor: 'pointer'
-              }}
-              title="実在庫DBへ書き込まず、差分と理由コードを事前プレビューします"
-            >
-              🔍 Dry Run プレビュー
-            </button>
-
-            <button
-              type="button"
-              onClick={handleGenerateListingHandoff}
-              style={{
-                fontSize: '0.75rem',
-                padding: '0.3rem 0.65rem',
-                borderRadius: '6px',
-                fontWeight: 700,
-                background: '#1e293b',
-                color: '#c084fc',
-                border: '1px solid #9333ea',
-                cursor: 'pointer'
-              }}
-              title="本番出品や在庫DBを変更せず、出品ドラフト用写真候補とゲート状態を事前プレビューします"
-            >
-              📦 出品準備プレビュー
-            </button>
-
-            {gateStatus.photoQaComplete && linkage.status === 'LINKED_STAGED' && (
-              <button
-                type="button"
-                onClick={handleSyncToInventory}
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <span
                 style={{
                   fontSize: '0.75rem',
                   padding: '0.3rem 0.65rem',
                   borderRadius: '6px',
                   fontWeight: 700,
-                  background: '#059669',
-                  color: 'white',
-                  border: 'none',
+                  background:
+                    linkage.status === 'LINKED_STAGED'
+                      ? 'rgba(16,185,129,0.2)'
+                      : linkage.status === 'ALREADY_REGISTERED'
+                      ? 'rgba(239,68,68,0.2)'
+                      : 'rgba(245,158,11,0.2)',
+                  color:
+                    linkage.status === 'LINKED_STAGED'
+                      ? '#34d399'
+                      : linkage.status === 'ALREADY_REGISTERED'
+                      ? '#f87171'
+                      : '#fbbf24',
+                  border:
+                    linkage.status === 'LINKED_STAGED'
+                      ? '1px solid #10b981'
+                      : linkage.status === 'ALREADY_REGISTERED'
+                      ? '1px solid #ef4444'
+                      : '1px solid #f59e0b'
+                }}
+              >
+                {linkage.status === 'LINKED_STAGED' && '🟢 紐付け確定 (LINKED_STAGED)'}
+                {linkage.status === 'ALREADY_REGISTERED' && '🚫 登録済み (ALREADY_REGISTERED)'}
+                {linkage.status === 'UNLINKED_HOLD' && '⚠️ 紐付け保留中 (UNLINKED_HOLD)'}
+                {linkage.status === 'MISMATCH_ERROR' && '❌ 個体不一致 (MISMATCH_ERROR)'}
+              </span>
+
+              <span
+                style={{
+                  fontSize: '0.75rem',
+                  padding: '0.3rem 0.65rem',
+                  borderRadius: '6px',
+                  fontWeight: 700,
+                  background: gateStatus.photoQaComplete ? 'rgba(16,185,129,0.2)' : '#1e293b',
+                  color: gateStatus.photoQaComplete ? '#34d399' : '#94a3b8',
+                  border: gateStatus.photoQaComplete ? '1px solid #10b981' : '1px solid #475569'
+                }}
+              >
+                Gate 要件: {gateStatus.photoQaComplete ? '合格 (PASS)' : `未達 (${gateStatus.passedRequiredAngles.length}/4)`}
+              </span>
+
+              <button
+                type="button"
+                onClick={handleGenerateDryRun}
+                style={{
+                  fontSize: '0.75rem',
+                  padding: '0.3rem 0.65rem',
+                  borderRadius: '6px',
+                  fontWeight: 700,
+                  background: '#1e293b',
+                  color: '#38bdf8',
+                  border: '1px solid #0284c7',
+                  cursor: 'pointer'
+                }}
+                title="実在庫DBへ書き込まず、差分と理由コードを事前プレビューします"
+              >
+                🔍 Dry Run プレビュー
+              </button>
+
+              <button
+                type="button"
+                onClick={handleGenerateListingHandoff}
+                style={{
+                  fontSize: '0.75rem',
+                  padding: '0.3rem 0.65rem',
+                  borderRadius: '6px',
+                  fontWeight: 700,
+                  background: '#1e293b',
+                  color: '#c084fc',
+                  border: '1px solid #9333ea',
+                  cursor: 'pointer'
+                }}
+                title="本番出品や在庫DBを変更せず、出品ドラフト用写真候補とゲート状態を事前プレビューします"
+              >
+                📦 出品準備プレビュー
+              </button>
+
+              {gateStatus.photoQaComplete && linkage.status === 'LINKED_STAGED' && (
+                <button
+                  type="button"
+                  onClick={handleSyncToInventory}
+                  style={{
+                    fontSize: '0.75rem',
+                    padding: '0.3rem 0.65rem',
+                    borderRadius: '6px',
+                    fontWeight: 700,
+                    background: '#059669',
+                    color: 'white',
+                    border: 'none',
+                    cursor: 'pointer'
+                  }}
+                >
+                  🔄 在庫ゲートへ写真合格を反映 (Mock Sync)
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Target Context Quick Selector Bar */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', paddingTop: '0.6rem', borderTop: '1px solid rgba(148, 163, 184, 0.15)', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 600 }}>撮影対象の選択:</span>
+            <select
+              value={
+                TARGET_CONTEXT_PRESETS.find(
+                  (p) => p.context.sku === activeTargetContext?.sku && p.context.inventoryUnitId === activeTargetContext?.inventoryUnitId
+                )?.id || 'NONE'
+              }
+              onChange={(e) => {
+                const preset = TARGET_CONTEXT_PRESETS.find((p) => p.id === e.target.value);
+                if (preset) {
+                  handleSwitchTargetContext(preset.context);
+                }
+              }}
+              style={{
+                background: '#0f172a',
+                color: '#f8fafc',
+                border: '1px solid #475569',
+                borderRadius: '6px',
+                padding: '4px 10px',
+                fontSize: '0.8rem',
+                cursor: 'pointer'
+              }}
+            >
+              {TARGET_CONTEXT_PRESETS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+
+            {activeTargetContext?.isConfirmed && (
+              <button
+                type="button"
+                onClick={() => handleSwitchTargetContext(TARGET_CONTEXT_PRESETS[0].context)}
+                style={{
+                  background: 'none',
+                  border: '1px solid #64748b',
+                  color: '#94a3b8',
+                  borderRadius: '4px',
+                  padding: '3px 8px',
+                  fontSize: '0.72rem',
                   cursor: 'pointer'
                 }}
               >
-                🔄 在庫ゲートへ写真合格を反映 (Mock Sync)
+                ✕ 選択解除 (HOLDへ)
               </button>
             )}
+
+            <div style={{ marginLeft: 'auto' }}>
+              <a
+                href="./inventory-sales.html"
+                style={{
+                  fontSize: '0.75rem',
+                  color: '#93c5fd',
+                  textDecoration: 'none',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4
+                }}
+              >
+                <span>📦</span> 在庫販売ワークベンチを開く ↗
+              </a>
+            </div>
           </div>
         </div>
 
@@ -565,6 +739,29 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
                 </span>
               </div>
             </div>
+
+            {listingHandoff.canPrepareDraft && (
+              <div style={{ marginTop: '0.75rem', display: 'flex', justifyContent: 'flex-end' }}>
+                <a
+                  href="./inventory-sales.html"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    background: 'linear-gradient(135deg, #7c3aed, #4f46e5)',
+                    color: '#ffffff',
+                    padding: '0.45rem 0.95rem',
+                    borderRadius: '6px',
+                    fontWeight: 700,
+                    fontSize: '0.8rem',
+                    textDecoration: 'none',
+                    border: '1px solid #9333ea'
+                  }}
+                >
+                  <span>📦</span> 在庫販売ワークベンチで出品準備・ドラフト確認を開く ↗
+                </a>
+              </div>
+            )}
           </div>
         )}
 
