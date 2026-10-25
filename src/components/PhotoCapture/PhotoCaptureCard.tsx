@@ -568,6 +568,9 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
           <span style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem', background: 'rgba(239, 68, 68, 0.1)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', fontWeight: 600 }}>
             🚫 Publish Disabled
           </span>
+          <span style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem', background: 'rgba(168, 85, 247, 0.1)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)', borderRadius: '6px', fontWeight: 600 }} title="正式永続化（Evidence Vault）は現在モック検証段階であり、実ディスクへの保存は未接続です">
+            🏛️ Evidence Vault: 設計・検証中 (In-Memory Mock)
+          </span>
         </div>
       </div>
 

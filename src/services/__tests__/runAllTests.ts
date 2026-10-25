@@ -73,6 +73,7 @@ import { runPhotoCaptureTests } from './photoCapture.test';
 import { runListingPipelineE2ETests } from './listingPipelineE2E.test';
 import { runUiNavigationDiagnosticsTests } from './uiNavigationDiagnostics.test';
 import { runPhotoCaptureStashTests } from './photoCaptureStash.test';
+import { runPhotoEvidenceVaultTests } from './photoEvidenceVault.test';
 
 export interface MasterTestSummary {
   totalPassed: number;
@@ -133,7 +134,8 @@ export async function runAllAppTests(): Promise<MasterTestSummary> {
     { name: 'Pedal-Assisted Photo Capture & Automated Photo QA Tests', fn: runPhotoCaptureTests },
     { name: 'Listing Pipeline End-to-End Simulation Tests', fn: runListingPipelineE2ETests },
     { name: 'UI Navigation & Operational Diagnostics Tests', fn: runUiNavigationDiagnosticsTests },
-    { name: 'Photo Capture In-Memory Stash & Resume Safety Tests', fn: runPhotoCaptureStashTests }
+    { name: 'Photo Capture In-Memory Stash & Resume Safety Tests', fn: runPhotoCaptureStashTests },
+    { name: 'Photo Evidence Vault & Storage Persistence Safety Tests', fn: runPhotoEvidenceVaultTests }
   ];
 
   let totalPassed = 0;
