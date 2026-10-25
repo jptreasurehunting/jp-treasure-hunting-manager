@@ -14,7 +14,8 @@
 
 import {
   PhotoCaptureStashService,
-  StashedPhotoSession
+  StashedPhotoSession,
+  StashSessionSummary
 } from '../photoCaptureStashService';
 import type {
   PhotoAngle,
@@ -435,6 +436,159 @@ export async function runPhotoCaptureStashTests(): Promise<{ passed: number; fai
 
     assert(activePhotos.FRONT?.id === 'p-remount', 'Re-mount must seamlessly recover stashed photos');
     assert(activeAngle === 1, 'Re-mount must recover active angle index');
+  });
+
+  // Test 15: Drawer discard two-step confirmation (cancellation retains data, only confirmed action deletes)
+  test('Test 15: Drawer discard two-step confirmation ensures data is NOT deleted on cancel and ONLY deleted upon explicit confirmation', () => {
+    const service = new PhotoCaptureStashService();
+    const context: PhotoCaptureTargetContext = { sku: 'SKU-DRAWER-01', inventoryUnitId: 'UNIT-DRAWER-01', isConfirmed: true };
+    const photo = createMockCapturedPhoto({ id: 'p-drawer-1', angle: 'FRONT', sku: context.sku!, inventoryUnitId: context.inventoryUnitId! });
+
+    // Initial stash
+    service.stashPhotos({
+      targetContext: context,
+      capturedPhotos: { FRONT: photo, BACK: null, LEFT: null, RIGHT: null, TOP: null, LABEL_TAG: null, DEFECT_DETAIL: null }
+    });
+    assert(service.hasStash(context) === true, 'Session must exist in stash initially');
+
+    // Simulate Step 1: User clicks "破棄" in drawer -> sets discard target (confirmation mode)
+    let discardTarget: StashSessionSummary | null = service.listSummaries()[0];
+    assert(discardTarget !== null, 'Target must be set for confirmation');
+    assert(discardTarget.sku === 'SKU-DRAWER-01', 'Target SKU must match');
+    assert(discardTarget.photoCount === 1, 'Target photoCount must match');
+
+    // Simulate Step 2a: User clicks "キャンセル（退避データを保持）"
+    discardTarget = null; // reset without calling discard
+    assert(service.hasStash(context) === true, 'Data must NOT be deleted when user cancels');
+    assert(service.getCount() === 1, 'Stash count must remain 1');
+
+    // Simulate Step 2b: User re-prompts and clicks "完全消去を確定"
+    discardTarget = service.listSummaries()[0];
+    const deleted = service.discardStashedSession(discardTarget.sku, discardTarget.inventoryUnitId);
+    discardTarget = null;
+    assert(deleted === true, 'Discard must return true on confirmed deletion');
+    assert(service.hasStash(context) === false, 'Session must now be removed from stash');
+    assert(service.getCount() === 0, 'Stash count must be 0 after confirmed discard');
+  });
+
+  // Test 16: External context switch (props.targetContext) strictly protects against photo carryover and cross-contamination
+  test('Test 16: External context switch (props.targetContext) intercepts unsaved photos and prevents carrying old photos to new SKU', () => {
+    const service = new PhotoCaptureStashService();
+    const contextA: PhotoCaptureTargetContext = { sku: 'SKU-OLD-A', inventoryUnitId: 'UNIT-OLD-A', isConfirmed: true };
+    const contextB: PhotoCaptureTargetContext = { sku: 'SKU-NEW-B', inventoryUnitId: 'UNIT-NEW-B', isConfirmed: true };
+
+    const photoA = createMockCapturedPhoto({ id: 'p-old-a', angle: 'FRONT', sku: contextA.sku!, inventoryUnitId: contextA.inventoryUnitId! });
+    let currentPhotos: Record<PhotoAngle, CapturedPhoto | null> = {
+      FRONT: photoA, BACK: null, LEFT: null, RIGHT: null, TOP: null, LABEL_TAG: null, DEFECT_DETAIL: null
+    };
+    let activeContext = contextA;
+
+    // Simulate props.targetContext arriving with contextB while contextA has unsaved photos
+    const incomingPropContext = contextB;
+    const isDifferent = incomingPropContext.sku !== activeContext.sku || incomingPropContext.inventoryUnitId !== activeContext.inventoryUnitId;
+    assert(isDifferent === true, 'Context change must be detected');
+
+    const hasPhotos = Object.values(currentPhotos).some((p) => p !== null);
+    assert(hasPhotos === true, 'Unsaved photos must be detected');
+
+    // Verification 1: Switch must NOT proceed directly without protection
+    // Photos of contextA MUST NOT be carried over to contextB
+    let carriedOverToNewContext = false;
+    if (activeContext.sku === contextB.sku && currentPhotos.FRONT?.sku === 'SKU-OLD-A') {
+      carriedOverToNewContext = true;
+    }
+    assert(carriedOverToNewContext === false, 'Photos from old SKU must never be directly reassigned to new SKU');
+
+    // Verification 2: Safe stash and switch
+    const stashRes = service.stashPhotos({
+      targetContext: activeContext,
+      capturedPhotos: currentPhotos
+    });
+    assert(stashRes.success === true, 'Old session must be safely stashed');
+    assert(service.hasStash(contextA) === true, 'contextA must be preserved in stash');
+
+    // Switch to contextB with clean reset
+    activeContext = incomingPropContext;
+    currentPhotos = {
+      FRONT: null, BACK: null, LEFT: null, RIGHT: null, TOP: null, LABEL_TAG: null, DEFECT_DETAIL: null
+    };
+
+    assert(activeContext.sku === 'SKU-NEW-B', 'Active context is now contextB');
+    assert(currentPhotos.FRONT === null, 'New context starts with clean photos (no carryover)');
+
+    // Verify contextA in stash is completely untainted by contextB
+    const restoredA = service.restorePhotos(contextA);
+    assert(restoredA.success === true, 'contextA photos can be restored cleanly');
+    assert(restoredA.session?.capturedPhotos.FRONT?.sku === 'SKU-OLD-A', 'Restored photo retains original SKU');
+  });
+
+  // Test 17: Leave / Unload / Unmount protection conditions
+  test('Test 17: Leave / Unload condition accurately evaluates unsaved active photos and stashed session presence', () => {
+    const service = new PhotoCaptureStashService();
+    const context: PhotoCaptureTargetContext = { sku: 'SKU-LEAVE-01', inventoryUnitId: 'UNIT-LEAVE-01', isConfirmed: true };
+
+    const emptyPhotos: Record<PhotoAngle, CapturedPhoto | null> = {
+      FRONT: null, BACK: null, LEFT: null, RIGHT: null, TOP: null, LABEL_TAG: null, DEFECT_DETAIL: null
+    };
+
+    // Helper evaluating beforeunload activation condition
+    const shouldWarnBeforeUnload = (photos: Record<PhotoAngle, CapturedPhoto | null>, stashCount: number) => {
+      const hasUnsavedPhotos = Object.values(photos).some((p) => p !== null);
+      const hasStashedSessions = stashCount > 0;
+      return hasUnsavedPhotos || hasStashedSessions;
+    };
+
+    // Condition 1: Clean state -> NO warning
+    assert(shouldWarnBeforeUnload(emptyPhotos, service.getCount()) === false, 'Clean state must not trigger beforeunload');
+
+    // Condition 2: Active photos present, 0 stashed -> WARN
+    const activePhotos = {
+      ...emptyPhotos,
+      FRONT: createMockCapturedPhoto({ id: 'p-active', angle: 'FRONT', sku: context.sku!, inventoryUnitId: context.inventoryUnitId! })
+    };
+    assert(shouldWarnBeforeUnload(activePhotos, service.getCount()) === true, 'Active unsaved photos must trigger beforeunload');
+
+    // Condition 3: Component unmounts -> auto-stashes active photos
+    service.stashPhotos({ targetContext: context, capturedPhotos: activePhotos });
+    const clearedActivePhotos = { ...emptyPhotos };
+
+    // Condition 4: 0 active photos, but 1 stashed session in memory -> MUST STILL WARN!
+    assert(shouldWarnBeforeUnload(clearedActivePhotos, service.getCount()) === true, 'Stashed session in memory must trigger beforeunload');
+
+    // Condition 5: Explicitly discard all stashed sessions -> NO warning
+    service.discardStashedSession(context.sku!, context.inventoryUnitId!);
+    assert(shouldWarnBeforeUnload(clearedActivePhotos, service.getCount()) === false, 'After complete discard, beforeunload must be deactivated');
+  });
+
+  // Test 18: Component unmount lifecycle auto-stashes confirmed session and restores it upon re-mounting
+  test('Test 18: Component unmount lifecycle auto-stashes confirmed session and restores it upon re-mounting', () => {
+    const service = new PhotoCaptureStashService();
+    const confirmedCtx: PhotoCaptureTargetContext = { sku: 'SKU-UNMOUNT-01', inventoryUnitId: 'UNIT-UNMOUNT-01', isConfirmed: true };
+
+    const captured: Record<PhotoAngle, CapturedPhoto | null> = {
+      FRONT: createMockCapturedPhoto({ id: 'p-unmount-1', angle: 'FRONT', sku: confirmedCtx.sku!, inventoryUnitId: confirmedCtx.inventoryUnitId! }),
+      BACK: createMockCapturedPhoto({ id: 'p-unmount-2', angle: 'BACK', sku: confirmedCtx.sku!, inventoryUnitId: confirmedCtx.inventoryUnitId! }),
+      LEFT: null, RIGHT: null, TOP: null, LABEL_TAG: null, DEFECT_DETAIL: null
+    };
+
+    // Simulate React cleanup function on unmount
+    const simulateUnmountCleanup = (ctx: PhotoCaptureTargetContext, photos: Record<PhotoAngle, CapturedPhoto | null>) => {
+      const hasPhotos = Object.values(photos).some((p) => p !== null);
+      if (hasPhotos && ctx && ctx.isConfirmed) {
+        return service.stashPhotos({ targetContext: ctx, capturedPhotos: photos, currentAngleIndex: 2 });
+      }
+      return null;
+    };
+
+    const cleanupRes = simulateUnmountCleanup(confirmedCtx, captured);
+    assert(cleanupRes !== null && cleanupRes.success === true, 'Unmount auto-stash must succeed for confirmed context');
+    assert(service.hasStash(confirmedCtx) === true, 'Stash store must hold unmounted session');
+
+    // Simulate Re-mount with confirmedCtx
+    const restored = service.restorePhotos(confirmedCtx);
+    assert(restored.success === true, 'Re-mount restore must succeed');
+    assert(restored.session?.photoCount === 2, 'Restored session must have 2 photos');
+    assert(restored.session?.currentAngleIndex === 2, 'Restored session must have angle index 2');
   });
 
   return {

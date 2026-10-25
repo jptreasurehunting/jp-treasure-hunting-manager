@@ -74,6 +74,7 @@ import { runListingPipelineE2ETests } from './listingPipelineE2E.test';
 import { runUiNavigationDiagnosticsTests } from './uiNavigationDiagnostics.test';
 import { runPhotoCaptureStashTests } from './photoCaptureStash.test';
 import { runPhotoEvidenceVaultTests } from './photoEvidenceVault.test';
+import { runWindowsFsPersistenceTests } from './windowsFsPersistence.test';
 
 export interface MasterTestSummary {
   totalPassed: number;
@@ -135,7 +136,8 @@ export async function runAllAppTests(): Promise<MasterTestSummary> {
     { name: 'Listing Pipeline End-to-End Simulation Tests', fn: runListingPipelineE2ETests },
     { name: 'UI Navigation & Operational Diagnostics Tests', fn: runUiNavigationDiagnosticsTests },
     { name: 'Photo Capture In-Memory Stash & Resume Safety Tests', fn: runPhotoCaptureStashTests },
-    { name: 'Photo Evidence Vault & Storage Persistence Safety Tests', fn: runPhotoEvidenceVaultTests }
+    { name: 'Photo Evidence Vault & Storage Persistence Safety Tests', fn: runPhotoEvidenceVaultTests },
+    { name: 'Windows Isolated FS Persistence & Multi-Process Cold Recovery Tests', fn: runWindowsFsPersistenceTests }
   ];
 
   let totalPassed = 0;
