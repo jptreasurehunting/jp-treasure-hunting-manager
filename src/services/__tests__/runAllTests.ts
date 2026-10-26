@@ -77,6 +77,7 @@ import { runPhotoEvidenceVaultTests } from './photoEvidenceVault.test';
 import { runWindowsFsPersistenceTests } from './windowsFsPersistence.test';
 import { runIndexedDbPhotoDraftTests } from './indexedDbPhotoDraft.test';
 import { runPhotoCaptureDraftIntegrationTests } from './photoCaptureDraftIntegration.test';
+import { runPhotoFormalPersistenceGateTests } from './photoFormalPersistenceGate.test';
 
 export interface MasterTestSummary {
   totalPassed: number;
@@ -141,7 +142,8 @@ export async function runAllAppTests(): Promise<MasterTestSummary> {
     { name: 'Photo Evidence Vault & Storage Persistence Safety Tests', fn: runPhotoEvidenceVaultTests },
     { name: 'Windows Isolated FS Persistence & Multi-Process Cold Recovery Tests', fn: runWindowsFsPersistenceTests },
     { name: 'IndexedDB Local Photo Draft Storage Adapter Safety Tests', fn: runIndexedDbPhotoDraftTests },
-    { name: 'Photo Capture & Photo Draft UI Integration Safety Tests', fn: runPhotoCaptureDraftIntegrationTests }
+    { name: 'Photo Capture & Photo Draft UI Integration Safety Tests', fn: runPhotoCaptureDraftIntegrationTests },
+    { name: 'Photo Formal Persistence Gate & Disaster Recovery Safety Tests', fn: runPhotoFormalPersistenceGateTests }
   ];
 
   let totalPassed = 0;
