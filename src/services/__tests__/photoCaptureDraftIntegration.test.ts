@@ -24,7 +24,8 @@ import {
   PhotoCaptureCard,
   PhotoCaptureCardProps,
   DraftRestoreModalState,
-  TARGET_CONTEXT_PRESETS
+  TARGET_CONTEXT_PRESETS,
+  checkRealDraftPersistenceSafety
 } from '../../components/PhotoCapture/PhotoCaptureCard';
 import {
   IndexedDbPhotoDraftAdapter,
@@ -497,6 +498,118 @@ export async function runPhotoCaptureDraftIntegrationTests(): Promise<{
     assert(html.includes('PC再起動後やブラウザ終了後は復元できません'), 'Must clarify non-persistence across reboot/close');
     assert(html.includes('正式な証拠保存（Evidence Vault）や在庫DBではありません'), 'Must clearly state not official storage');
     assert(!html.includes('PC再起動・ブラウザ終了後の消失を防ぐセーフティネット'), 'Must not contain misleading claims');
+  });
+
+  // Test 17: Triple-guard real IndexedDB safety check blocks unauthorized persistence
+  await test('Test 17: Triple-guard safety check strictly requires loopback origin, profile marker, and explicit feature flag', () => {
+    // 1. All 3 conditions met (simulated window environment)
+    const validCheck = checkRealDraftPersistenceSafety({
+      enableFlag: true,
+      profileMarker: true
+    });
+    // In node/jest environment, window might not have localhost:port by default, let's verify mock
+    const originalWindow = (globalThis as any).window;
+    try {
+      (globalThis as any).window = {
+        location: {
+          hostname: '127.0.0.1',
+          port: '5173',
+          protocol: 'http:'
+        }
+      };
+
+      const permitted = checkRealDraftPersistenceSafety({
+        enableFlag: true,
+        profileMarker: true
+      });
+      assert(permitted.isPermitted === true, 'All 3 conditions met must be permitted');
+      assert(permitted.isTestOrigin === true, 'Test origin must be true');
+      assert(permitted.isDedicatedProfile === true, 'Dedicated profile must be true');
+      assert(permitted.isExplicitFlag === true, 'Explicit flag must be true');
+
+      // 2. Production origin rejection
+      (globalThis as any).window.location.hostname = 'app.jptreasurehunting.com';
+      const prodOrigin = checkRealDraftPersistenceSafety({
+        enableFlag: true,
+        profileMarker: true
+      });
+      assert(prodOrigin.isPermitted === false, 'Production origin must be rejected');
+      assert(prodOrigin.isTestOrigin === false, 'Production origin cannot be test origin');
+      assert(prodOrigin.reasonJa.includes('ローカルテストOrigin'), 'Reason must specify test origin');
+
+      // 3. Missing profile marker
+      (globalThis as any).window.location.hostname = 'localhost';
+      const noProfile = checkRealDraftPersistenceSafety({
+        enableFlag: true,
+        profileMarker: false
+      });
+      assert(noProfile.isPermitted === false, 'Missing profile marker must be rejected');
+      assert(noProfile.reasonJa.includes('使い捨てテストプロファイル'), 'Reason must specify disposable profile');
+
+      // 4. Missing feature flag
+      const noFlag = checkRealDraftPersistenceSafety({
+        enableFlag: false,
+        profileMarker: true
+      });
+      assert(noFlag.isPermitted === false, 'Missing feature flag must be rejected');
+      assert(noFlag.reasonJa.includes('フィーチャーフラグ'), 'Reason must specify feature flag');
+
+      // 5. Flag alone on non-test environment must never enable
+      (globalThis as any).window.location.hostname = 'business.internal';
+      const flagAlone = checkRealDraftPersistenceSafety({
+        enableFlag: true,
+        profileMarker: false
+      });
+      assert(flagAlone.isPermitted === false, 'Flag alone must never enable persistence');
+    } finally {
+      (globalThis as any).window = originalWindow;
+    }
+  });
+
+  // Test 18: Real IndexedDB test mode UI rendering & clear 3-way distinction
+  await test('Test 18: PhotoCaptureCard renders dedicated real draft button, 3-way storage distinction, and eviction disclaimer', () => {
+    const originalWindow = (globalThis as any).window;
+    try {
+      (globalThis as any).window = {
+        location: {
+          hostname: '127.0.0.1',
+          port: '5173',
+          protocol: 'http:'
+        }
+      };
+
+      // 1. Triple-guard active render
+      const activeHtml = renderToStaticMarkup(
+        React.createElement(PhotoCaptureCard, {
+          enableRealIndexedDbTestMode: true,
+          isolatedTestProfileMarker: true,
+          initialShowDraftDrawer: true
+        })
+      );
+
+      assert(activeHtml.includes('save-real-draft-btn'), 'Active test mode must render save-real-draft-btn');
+      assert(activeHtml.includes('ブラウザ内ドラフト保存（テスト専用）'), 'Button must state browser draft test only');
+      assert(activeHtml.includes('[INDEXEDDB_TEST]'), 'Drawer must display [INDEXEDDB_TEST] badge');
+      assert(activeHtml.includes('閲覧履歴・Cookie・サイトデータ消去'), 'Must display site data clearance disclaimer');
+      assert(activeHtml.includes('エビクション時はデータが消失するリスク'), 'Must display storage eviction risk disclaimer');
+      assert(activeHtml.includes('[SIMULATED_MOCK]'), 'Must distinguish [SIMULATED_MOCK]');
+      assert(activeHtml.includes('[EVIDENCE_VAULT]'), 'Must distinguish [EVIDENCE_VAULT]');
+
+      // 2. Normal / non-test mode render (guards inactive)
+      const inactiveHtml = renderToStaticMarkup(
+        React.createElement(PhotoCaptureCard, {
+          enableRealIndexedDbTestMode: false,
+          isolatedTestProfileMarker: false,
+          isSimulatedDraftMode: false
+        })
+      );
+
+      assert(!inactiveHtml.includes('save-real-draft-btn'), 'Inactive test mode must not render active real draft save button');
+      assert(inactiveHtml.includes('実IndexedDB保存（無効化中）'), 'Inactive mode must render disabled locked button');
+      assert(inactiveHtml.includes('disabled'), 'Locked button must be disabled');
+    } finally {
+      (globalThis as any).window = originalWindow;
+    }
   });
 
   return { passed, failed, log };

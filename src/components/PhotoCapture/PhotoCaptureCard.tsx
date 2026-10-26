@@ -127,6 +127,52 @@ export interface DraftStatusInfo {
   lastSavedVersion?: number;
 }
 
+export interface RealDraftPersistenceSafetyCheck {
+  isPermitted: boolean;
+  reasonJa: string;
+  isTestOrigin: boolean;
+  isDedicatedProfile: boolean;
+  isExplicitFlag: boolean;
+}
+
+export function checkRealDraftPersistenceSafety(params: {
+  enableFlag?: boolean;
+  profileMarker?: boolean;
+}): RealDraftPersistenceSafetyCheck {
+  let isTestOrigin = false;
+  if (typeof window !== 'undefined' && window.location) {
+    const hostname = window.location.hostname;
+    const port = window.location.port;
+    // Must be loopback (127.0.0.1 or localhost) with a dedicated port (not standard production)
+    isTestOrigin = (hostname === '127.0.0.1' || hostname === 'localhost') && Boolean(port);
+  }
+
+  const isDedicatedProfile = Boolean(
+    params.profileMarker ||
+    (typeof window !== 'undefined' && (window as any).__JPTH_ISOLATED_TEST_PROFILE_MARKER__ === true)
+  );
+
+  const isExplicitFlag = Boolean(
+    params.enableFlag ||
+    (typeof window !== 'undefined' && (window as any).__JPTH_ENABLE_REAL_INDEXEDDB_TEST_MODE__ === true)
+  );
+
+  const isPermitted = isTestOrigin && isDedicatedProfile && isExplicitFlag;
+
+  let reasonJa = '';
+  if (!isTestOrigin) {
+    reasonJa = '独立したローカルテストOrigin外での実IndexedDB保存は禁止されています。';
+  } else if (!isDedicatedProfile) {
+    reasonJa = '通常ブラウザプロファイル保護のため、専用の使い捨てテストプロファイル外での実IndexedDB保存は禁止されています。';
+  } else if (!isExplicitFlag) {
+    reasonJa = 'テスト用フィーチャーフラグが無効です。実IndexedDB保存は安全停止されています。';
+  } else {
+    reasonJa = 'テスト専用の実IndexedDB保存条件（独立Origin・専用プロファイル・明示フラグ）が満たされています。';
+  }
+
+  return { isPermitted, reasonJa, isTestOrigin, isDedicatedProfile, isExplicitFlag };
+}
+
 export interface PhotoCaptureCardProps {
   isTabActive?: boolean;
   cameraAdapter?: ICameraHardwareAdapter;
@@ -137,6 +183,9 @@ export interface PhotoCaptureCardProps {
   stashService?: PhotoCaptureStashService;
   draftAdapter?: IPhotoDraftStorageAdapter;
   isSimulatedDraftMode?: boolean;
+  enableRealIndexedDbTestMode?: boolean;
+  isolatedTestProfileMarker?: boolean;
+  customTestDbName?: string;
   initialShowDraftDrawer?: boolean;
   initialRestoreModal?: DraftRestoreModalState;
   onPhotoGateEvaluated?: (gate: { photoCaptureComplete: boolean; photoQaComplete: boolean }) => void;
@@ -154,6 +203,9 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
   stashService,
   draftAdapter,
   isSimulatedDraftMode,
+  enableRealIndexedDbTestMode,
+  isolatedTestProfileMarker,
+  customTestDbName,
   initialShowDraftDrawer,
   initialRestoreModal,
   onPhotoGateEvaluated,
@@ -163,10 +215,24 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
   // Stash Service Instance (Isolated or Global Singleton)
   const activeStashService = stashService || globalPhotoCaptureStashService;
 
+  // Real persistence triple-guard safety evaluation
+  const realPersistenceSafety = checkRealDraftPersistenceSafety({
+    enableFlag: enableRealIndexedDbTestMode,
+    profileMarker: isolatedTestProfileMarker
+  });
+  const isRealDraftPersistenceActive = realPersistenceSafety.isPermitted;
+
   // Draft Persistence Instance & State
-  const [activeDraftAdapter] = useState<IPhotoDraftStorageAdapter>(() =>
-    draftAdapter || new IndexedDbPhotoDraftAdapter({ useSimulatedStore: true })
-  );
+  const [activeDraftAdapter] = useState<IPhotoDraftStorageAdapter>(() => {
+    if (draftAdapter) return draftAdapter;
+    if (isRealDraftPersistenceActive) {
+      return new IndexedDbPhotoDraftAdapter({
+        useSimulatedStore: false,
+        dbName: customTestDbName || 'JPTH_PHOTO_DRAFTS_TEST_DB'
+      });
+    }
+    return new IndexedDbPhotoDraftAdapter({ useSimulatedStore: true });
+  });
   const [simulatedDraftEnabled, setSimulatedDraftEnabled] = useState<boolean>(() =>
     isSimulatedDraftMode ?? (draftAdapter ? ((draftAdapter as any).isSimulated?.() ?? true) : false)
   );
@@ -540,10 +606,10 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
 
   // Handle explicit draft save
   const handleSaveDraft = async () => {
-    if (!simulatedDraftEnabled) {
+    if (!isRealDraftPersistenceActive && !simulatedDraftEnabled) {
       setDraftStatus({
         status: 'FAILED_DB_UNAVAILABLE',
-        messageJa: '通常モードでは実IndexedDBへの書込みは無効化されています（JTH-STEP 41 安全制限）。模擬テストモードを有効化してください。',
+        messageJa: `実IndexedDB保存は無効化されています（理由: ${realPersistenceSafety.reasonJa}）。模擬テストモードを有効化してください。`,
         isError: true
       });
       return;
@@ -591,9 +657,10 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
 
     const saveRes = await activeDraftAdapter.saveDraft(buildRes.draft);
     if (saveRes.success) {
+      const modeLabel = isRealDraftPersistenceActive ? 'ローカルドラフト保存成功（実IndexedDBテスト専用）' : '模擬ドラフト保存成功（インメモリ模擬）';
       setDraftStatus({
         status: saveRes.status,
-        messageJa: `💾 模擬ドラフト【${saveRes.draftKey}】（v${saveRes.version} / ${buildRes.draft.photoCount}枚）を安全に保存しました。※正式Evidence Vaultではありません`,
+        messageJa: `💾 ${modeLabel}【${saveRes.draftKey}】（v${saveRes.version} / ${buildRes.draft.photoCount}枚）。※正式保管庫（Evidence Vault）や在庫DBではありません`,
         isError: false,
         lastSavedKey: saveRes.draftKey,
         lastSavedVersion: saveRes.version
@@ -603,7 +670,7 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
     } else {
       setDraftStatus({
         status: saveRes.status,
-        messageJa: `❌ 模擬ドラフト保存エラー: ${saveRes.messageJa} (${saveRes.error || ''})`,
+        messageJa: `❌ ドラフト保存エラー: ${saveRes.messageJa} (${saveRes.error || ''})`,
         isError: true
       });
     }
@@ -748,10 +815,11 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
     setListingHandoff(draft.listingHandoff || null);
     setShowListingPanel(Boolean(draft.listingHandoff));
 
-    setStatusMessage(`✅ 【${draft.sku} (${draft.inventoryUnitId})】の模擬ドラフト（v${draft.version} / ${draft.photoCount}枚）を安全に復元しました。※正式Evidence Vaultではありません`);
+    const restoredModeLabel = isRealDraftPersistenceActive ? '実IndexedDBテストドラフト' : '模擬ドラフト';
+    setStatusMessage(`✅ 【${draft.sku} (${draft.inventoryUnitId})】の${restoredModeLabel}（v${draft.version} / ${draft.photoCount}枚）を安全に復元しました。※正式Evidence Vaultではありません`);
     setDraftStatus({
       status: 'DRAFT_LOCAL_SAVED',
-      messageJa: `✅ 模擬ドラフト（v${draft.version} / ${draft.photoCount}枚）を復元完了しました。`,
+      messageJa: `✅ ${restoredModeLabel}（v${draft.version} / ${draft.photoCount}枚）を復元完了しました。`,
       isError: false,
       lastSavedKey: draft.draftKey,
       lastSavedVersion: draft.version
@@ -1233,9 +1301,34 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
             </button>
 
             {/* Draft Controls */}
-            {simulatedDraftEnabled ? (
+            {isRealDraftPersistenceActive ? (
               <button
                 type="button"
+                id="save-real-draft-btn"
+                onClick={handleSaveDraft}
+                style={{
+                  background: 'linear-gradient(135deg, #0d9488, #0f766e)',
+                  color: '#ffffff',
+                  border: '1px solid #14b8a6',
+                  borderRadius: '6px',
+                  padding: '4px 12px',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  boxShadow: '0 2px 4px rgba(13, 148, 136, 0.4)'
+                }}
+                title="【テスト専用隔離環境】実ブラウザIndexedDBにドラフトを永続保存（ブラウザ終了後も保持可能）※正式保管庫ではありません"
+              >
+                <span>💾</span>
+                <span>ブラウザ内ドラフト保存（テスト専用）</span>
+              </button>
+            ) : simulatedDraftEnabled ? (
+              <button
+                type="button"
+                id="save-simulated-draft-btn"
                 onClick={handleSaveDraft}
                 style={{
                   background: 'linear-gradient(135deg, #059669, #047857)',
@@ -1251,7 +1344,7 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
                   gap: '0.4rem',
                   boxShadow: '0 2px 4px rgba(5, 150, 105, 0.3)'
                 }}
-                title="現在の撮影写真を模擬IndexedDBドラフトに保存（明示操作）※正式Evidence Vaultではありません"
+                title="現在の撮影写真を模擬IndexedDBドラフトに保存（明示操作・タブ終了で消失）※正式Evidence Vaultではありません"
               >
                 <span>💾</span>
                 <span>模擬ドラフト保存</span>
@@ -1259,6 +1352,7 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
             ) : (
               <button
                 type="button"
+                id="real-idb-disabled-btn"
                 disabled={true}
                 style={{
                   background: 'rgba(51, 65, 85, 0.4)',
@@ -1273,7 +1367,7 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
                   alignItems: 'center',
                   gap: '0.4rem'
                 }}
-                title="通常モードでは実IndexedDBへの書込みは無効化されています（JTH-STEP 41 安全制限）。模擬テストモードを有効化してください。"
+                title="通常モード・本番環境では実IndexedDBへの書込みは無効化されています。隔離テスト環境でのみ有効化可能です。"
               >
                 <span>🔒</span>
                 <span>実IndexedDB保存（無効化中）</span>
@@ -1283,6 +1377,7 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
             {/* Draft Drawer Toggle Button */}
             <button
               type="button"
+              id="toggle-draft-drawer-btn"
               onClick={() => setShowDraftDrawer(!showDraftDrawer)}
               style={{
                 background: draftSummaries.length > 0 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(51, 65, 85, 0.4)',
@@ -1347,6 +1442,7 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
           {/* Draft Status Banner */}
           {draftStatus.messageJa && (
             <div
+              id="draft-status-banner"
               style={{
                 marginTop: '0.5rem',
                 padding: '0.45rem 0.8rem',
@@ -1562,16 +1658,35 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                <span style={{ fontWeight: 700, color: '#34d399' }}>
-                  📂 模擬写真ドラフト一覧（IndexedDB Simulated / {draftSummaries.length}件）
+                <span style={{ fontWeight: 700, color: isRealDraftPersistenceActive ? '#2dd4bf' : '#34d399' }}>
+                  📂 {isRealDraftPersistenceActive ? `実ブラウザ写真ドラフト一覧（IndexedDB Test / ${draftSummaries.length}件）` : `模擬写真ドラフト一覧（IndexedDB Simulated / ${draftSummaries.length}件）`}
                 </span>
                 <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
                   上限: 15個体 / 50MB（自動削除禁止）
                 </span>
               </div>
 
-              <div style={{ marginBottom: '0.6rem', padding: '0.35rem 0.6rem', background: '#022c22', borderRadius: '4px', fontSize: '0.72rem', color: '#6ee7b7', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
-                ℹ️ <strong>【保存先種別】</strong> {simulatedDraftEnabled ? '模擬ドラフト保存（IndexedDB Simulated / メモリ内隔離・タブ終了で消失）※正式Evidence Vaultではありません' : '実ブラウザIndexedDB（無効化中・安全停止）'}
+              {/* 3-Way Storage Type Distinction (Requirement 13) */}
+              <div style={{ marginBottom: '0.6rem', padding: '0.4rem 0.6rem', background: '#022c22', borderRadius: '4px', fontSize: '0.72rem', color: '#6ee7b7', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+                <div>
+                  ℹ️ <strong>【保存先種別】</strong>{' '}
+                  {isRealDraftPersistenceActive ? (
+                    <span style={{ color: '#5eead4', fontWeight: 700 }}>
+                      [INDEXEDDB_TEST] 実ブラウザIndexedDBドラフト（テスト専用隔離DB: {customTestDbName || 'JPTH_PHOTO_DRAFTS_TEST_DB'}）※ブラウザ再起動後も復元可能
+                    </span>
+                  ) : simulatedDraftEnabled ? (
+                    <span style={{ color: '#6ee7b7' }}>
+                      [SIMULATED_MOCK] 模擬ドラフト保存（メモリ内隔離・タブ終了で消失）※再起動後は復元不可
+                    </span>
+                  ) : (
+                    <span style={{ color: '#94a3b8' }}>
+                      [LOCKED] 実ブラウザIndexedDB（通常環境・安全停止中）
+                    </span>
+                  )}
+                </div>
+                <div style={{ marginTop: '0.2rem', color: '#94a3b8', fontSize: '0.68rem' }}>
+                  🔒 <strong>【ストレージ種別の厳格分離】</strong> [SIMULATED_MOCK] 模擬保存（揮発性メモリ） / [INDEXEDDB_TEST] 実ブラウザ隔離DB / [EVIDENCE_VAULT] 正式証拠保管庫・本番在庫DB（未接続・完全保護）
+                </div>
               </div>
 
               {draftSummaries.length === 0 ? (
@@ -1624,6 +1739,7 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
                             </button>
                             <button
                               type="button"
+                              id={`confirm-discard-btn-${s.sku}-${s.inventoryUnitId}`}
                               onClick={() => handleExecuteDraftDiscard(s.sku, s.inventoryUnitId)}
                               style={{
                                 background: 'rgba(239, 68, 68, 0.25)',
@@ -1664,6 +1780,7 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
                           <div style={{ display: 'flex', gap: '0.4rem' }}>
                             <button
                               type="button"
+                              id={`restore-preview-btn-${s.sku}-${s.inventoryUnitId}`}
                               onClick={() => handleOpenRestorePreview(s)}
                               style={{
                                 background: '#059669',
@@ -1680,6 +1797,7 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
                             </button>
                             <button
                               type="button"
+                              id={`discard-draft-btn-${s.sku}-${s.inventoryUnitId}`}
                               onClick={() => handlePromptDiscardDraft(s)}
                               style={{
                                 background: 'rgba(239, 68, 68, 0.2)',
@@ -1702,7 +1820,15 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
               )}
 
               <div style={{ marginTop: '0.6rem', padding: '0.4rem 0.6rem', background: '#021811', borderRadius: '4px', fontSize: '0.72rem', color: '#fbbf24', border: '1px solid rgba(251, 191, 36, 0.3)' }}>
-                ⚠️ <strong>【模擬ドラフト保存（In-Memory Mock）について】</strong> 本機能はテスト用のインメモリ模擬保存です。実IndexedDBには書き込まれず、ブラウザタブやプロセスの終了で消失します（PC再起動後やブラウザ終了後は復元できません）。正式な証拠保存（Evidence Vault）や在庫DBではありません。正式保管庫への自動昇格は行われません。
+                {isRealDraftPersistenceActive ? (
+                  <>
+                    ⚠️ <strong>【ブラウザ内ドラフト保存（テスト専用）について】</strong> 本機能はブラウザ終了・PC再起動後のデータ消失を防ぐローカルセーフティネットです。ただしブラウザ設定からの「閲覧履歴・Cookie・サイトデータ消去」や容量不足によるエビクション時はデータが消失するリスクがあります。正式な証拠保存（Evidence Vault）や在庫DBではありません。
+                  </>
+                ) : (
+                  <>
+                    ⚠️ <strong>【模擬ドラフト保存（In-Memory Mock）について】</strong> 本機能はテスト用のインメモリ模擬保存です。実IndexedDBには書き込まれず、ブラウザタブやプロセスの終了で消失します（PC再起動後やブラウザ終了後は復元できません）。正式な証拠保存（Evidence Vault）や在庫DBではありません。正式保管庫への自動昇格は行われません。
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -2024,6 +2150,7 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
             <div style={{ marginTop: '1rem', display: 'flex', gap: '0.75rem', width: '100%', justifyContent: 'center' }}>
               <button
                 type="button"
+                id="capture-pedal-btn"
                 onClick={handlePedalTrigger}
                 disabled={isCapturing}
                 style={{
@@ -2632,6 +2759,7 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
       {/* Draft Restore Preview & Integrity Check Modal */}
       {restoreModal.isOpen && (
         <div
+          id="draft-restore-modal"
           style={{
             position: 'fixed',
             top: 0,
