@@ -30,6 +30,17 @@ import {
   PhotoGateDryRunPreview,
   DryRunListingPhotoHandoff
 } from '../../types/photoCapture';
+import {
+  IndexedDbPhotoDraftAdapter,
+  buildPhotoDraftRecord
+} from '../../services/indexedDbPhotoDraftAdapter';
+import type {
+  PhotoDraftRecord,
+  PhotoDraftSummary,
+  PhotoDraftPersistenceStatus,
+  IPhotoDraftStorageAdapter
+} from '../../types/photoDraft';
+import { computeSha256Hex } from '../../services/photoEvidenceVaultService';
 
 export interface TargetContextPreset {
   id: string;
@@ -98,7 +109,25 @@ interface SwitchConfirmModalState {
   errorMessage?: string | null;
 }
 
-interface PhotoCaptureCardProps {
+export interface DraftRestoreModalState {
+  isOpen: boolean;
+  targetSummary: PhotoDraftSummary | null;
+  targetDraft: PhotoDraftRecord | null;
+  isLoading: boolean;
+  errorMessage: string | null;
+  hasUnsavedConflict: boolean;
+  currentPhotoCount: number;
+}
+
+export interface DraftStatusInfo {
+  status: PhotoDraftPersistenceStatus | null;
+  messageJa: string | null;
+  isError: boolean;
+  lastSavedKey?: string;
+  lastSavedVersion?: number;
+}
+
+export interface PhotoCaptureCardProps {
   isTabActive?: boolean;
   cameraAdapter?: ICameraHardwareAdapter;
   targetContext?: PhotoCaptureTargetContext;
@@ -106,6 +135,10 @@ interface PhotoCaptureCardProps {
   inventoryBridge?: MockInventoryPhotoGateBridge;
   integrationAdapter?: CentralInventoryPhotoAdapter;
   stashService?: PhotoCaptureStashService;
+  draftAdapter?: IPhotoDraftStorageAdapter;
+  isSimulatedDraftMode?: boolean;
+  initialShowDraftDrawer?: boolean;
+  initialRestoreModal?: DraftRestoreModalState;
   onPhotoGateEvaluated?: (gate: { photoCaptureComplete: boolean; photoQaComplete: boolean }) => void;
   onSyncToInventory?: (result: InventoryPhotoGateSyncResult) => void;
   onListingHandoffEvaluated?: (handoff: DryRunListingPhotoHandoff) => void;
@@ -119,12 +152,44 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
   inventoryBridge,
   integrationAdapter,
   stashService,
+  draftAdapter,
+  isSimulatedDraftMode,
+  initialShowDraftDrawer,
+  initialRestoreModal,
   onPhotoGateEvaluated,
   onSyncToInventory,
   onListingHandoffEvaluated
 }) => {
   // Stash Service Instance (Isolated or Global Singleton)
   const activeStashService = stashService || globalPhotoCaptureStashService;
+
+  // Draft Persistence Instance & State
+  const [activeDraftAdapter] = useState<IPhotoDraftStorageAdapter>(() =>
+    draftAdapter || new IndexedDbPhotoDraftAdapter({ useSimulatedStore: true })
+  );
+  const [simulatedDraftEnabled, setSimulatedDraftEnabled] = useState<boolean>(() =>
+    isSimulatedDraftMode ?? (draftAdapter ? ((draftAdapter as any).isSimulated?.() ?? true) : false)
+  );
+  const [draftSummaries, setDraftSummaries] = useState<PhotoDraftSummary[]>([]);
+  const [showDraftDrawer, setShowDraftDrawer] = useState<boolean>(initialShowDraftDrawer ?? false);
+  const [drawerDraftDiscardTarget, setDrawerDraftDiscardTarget] = useState<PhotoDraftSummary | null>(null);
+  const [draftStatus, setDraftStatus] = useState<DraftStatusInfo>({
+    status: null,
+    messageJa: null,
+    isError: false
+  });
+  const [restoreModal, setRestoreModal] = useState<DraftRestoreModalState>(
+    initialRestoreModal || {
+      isOpen: false,
+      targetSummary: null,
+      targetDraft: null,
+      isLoading: false,
+      errorMessage: null,
+      hasUnsavedConflict: false,
+      currentPhotoCount: 0
+    }
+  );
+  const [restoreOverwriteConfirmed, setRestoreOverwriteConfirmed] = useState<boolean>(false);
 
   // State & Ref variables
   const [currentAngleIndex, setCurrentAngleIndex] = useState<number>(0);
@@ -460,6 +525,283 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
     };
     handleSwitchTargetContext(target);
     setShowStashDrawer(false);
+  };
+
+  // Fetch initial draft summaries
+  useEffect(() => {
+    let isMounted = true;
+    activeDraftAdapter.listDraftSummaries().then((list) => {
+      if (isMounted) {
+        setDraftSummaries(list);
+      }
+    }).catch(() => {});
+    return () => { isMounted = false; };
+  }, [activeDraftAdapter]);
+
+  // Handle explicit draft save
+  const handleSaveDraft = async () => {
+    if (!simulatedDraftEnabled) {
+      setDraftStatus({
+        status: 'FAILED_DB_UNAVAILABLE',
+        messageJa: '通常モードでは実IndexedDBへの書込みは無効化されています（JTH-STEP 41 安全制限）。模擬テストモードを有効化してください。',
+        isError: true
+      });
+      return;
+    }
+
+    const currentNonNullPhotos = Object.values(capturedPhotos).filter((p) => p !== null);
+    if (currentNonNullPhotos.length === 0) {
+      setDraftStatus({
+        status: null,
+        messageJa: '⚠️ 保存対象の写真がありません。アングル写真を1枚以上撮影してください。',
+        isError: true
+      });
+      return;
+    }
+
+    let existingDraft: PhotoDraftRecord | null = null;
+    if (activeTargetContext.isConfirmed && activeTargetContext.sku && activeTargetContext.inventoryUnitId) {
+      try {
+        const loadRes = await activeDraftAdapter.loadDraft(activeTargetContext.sku, activeTargetContext.inventoryUnitId);
+        if (loadRes.success && loadRes.draft) {
+          existingDraft = loadRes.draft;
+        }
+      } catch {
+        // Safe ignore
+      }
+    }
+
+    const buildRes = buildPhotoDraftRecord({
+      targetContext: activeTargetContext,
+      capturedPhotos,
+      currentAngleIndex,
+      dryRunPreview,
+      listingHandoff,
+      existingDraft
+    });
+
+    if (!buildRes.success) {
+      setDraftStatus({
+        status: buildRes.status,
+        messageJa: `❌ 保存失敗: ${buildRes.messageJa}`,
+        isError: true
+      });
+      return;
+    }
+
+    const saveRes = await activeDraftAdapter.saveDraft(buildRes.draft);
+    if (saveRes.success) {
+      setDraftStatus({
+        status: saveRes.status,
+        messageJa: `💾 模擬ドラフト【${saveRes.draftKey}】（v${saveRes.version} / ${buildRes.draft.photoCount}枚）を安全に保存しました。※正式Evidence Vaultではありません`,
+        isError: false,
+        lastSavedKey: saveRes.draftKey,
+        lastSavedVersion: saveRes.version
+      });
+      const updatedList = await activeDraftAdapter.listDraftSummaries();
+      setDraftSummaries(updatedList);
+    } else {
+      setDraftStatus({
+        status: saveRes.status,
+        messageJa: `❌ 模擬ドラフト保存エラー: ${saveRes.messageJa} (${saveRes.error || ''})`,
+        isError: true
+      });
+    }
+  };
+
+  // Handle open restore preview
+  const handleOpenRestorePreview = async (summary: PhotoDraftSummary) => {
+    setRestoreOverwriteConfirmed(false);
+    const currentCount = Object.values(capturedPhotos).filter((p) => p !== null).length;
+    const hasUnsavedConflict = currentCount > 0;
+
+    setRestoreModal({
+      isOpen: true,
+      targetSummary: summary,
+      targetDraft: null,
+      isLoading: true,
+      errorMessage: null,
+      hasUnsavedConflict,
+      currentPhotoCount: currentCount
+    });
+
+    try {
+      const loadRes = await activeDraftAdapter.loadDraft(summary.sku, summary.inventoryUnitId);
+      if (!loadRes.success || !loadRes.draft) {
+        setRestoreModal({
+          isOpen: true,
+          targetSummary: summary,
+          targetDraft: null,
+          isLoading: false,
+          errorMessage: loadRes.messageJa || 'ドラフトの読み込みに失敗しました。',
+          hasUnsavedConflict,
+          currentPhotoCount: currentCount
+        });
+        return;
+      }
+
+      // Cryptographic integrity verification
+      const integRes = await activeDraftAdapter.verifyDraftIntegrity(summary.sku, summary.inventoryUnitId);
+      if (!integRes.isValid) {
+        setRestoreModal({
+          isOpen: true,
+          targetSummary: summary,
+          targetDraft: null,
+          isLoading: false,
+          errorMessage: `❌ 整合性検査エラー: ${integRes.messageJa} 破損防止のため復元を停止しました。`,
+          hasUnsavedConflict,
+          currentPhotoCount: currentCount
+        });
+        return;
+      }
+
+      setRestoreModal({
+        isOpen: true,
+        targetSummary: summary,
+        targetDraft: loadRes.draft,
+        isLoading: false,
+        errorMessage: null,
+        hasUnsavedConflict,
+        currentPhotoCount: currentCount
+      });
+    } catch (err: any) {
+      setRestoreModal({
+        isOpen: true,
+        targetSummary: summary,
+        targetDraft: null,
+        isLoading: false,
+        errorMessage: `例外エラー: ${err?.message || '不明なエラー'}`,
+        hasUnsavedConflict,
+        currentPhotoCount: currentCount
+      });
+    }
+  };
+
+  // Handle execute restore
+  const handleExecuteRestore = () => {
+    const draft = restoreModal.targetDraft;
+    if (!draft) return;
+
+    // Explicit approval guard: if current session has unsaved photos, require operator approval
+    if (restoreModal.hasUnsavedConflict && !restoreOverwriteConfirmed) {
+      setDraftStatus({
+        status: 'HOLD_VERSION_CONFLICT',
+        messageJa: '⚠️ 未保存写真の上書き復元が承認されていません。チェックボックスを確認してください。',
+        isError: true
+      });
+      return;
+    }
+
+    // Cross-pollution check: verify all photos
+    for (const [angleStr, item] of Object.entries(draft.photos)) {
+      if (item) {
+        if (draft.isConfirmed && draft.sku) {
+          const rawHash = computeSha256Hex(item.originalDataUrl);
+          if (rawHash !== item.originalSha256Checksum) {
+            setDraftStatus({
+              status: 'HOLD_CORRUPTED_CHECKSUM',
+              messageJa: `❌ アングル【${angleStr}】の原本チェックサム改ざんを検知しました。復元を中止しました。`,
+              isError: true
+            });
+            setRestoreModal((prev) => ({ ...prev, isOpen: false }));
+            setRestoreOverwriteConfirmed(false);
+            return;
+          }
+        }
+      }
+    }
+
+    // Switch context if different
+    const newContext: PhotoCaptureTargetContext = {
+      sku: draft.sku,
+      inventoryUnitId: draft.inventoryUnitId,
+      itemTitle: draft.itemTitle,
+      isConfirmed: draft.isConfirmed
+    };
+    setActiveTargetContext(newContext);
+
+    // Restore photos with exact fidelity
+    const restoredPhotos: Record<PhotoAngle, CapturedPhoto | null> = {
+      FRONT: null, BACK: null, LEFT: null, RIGHT: null, TOP: null, LABEL_TAG: null, DEFECT_DETAIL: null
+    };
+
+    for (const [angleStr, item] of Object.entries(draft.photos)) {
+      const angle = angleStr as PhotoAngle;
+      if (item) {
+        restoredPhotos[angle] = {
+          id: `draft_${angle}_${draft.sessionId}`,
+          angle,
+          timestamp: item.capturedAt,
+          dataUrl: item.dataUrl,
+          originalDataUrl: item.originalDataUrl, // Immutable bit-for-bit raw photo
+          sku: draft.sku,
+          inventoryUnitId: draft.inventoryUnitId,
+          qaResult: { ...item.qaResult }
+        };
+      }
+    }
+
+    setCapturedPhotos(restoredPhotos);
+    setCurrentAngleIndex(draft.currentAngleIndex);
+    setDryRunPreview(draft.dryRunPreview || null);
+    setShowPreviewPanel(Boolean(draft.dryRunPreview));
+    setListingHandoff(draft.listingHandoff || null);
+    setShowListingPanel(Boolean(draft.listingHandoff));
+
+    setStatusMessage(`✅ 【${draft.sku} (${draft.inventoryUnitId})】の模擬ドラフト（v${draft.version} / ${draft.photoCount}枚）を安全に復元しました。※正式Evidence Vaultではありません`);
+    setDraftStatus({
+      status: 'DRAFT_LOCAL_SAVED',
+      messageJa: `✅ 模擬ドラフト（v${draft.version} / ${draft.photoCount}枚）を復元完了しました。`,
+      isError: false,
+      lastSavedKey: draft.draftKey,
+      lastSavedVersion: draft.version
+    });
+
+    setRestoreOverwriteConfirmed(false);
+    setRestoreModal({
+      isOpen: false,
+      targetSummary: null,
+      targetDraft: null,
+      isLoading: false,
+      errorMessage: null,
+      hasUnsavedConflict: false,
+      currentPhotoCount: 0
+    });
+  };
+
+  // Handle cancel restore
+  const handleCancelRestore = () => {
+    setRestoreOverwriteConfirmed(false);
+    setRestoreModal({
+      isOpen: false,
+      targetSummary: null,
+      targetDraft: null,
+      isLoading: false,
+      errorMessage: null,
+      hasUnsavedConflict: false,
+      currentPhotoCount: 0
+    });
+  };
+
+  // Handle discard draft prompt (two-step confirmation)
+  const handlePromptDiscardDraft = (summary: PhotoDraftSummary) => {
+    setDrawerDraftDiscardTarget(summary);
+  };
+
+  const handleCancelDraftDiscard = () => {
+    setDrawerDraftDiscardTarget(null);
+  };
+
+  const handleExecuteDraftDiscard = async (sku: string, inventoryUnitId: string) => {
+    await activeDraftAdapter.deleteDraft(sku, inventoryUnitId);
+    const updated = await activeDraftAdapter.listDraftSummaries();
+    setDraftSummaries(updated);
+    setDrawerDraftDiscardTarget(null);
+    setDraftStatus({
+      status: null,
+      messageJa: `🗑️ 模擬ドラフト【${sku} (${inventoryUnitId})】を安全に破棄しました。`,
+      isError: false
+    });
   };
 
   const [pedalConfig, setPedalConfig] = useState<PedalTriggerConfig>({
@@ -890,6 +1232,101 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
               <span style={{ fontSize: '0.7rem' }}>{showStashDrawer ? '▲ 閉じる' : '▼ 一覧'}</span>
             </button>
 
+            {/* Draft Controls */}
+            {simulatedDraftEnabled ? (
+              <button
+                type="button"
+                onClick={handleSaveDraft}
+                style={{
+                  background: 'linear-gradient(135deg, #059669, #047857)',
+                  color: '#ffffff',
+                  border: '1px solid #10b981',
+                  borderRadius: '6px',
+                  padding: '4px 12px',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  boxShadow: '0 2px 4px rgba(5, 150, 105, 0.3)'
+                }}
+                title="現在の撮影写真を模擬IndexedDBドラフトに保存（明示操作）※正式Evidence Vaultではありません"
+              >
+                <span>💾</span>
+                <span>模擬ドラフト保存</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={true}
+                style={{
+                  background: 'rgba(51, 65, 85, 0.4)',
+                  color: '#64748b',
+                  border: '1px solid #334155',
+                  borderRadius: '6px',
+                  padding: '4px 12px',
+                  fontSize: '0.78rem',
+                  fontWeight: 600,
+                  cursor: 'not-allowed',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem'
+                }}
+                title="通常モードでは実IndexedDBへの書込みは無効化されています（JTH-STEP 41 安全制限）。模擬テストモードを有効化してください。"
+              >
+                <span>🔒</span>
+                <span>実IndexedDB保存（無効化中）</span>
+              </button>
+            )}
+
+            {/* Draft Drawer Toggle Button */}
+            <button
+              type="button"
+              onClick={() => setShowDraftDrawer(!showDraftDrawer)}
+              style={{
+                background: draftSummaries.length > 0 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(51, 65, 85, 0.4)',
+                color: draftSummaries.length > 0 ? '#34d399' : '#94a3b8',
+                border: draftSummaries.length > 0 ? '1px solid #10b981' : '1px solid #475569',
+                borderRadius: '6px',
+                padding: '4px 10px',
+                fontSize: '0.78rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem'
+              }}
+              title="模擬写真ドラフト一覧を表示"
+            >
+              <span>📂</span>
+              <span>ドラフト: {draftSummaries.length}件</span>
+              <span style={{ fontSize: '0.7rem' }}>{showDraftDrawer ? '▲ 閉じる' : '▼ 一覧'}</span>
+            </button>
+
+            {/* Simulated Draft Mode Toggle */}
+            <button
+              type="button"
+              onClick={() => setSimulatedDraftEnabled(!simulatedDraftEnabled)}
+              style={{
+                background: simulatedDraftEnabled ? 'rgba(14, 165, 233, 0.2)' : 'rgba(30, 41, 59, 0.6)',
+                color: simulatedDraftEnabled ? '#38bdf8' : '#64748b',
+                border: simulatedDraftEnabled ? '1px solid #0284c7' : '1px solid #334155',
+                borderRadius: '6px',
+                padding: '4px 8px',
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.3rem'
+              }}
+              title="模擬ドラフトテストモードの有効/無効を切り替え"
+            >
+              <span>🧪</span>
+              <span>模擬保存モード: {simulatedDraftEnabled ? 'ON' : 'OFF'}</span>
+            </button>
+
             <div style={{ marginLeft: 'auto' }}>
               <a
                 href="./inventory-sales.html"
@@ -906,6 +1343,57 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
               </a>
             </div>
           </div>
+
+          {/* Draft Status Banner */}
+          {draftStatus.messageJa && (
+            <div
+              style={{
+                marginTop: '0.5rem',
+                padding: '0.45rem 0.8rem',
+                background: draftStatus.isError ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                border: draftStatus.isError ? '1px solid #ef4444' : '1px solid #10b981',
+                borderRadius: '6px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                fontSize: '0.78rem',
+                color: draftStatus.isError ? '#fca5a5' : '#a7f3d0'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <span>{draftStatus.isError ? '⚠️' : '✅'}</span>
+                {draftStatus.status && (
+                  <span
+                    style={{
+                      background: draftStatus.isError ? 'rgba(239, 68, 68, 0.3)' : 'rgba(16, 185, 129, 0.3)',
+                      color: draftStatus.isError ? '#fecaca' : '#6ee7b7',
+                      padding: '1px 6px',
+                      borderRadius: '4px',
+                      fontWeight: 700,
+                      fontSize: '0.7rem'
+                    }}
+                  >
+                    [{draftStatus.status}]
+                  </span>
+                )}
+                <span>{draftStatus.messageJa}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDraftStatus({ status: null, messageJa: null, isError: false })}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  fontSize: '0.75rem',
+                  padding: '2px 6px'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          )}
 
           {/* Stash Drawer Panel */}
           {showStashDrawer && (
@@ -1057,6 +1545,164 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
 
               <div style={{ marginTop: '0.6rem', padding: '0.4rem 0.6rem', background: '#020617', borderRadius: '4px', fontSize: '0.72rem', color: '#fbbf24', border: '1px solid rgba(251, 191, 36, 0.3)' }}>
                 ⚠️ <strong>【一時退避（In-Memory Stash）について】</strong> これは同一ブラウザセッション内の一時退避領域です。正式な証拠保存（Evidence Vault）や在庫DBではありません。ページ更新・タブ終了時には離脱警告（beforeunload）が行われますが、ブラウザの仕様（事前操作のないタブ、強制終了、障害等）により警告が表示されずデータが消失する場合があります。
+              </div>
+            </div>
+          )}
+
+          {/* Photo Draft Drawer Panel */}
+          {showDraftDrawer && (
+            <div
+              style={{
+                marginTop: '0.75rem',
+                padding: '0.75rem 1rem',
+                background: '#041c14',
+                border: '1px solid #10b981',
+                borderRadius: '8px',
+                fontSize: '0.8rem'
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                <span style={{ fontWeight: 700, color: '#34d399' }}>
+                  📂 模擬写真ドラフト一覧（IndexedDB Simulated / {draftSummaries.length}件）
+                </span>
+                <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                  上限: 15個体 / 50MB（自動削除禁止）
+                </span>
+              </div>
+
+              <div style={{ marginBottom: '0.6rem', padding: '0.35rem 0.6rem', background: '#022c22', borderRadius: '4px', fontSize: '0.72rem', color: '#6ee7b7', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+                ℹ️ <strong>【保存先種別】</strong> {simulatedDraftEnabled ? '模擬ドラフト保存（IndexedDB Simulated / メモリ内隔離・タブ終了で消失）※正式Evidence Vaultではありません' : '実ブラウザIndexedDB（無効化中・安全停止）'}
+              </div>
+
+              {draftSummaries.length === 0 ? (
+                <p style={{ margin: 0, color: '#94a3b8', fontSize: '0.78rem' }}>
+                  現在保存されている模擬ドラフトはありません。「模擬ドラフト保存」ボタンを押すと明示的に保存されます。
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {draftSummaries.map((s) => (
+                    <div
+                      key={s.draftKey}
+                      style={{
+                        background: '#064e3b',
+                        padding: '0.5rem 0.75rem',
+                        borderRadius: '6px',
+                        border: '1px solid #047857'
+                      }}
+                    >
+                      {drawerDraftDiscardTarget?.draftKey === s.draftKey ? (
+                        <div
+                          style={{
+                            background: 'rgba(239, 68, 68, 0.15)',
+                            border: '1px solid #ef4444',
+                            borderRadius: '6px',
+                            padding: '0.65rem 0.85rem'
+                          }}
+                        >
+                          <div style={{ color: '#f87171', fontWeight: 700, fontSize: '0.8rem', marginBottom: '0.3rem' }}>
+                            ⚠️ 【不可逆なデータ消去の警告（二段階確認）】
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: '#f1f5f9', marginBottom: '0.5rem', lineHeight: '1.4' }}>
+                            ドラフト【<strong>{s.sku}</strong> ({s.inventoryUnitId})】の写真 <strong>{s.photoCount} 枚</strong>（v{s.version}）を完全に消去します。本当によろしいですか？
+                          </div>
+                          <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                            <button
+                              type="button"
+                              onClick={handleCancelDraftDiscard}
+                              style={{
+                                background: '#334155',
+                                color: '#ffffff',
+                                border: '1px solid #475569',
+                                borderRadius: '4px',
+                                padding: '4px 12px',
+                                fontSize: '0.74rem',
+                                fontWeight: 700,
+                                cursor: 'pointer'
+                              }}
+                            >
+                              🛡️ キャンセル（保持）
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleExecuteDraftDiscard(s.sku, s.inventoryUnitId)}
+                              style={{
+                                background: 'rgba(239, 68, 68, 0.25)',
+                                color: '#fca5a5',
+                                border: '1px solid #ef4444',
+                                borderRadius: '4px',
+                                padding: '4px 10px',
+                                fontSize: '0.74rem',
+                                fontWeight: 700,
+                                cursor: 'pointer'
+                              }}
+                            >
+                              🗑️ 完全消去を確定
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            flexWrap: 'wrap',
+                            gap: '0.5rem'
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontWeight: 700, color: '#f8fafc' }}>
+                              {s.sku} <span style={{ color: '#a7f3d0', fontWeight: 400 }}>({s.inventoryUnitId})</span>
+                              <span style={{ marginLeft: '0.5rem', fontSize: '0.7rem', background: '#022c22', color: '#34d399', padding: '1px 5px', borderRadius: '4px', border: '1px solid #059669' }}>
+                                v{s.version}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '0.72rem', color: '#cbd5e1' }}>
+                              写真: {s.photoCount} 枚（合格: {s.usablePhotoCount} 枚） | 更新: {new Date(s.lastModifiedAt).toLocaleTimeString()} | 容量: ~{Math.round(s.estimatedBytes / 1024)} KB
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', gap: '0.4rem' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenRestorePreview(s)}
+                              style={{
+                                background: '#059669',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                padding: '3px 8px',
+                                fontSize: '0.72rem',
+                                fontWeight: 600,
+                                cursor: 'pointer'
+                              }}
+                            >
+                              👁️ 復元プレビュー
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handlePromptDiscardDraft(s)}
+                              style={{
+                                background: 'rgba(239, 68, 68, 0.2)',
+                                color: '#f87171',
+                                border: '1px solid rgba(239, 68, 68, 0.4)',
+                                borderRadius: '4px',
+                                padding: '3px 8px',
+                                fontSize: '0.72rem',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              🗑️ 破棄
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ marginTop: '0.6rem', padding: '0.4rem 0.6rem', background: '#021811', borderRadius: '4px', fontSize: '0.72rem', color: '#fbbf24', border: '1px solid rgba(251, 191, 36, 0.3)' }}>
+                ⚠️ <strong>【模擬ドラフト保存（In-Memory Mock）について】</strong> 本機能はテスト用のインメモリ模擬保存です。実IndexedDBには書き込まれず、ブラウザタブやプロセスの終了で消失します（PC再起動後やブラウザ終了後は復元できません）。正式な証拠保存（Evidence Vault）や在庫DBではありません。正式保管庫への自動昇格は行われません。
               </div>
             </div>
           )}
@@ -1978,6 +2624,292 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
             >
               ℹ️ <strong>【一時退避（In-Memory Stash）について】</strong>
               {' '}これは同一ブラウザセッション内の一時退避領域です。正式な証拠保存（Evidence Vault）や在庫DBではありません。ページ更新・タブ終了時には離脱警告（beforeunload）が行われますが、ブラウザの仕様（事前操作のないタブ、強制終了、障害等）により警告が表示されずデータが消失する場合があります。
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Draft Restore Preview & Integrity Check Modal */}
+      {restoreModal.isOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '1rem'
+          }}
+        >
+          <div
+            style={{
+              background: '#0f172a',
+              border: restoreModal.errorMessage ? '2px solid #ef4444' : '2px solid #10b981',
+              borderRadius: '12px',
+              padding: '1.5rem',
+              maxWidth: '620px',
+              width: '100%',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
+              color: '#f8fafc',
+              maxHeight: '90vh',
+              overflowY: 'auto'
+            }}
+          >
+            {/* Modal Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+              <div
+                style={{
+                  background: restoreModal.errorMessage ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)',
+                  color: restoreModal.errorMessage ? '#f87171' : '#34d399',
+                  padding: '0.6rem',
+                  borderRadius: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <span style={{ fontSize: '1.4rem' }}>{restoreModal.errorMessage ? '⚠️' : '👁️'}</span>
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700 }}>
+                  写真ドラフト復元プレビュー &amp; 整合性検査
+                </h3>
+                <p style={{ margin: 0, fontSize: '0.8rem', color: '#94a3b8' }}>
+                  【保存先種別】模擬ドラフト（IndexedDB Simulated）※正式Evidence Vaultではありません
+                </p>
+              </div>
+            </div>
+
+            {/* Error Message if integrity or load failed */}
+            {restoreModal.errorMessage && (
+              <div
+                style={{
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  border: '1px solid #ef4444',
+                  borderRadius: '6px',
+                  padding: '0.6rem 0.8rem',
+                  marginBottom: '1rem',
+                  fontSize: '0.82rem',
+                  color: '#fca5a5'
+                }}
+              >
+                {restoreModal.errorMessage}
+              </div>
+            )}
+
+            {/* Target Draft Information */}
+            {restoreModal.targetDraft && (
+              <>
+                <div
+                  style={{
+                    background: '#1e293b',
+                    borderRadius: '8px',
+                    padding: '0.85rem 1rem',
+                    marginBottom: '1rem',
+                    fontSize: '0.82rem',
+                    border: '1px solid #334155'
+                  }}
+                >
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                    <div>
+                      <span style={{ color: '#94a3b8' }}>対象SKU: </span>
+                      <strong style={{ color: '#f8fafc' }}>{restoreModal.targetDraft.sku}</strong>
+                    </div>
+                    <div>
+                      <span style={{ color: '#94a3b8' }}>個体ID: </span>
+                      <strong style={{ color: '#38bdf8' }}>{restoreModal.targetDraft.inventoryUnitId}</strong>
+                    </div>
+                    <div>
+                      <span style={{ color: '#94a3b8' }}>世代バージョン: </span>
+                      <span style={{ color: '#34d399', fontWeight: 700 }}>Version {restoreModal.targetDraft.version}</span>
+                    </div>
+                    <div>
+                      <span style={{ color: '#94a3b8' }}>写真枚数: </span>
+                      <strong style={{ color: '#f8fafc' }}>{restoreModal.targetDraft.photoCount} 枚</strong>
+                      <span style={{ color: '#94a3b8' }}> (合格: {restoreModal.targetDraft.usablePhotoCount} 枚)</span>
+                    </div>
+                    <div>
+                      <span style={{ color: '#94a3b8' }}>保存日時: </span>
+                      <span style={{ color: '#cbd5e1' }}>{new Date(restoreModal.targetDraft.savedAt).toLocaleString()}</span>
+                    </div>
+                    <div>
+                      <span style={{ color: '#94a3b8' }}>SHA-256 チェックサム: </span>
+                      <code style={{ color: '#a7f3d0', fontSize: '0.72rem' }}>{restoreModal.targetDraft.recordChecksum.slice(0, 16)}...</code>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Thumbnails Strip */}
+                <div style={{ marginBottom: '1rem' }}>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#94a3b8', marginBottom: '0.4rem' }}>
+                    アングル別ドラフト写真プレビュー:
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '0.4rem' }}>
+                    {REQUIRED_ANGLES.map((guide) => {
+                      const item = restoreModal.targetDraft?.photos[guide.angle];
+                      return (
+                        <div
+                          key={guide.angle}
+                          style={{
+                            background: '#090d16',
+                            borderRadius: '6px',
+                            padding: '0.3rem',
+                            border: '1px solid #334155',
+                            textAlign: 'center'
+                          }}
+                        >
+                          <div style={{ fontSize: '0.65rem', color: '#94a3b8', marginBottom: '0.2rem' }}>{guide.labelJa}</div>
+                          {item ? (
+                            <img src={item.dataUrl} alt={guide.labelJa} style={{ width: '100%', height: '50px', objectFit: 'cover', borderRadius: '4px' }} />
+                          ) : (
+                            <div style={{ width: '100%', height: '50px', background: '#1e293b', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6rem', color: '#64748b' }}>
+                              未撮影
+                            </div>
+                          )}
+                          {item && (
+                            <div style={{ fontSize: '0.6rem', fontWeight: 700, color: item.qaResult.status === 'USE_AS_IS' ? '#34d399' : '#fbbf24', marginTop: '0.2rem' }}>
+                              {item.qaResult.status}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Unsaved Conflict Detailed Comparison & Explicit Approval Gate */}
+                {restoreModal.hasUnsavedConflict && (
+                  <div
+                    style={{
+                      background: 'rgba(245, 158, 11, 0.12)',
+                      border: '1px solid #f59e0b',
+                      borderRadius: '8px',
+                      padding: '0.85rem 1rem',
+                      marginBottom: '1rem',
+                      fontSize: '0.8rem',
+                      color: '#fcd34d'
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: '0.4rem', color: '#fbbf24' }}>
+                      ⚠️ 【未保存写真の上書き警告・明示的最終承認が必要】
+                    </div>
+                    <div style={{ color: '#fef3c7', marginBottom: '0.6rem', lineHeight: '1.4' }}>
+                      現在編集中の作業セッションに未保存の写真が存在します。復元を実行すると、現在の写真は完全に破棄され、選択したドラフトの内容に置き換わります。
+                    </div>
+
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr 1fr',
+                        gap: '0.6rem',
+                        background: '#090d16',
+                        padding: '0.6rem 0.8rem',
+                        borderRadius: '6px',
+                        border: '1px solid #334155',
+                        marginBottom: '0.6rem',
+                        fontSize: '0.74rem'
+                      }}
+                    >
+                      <div>
+                        <div style={{ color: '#94a3b8', fontWeight: 600 }}>【現在の作業領域】（破棄対象）</div>
+                        <div style={{ color: '#f8fafc', fontWeight: 700, marginTop: '2px' }}>
+                          {activeTargetContext.sku || '未選択'} ({activeTargetContext.inventoryUnitId || '未割当'})
+                        </div>
+                        <div style={{ color: '#f87171', marginTop: '2px' }}>
+                          未保存写真: {restoreModal.currentPhotoCount} 枚
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ color: '#94a3b8', fontWeight: 600 }}>【復元対象ドラフト】（原本保持）</div>
+                        <div style={{ color: '#34d399', fontWeight: 700, marginTop: '2px' }}>
+                          {restoreModal.targetDraft?.sku} ({restoreModal.targetDraft?.inventoryUnitId})
+                        </div>
+                        <div style={{ color: '#a7f3d0', marginTop: '2px' }}>
+                          復元写真: {restoreModal.targetDraft?.photoCount} 枚（原本SHA-256検証済）
+                        </div>
+                      </div>
+                    </div>
+
+                    <label
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: '0.5rem',
+                        cursor: 'pointer',
+                        padding: '0.45rem 0.6rem',
+                        background: restoreOverwriteConfirmed ? 'rgba(16, 185, 129, 0.15)' : 'rgba(0, 0, 0, 0.25)',
+                        border: restoreOverwriteConfirmed ? '1px solid #10b981' : '1px solid #d97706',
+                        borderRadius: '6px'
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        id="confirm-restore-overwrite-checkbox"
+                        checked={restoreOverwriteConfirmed}
+                        onChange={(e) => setRestoreOverwriteConfirmed(e.target.checked)}
+                        style={{ marginTop: '0.15rem', cursor: 'pointer' }}
+                      />
+                      <span style={{ color: restoreOverwriteConfirmed ? '#6ee7b7' : '#fef08a', fontSize: '0.76rem', lineHeight: '1.4' }}>
+                        現在の未保存写真（{restoreModal.currentPhotoCount}枚）を破棄し、ドラフト（{restoreModal.targetDraft?.photoCount}枚 / {restoreModal.targetDraft?.sku}）で上書き復元することを明示的に承認する
+                      </span>
+                    </label>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
+              <button
+                type="button"
+                id="cancel-restore-modal-btn"
+                onClick={handleCancelRestore}
+                style={{
+                  background: '#334155',
+                  color: '#ffffff',
+                  border: '1px solid #475569',
+                  borderRadius: '8px',
+                  padding: '0.6rem 1.2rem',
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+              >
+                🛡️ 復元をキャンセル（現在の状態を保持）
+              </button>
+
+              {restoreModal.targetDraft && !restoreModal.errorMessage && (
+                <button
+                  type="button"
+                  id="execute-restore-modal-btn"
+                  onClick={handleExecuteRestore}
+                  disabled={restoreModal.hasUnsavedConflict && !restoreOverwriteConfirmed}
+                  style={{
+                    background: restoreModal.hasUnsavedConflict && !restoreOverwriteConfirmed
+                      ? '#475569'
+                      : restoreModal.hasUnsavedConflict
+                      ? 'linear-gradient(135deg, #d97706, #b45309)'
+                      : 'linear-gradient(135deg, #059669, #047857)',
+                    color: restoreModal.hasUnsavedConflict && !restoreOverwriteConfirmed ? '#94a3b8' : '#ffffff',
+                    border: restoreModal.hasUnsavedConflict && !restoreOverwriteConfirmed ? '1px solid #64748b' : '1px solid #10b981',
+                    borderRadius: '8px',
+                    padding: '0.6rem 1.2rem',
+                    fontSize: '0.85rem',
+                    fontWeight: 700,
+                    cursor: restoreModal.hasUnsavedConflict && !restoreOverwriteConfirmed ? 'not-allowed' : 'pointer',
+                    boxShadow: restoreModal.hasUnsavedConflict && !restoreOverwriteConfirmed ? 'none' : '0 4px 6px -1px rgba(5, 150, 105, 0.4)',
+                    opacity: restoreModal.hasUnsavedConflict && !restoreOverwriteConfirmed ? 0.6 : 1
+                  }}
+                >
+                  {restoreModal.hasUnsavedConflict ? '⚠️ 承認して上書き復元を実行' : '🔄 復元を実行する'}
+                </button>
+              )}
             </div>
           </div>
         </div>
