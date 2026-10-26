@@ -75,6 +75,7 @@ import { runUiNavigationDiagnosticsTests } from './uiNavigationDiagnostics.test'
 import { runPhotoCaptureStashTests } from './photoCaptureStash.test';
 import { runPhotoEvidenceVaultTests } from './photoEvidenceVault.test';
 import { runWindowsFsPersistenceTests } from './windowsFsPersistence.test';
+import { runIndexedDbPhotoDraftTests } from './indexedDbPhotoDraft.test';
 
 export interface MasterTestSummary {
   totalPassed: number;
@@ -137,7 +138,8 @@ export async function runAllAppTests(): Promise<MasterTestSummary> {
     { name: 'UI Navigation & Operational Diagnostics Tests', fn: runUiNavigationDiagnosticsTests },
     { name: 'Photo Capture In-Memory Stash & Resume Safety Tests', fn: runPhotoCaptureStashTests },
     { name: 'Photo Evidence Vault & Storage Persistence Safety Tests', fn: runPhotoEvidenceVaultTests },
-    { name: 'Windows Isolated FS Persistence & Multi-Process Cold Recovery Tests', fn: runWindowsFsPersistenceTests }
+    { name: 'Windows Isolated FS Persistence & Multi-Process Cold Recovery Tests', fn: runWindowsFsPersistenceTests },
+    { name: 'IndexedDB Local Photo Draft Storage Adapter Safety Tests', fn: runIndexedDbPhotoDraftTests }
   ];
 
   let totalPassed = 0;
