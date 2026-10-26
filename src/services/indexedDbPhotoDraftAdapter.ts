@@ -390,6 +390,14 @@ export class IndexedDbPhotoDraftAdapter implements IPhotoDraftStorageAdapter {
     try {
       const db = await this.openNativeDb();
       return new Promise((resolve) => {
+        let hasSettled = false;
+        const settle = (result: DraftSaveResult) => {
+          if (!hasSettled) {
+            hasSettled = true;
+            resolve(result);
+          }
+        };
+
         const tx = db.transaction([this.storeName], 'readwrite');
         const store = tx.objectStore(this.storeName);
 
@@ -398,13 +406,17 @@ export class IndexedDbPhotoDraftAdapter implements IPhotoDraftStorageAdapter {
         getReq.onsuccess = () => {
           const existing = getReq.result as PhotoDraftRecord | undefined;
           if (existing && (existing.version > draft.version || (existing.version === draft.version && existing.lastModifiedAt >= draft.lastModifiedAt))) {
-            tx.abort();
-            resolve({
+            settle({
               success: false,
               status: 'HOLD_VERSION_CONFLICT',
               messageJa: `より新しいドラフト（Version ${existing.version}）が既に存在するため、古いドラフト（Version ${draft.version}）による上書きを拒絶しました。`,
               error: 'STALE_WRITE_REJECTED'
             });
+            try {
+              tx.abort();
+            } catch {
+              // Ignore if already inactive
+            }
             return;
           }
 
@@ -413,18 +425,22 @@ export class IndexedDbPhotoDraftAdapter implements IPhotoDraftStorageAdapter {
         };
 
         getReq.onerror = () => {
-          tx.abort();
-          resolve({
+          settle({
             success: false,
             status: 'FAILED_TRANSACTION_ABORT',
             messageJa: '既存レコードの取得中にエラーが発生したため保存を中止しました。',
             error: getReq.error?.message
           });
+          try {
+            tx.abort();
+          } catch {
+            // Ignore if already inactive
+          }
         };
 
         // Transaction completion handler
         tx.oncomplete = () => {
-          resolve({
+          settle({
             success: true,
             status: draft.status,
             draftKey: draft.draftKey,
@@ -434,9 +450,12 @@ export class IndexedDbPhotoDraftAdapter implements IPhotoDraftStorageAdapter {
           });
         };
 
-        tx.onerror = () => {
+        tx.onerror = (event: any) => {
+          if (event && typeof event.preventDefault === 'function') {
+            event.preventDefault();
+          }
           const isQuota = tx.error?.name === 'QuotaExceededError';
-          resolve({
+          settle({
             success: false,
             status: isQuota ? 'FAILED_QUOTA_EXCEEDED' : 'FAILED_TRANSACTION_ABORT',
             messageJa: isQuota
@@ -447,7 +466,7 @@ export class IndexedDbPhotoDraftAdapter implements IPhotoDraftStorageAdapter {
         };
 
         tx.onabort = () => {
-          resolve({
+          settle({
             success: false,
             status: 'FAILED_TRANSACTION_ABORT',
             messageJa: 'IndexedDB のトランザクションがアボートされました。データは保存されていません。',
