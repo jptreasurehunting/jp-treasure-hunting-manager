@@ -1422,6 +1422,30 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
               <span>模擬保存モード: {simulatedDraftEnabled ? 'ON' : 'OFF'}</span>
             </button>
 
+            {/* Evidence Vault Promotion Gate Button (Requirement 14: Safety Locked) */}
+            <button
+              type="button"
+              id="evidence-vault-promotion-locked-btn"
+              disabled={true}
+              style={{
+                background: 'rgba(30, 41, 59, 0.4)',
+                color: '#64748b',
+                border: '1px solid #334155',
+                borderRadius: '6px',
+                padding: '4px 10px',
+                fontSize: '0.74rem',
+                fontWeight: 600,
+                cursor: 'not-allowed',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.35rem'
+              }}
+              title="本番Evidence Vaultへの直接昇格は安全のため無効化されています（接続基盤・模擬テストのみ実装済み）。"
+            >
+              <span>🔒</span>
+              <span>正式Vault昇格（未接続・設計中）</span>
+            </button>
+
             <div style={{ marginLeft: 'auto' }}>
               <a
                 href="./inventory-sales.html"
