@@ -8,7 +8,8 @@ import {
 import {
   evaluateListingDraftReadiness,
   ListingDraftReviewInput,
-  updateListingDraftReview
+  updateListingDraftReview,
+  evaluateEbayListingCopyReadiness
 } from '../../services/listingDraftReviewService';
 import {
   resolveDraftPhotoPreview,
@@ -74,6 +75,7 @@ export function ListingDraftReviewPanel({ items, photoHandoffs }: ListingDraftRe
   const selectedDraft = drafts.find((draft) => draft.draftId === selectedDraftId) ?? drafts[0];
   const [form, setForm] = useState<ListingDraftReviewInput>(() => toForm(selectedDraft));
   const [message, setMessage] = useState('');
+  const [copyFeedback, setCopyFeedback] = useState<{ message: string; warnings: string[]; isError?: boolean } | null>(null);
   const [photoViewMode, setPhotoViewMode] = useState<'SELECTED' | 'ORIGINAL'>('SELECTED');
 
   const itemsBySku = useMemo(() => new Map(items.map((item) => [item.sku, item])), [items]);
@@ -113,6 +115,57 @@ export function ListingDraftReviewPanel({ items, photoHandoffs }: ListingDraftRe
     const result = updateListingDraftReview(selectedDraft.draftId, form, selectedItem, drafts);
     setMessage(result.messageJa);
     reloadDrafts();
+  };
+
+  const handleCopyEbayPayload = async () => {
+    if (!selectedDraft) return;
+
+    const copyInput = {
+      sku: selectedDraft.sku,
+      inventoryUnitId: (activeHandoff?.inventoryUnitId && activeHandoff.inventoryUnitId !== selectedDraft.sku)
+        ? activeHandoff.inventoryUnitId
+        : undefined,
+      sellerAccountId: form.sellerAccountId,
+      listingTitle: form.listingTitle,
+      listingDescription: form.listingDescription,
+      priceAmount: form.priceAmount,
+      priceCurrency: form.priceCurrency,
+      shippingTerms: form.shippingTerms
+    };
+
+    const copyReadiness = evaluateEbayListingCopyReadiness(copyInput, selectedItem);
+
+    if (copyReadiness.blockingIssuesJa.length > 0) {
+      setCopyFeedback({
+        message: `⚠️ コピー前に必須項目をご確認ください: ${copyReadiness.blockingIssuesJa.join(' / ')}`,
+        warnings: copyReadiness.warningsJa,
+        isError: true
+      });
+      return;
+    }
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(copyReadiness.formattedPayload);
+        setCopyFeedback({
+          message: '📋 eBay用出品テキストをクリップボードにコピーしました（下書き状態は変更されません）。eBay Seller Hub へ手動で貼り付けてください。',
+          warnings: copyReadiness.warningsJa,
+          isError: false
+        });
+      } else {
+        setCopyFeedback({
+          message: '⚠️ クリップボードAPIがサポートされていない環境です。',
+          warnings: copyReadiness.warningsJa,
+          isError: true
+        });
+      }
+    } catch (err: any) {
+      setCopyFeedback({
+        message: `❌ コピー処理に失敗しました: ${err?.message || err}`,
+        warnings: copyReadiness.warningsJa,
+        isError: true
+      });
+    }
   };
 
   return (
@@ -359,31 +412,31 @@ export function ListingDraftReviewPanel({ items, photoHandoffs }: ListingDraftRe
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
             <div>
               <label style={labelStyle}>販売アカウントID</label>
-              <input style={inputStyle} value={form.sellerAccountId} onChange={(event) => updateField('sellerAccountId', event.target.value)} placeholder="正しいアカウントIDを入力" />
+              <input id="listing-seller-account-input" style={inputStyle} value={form.sellerAccountId} onChange={(event) => updateField('sellerAccountId', event.target.value)} placeholder="正しいアカウントIDを入力" />
             </div>
             <div>
               <label style={labelStyle}>販売価格</label>
-              <input style={inputStyle} type="number" min="0" step="0.01" value={Number.isFinite(form.priceAmount) ? form.priceAmount : ''} onChange={(event) => updateField('priceAmount', event.target.value === '' ? Number.NaN : Number(event.target.value))} placeholder="0.00" />
+              <input id="listing-price-amount-input" style={inputStyle} type="number" min="0" step="0.01" value={Number.isFinite(form.priceAmount) ? form.priceAmount : ''} onChange={(event) => updateField('priceAmount', event.target.value === '' ? Number.NaN : Number(event.target.value))} placeholder="0.00" />
             </div>
             <div>
               <label style={labelStyle}>通貨コード</label>
-              <input style={inputStyle} value={form.priceCurrency} onChange={(event) => updateField('priceCurrency', event.target.value.toUpperCase())} placeholder="USD / JPY など" maxLength={3} />
+              <input id="listing-price-currency-input" style={inputStyle} value={form.priceCurrency} onChange={(event) => updateField('priceCurrency', event.target.value.toUpperCase())} placeholder="USD / JPY など" maxLength={3} />
             </div>
           </div>
 
           <div style={{ marginTop: 12 }}>
             <label style={labelStyle}>出品タイトル</label>
-            <input style={inputStyle} value={form.listingTitle} onChange={(event) => updateField('listingTitle', event.target.value)} placeholder="実際に使用するタイトル" />
+            <input id="listing-title-input" style={inputStyle} value={form.listingTitle} onChange={(event) => updateField('listingTitle', event.target.value)} placeholder="実際に使用するタイトル" />
           </div>
 
           <div style={{ marginTop: 12 }}>
             <label style={labelStyle}>商品説明</label>
-            <textarea style={{ ...inputStyle, minHeight: 110, resize: 'vertical' }} value={form.listingDescription} onChange={(event) => updateField('listingDescription', event.target.value)} placeholder="商品の状態・内容・注意事項など" />
+            <textarea id="listing-description-input" style={{ ...inputStyle, minHeight: 110, resize: 'vertical' }} value={form.listingDescription} onChange={(event) => updateField('listingDescription', event.target.value)} placeholder="商品の状態・内容・注意事項など" />
           </div>
 
           <div style={{ marginTop: 12 }}>
             <label style={labelStyle}>配送条件</label>
-            <textarea style={{ ...inputStyle, minHeight: 70, resize: 'vertical' }} value={form.shippingTerms} onChange={(event) => updateField('shippingTerms', event.target.value)} placeholder="使用する配送ポリシーや配送条件を確認して入力" />
+            <textarea id="listing-shipping-terms-input" style={{ ...inputStyle, minHeight: 70, resize: 'vertical' }} value={form.shippingTerms} onChange={(event) => updateField('shippingTerms', event.target.value)} placeholder="使用する配送ポリシーや配送条件を確認して入力" />
           </div>
 
           {readiness && (
@@ -406,10 +459,50 @@ export function ListingDraftReviewPanel({ items, photoHandoffs }: ListingDraftRe
 
           {message && <div aria-live="polite" style={{ marginTop: 12, color: '#bfdbfe', fontSize: 13 }}>{message}</div>}
 
-          <div style={{ marginTop: 14, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ marginTop: 14, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <button type="button" style={buttonStyle} onClick={handleSave}>保存して安全性を再判定</button>
+            <button
+              type="button"
+              id="copy-ebay-listing-text-btn"
+              style={{
+                ...buttonStyle,
+                background: 'rgba(16, 185, 129, 0.75)',
+                borderColor: 'rgba(52, 211, 153, 0.5)',
+                color: '#ecfdf5',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+              onClick={handleCopyEbayPayload}
+            >
+              <span>📋</span> eBay用出品テキストをコピー
+            </button>
             <button type="button" style={{ ...buttonStyle, background: 'rgba(30, 41, 59, 0.95)', borderColor: 'rgba(148, 163, 184, 0.35)' }} onClick={reloadDrafts}>下書きを再読込</button>
           </div>
+
+          {copyFeedback && (
+            <div id="copy-feedback-banner"
+              style={{
+                marginTop: 12,
+                padding: '10px 14px',
+                borderRadius: 8,
+                background: copyFeedback.isError ? 'rgba(127, 29, 29, 0.35)' : 'rgba(6, 78, 59, 0.4)',
+                border: copyFeedback.isError ? '1px solid #ef4444' : '1px solid #10b981',
+                fontSize: 12,
+                color: copyFeedback.isError ? '#fecaca' : '#a7f3d0'
+              }}
+            >
+              <div style={{ fontWeight: 700 }}>{copyFeedback.message}</div>
+              {copyFeedback.warnings.length > 0 && (
+                <div style={{ marginTop: 6, color: '#fde68a', fontSize: 11 }}>
+                  <strong style={{ display: 'block', marginBottom: 2 }}>⚠️ eBay出品時の注意点（手動確認推奨）:</strong>
+                  {copyFeedback.warnings.map((w, idx) => (
+                    <div key={idx}>・{w}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
 

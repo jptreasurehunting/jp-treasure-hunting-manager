@@ -291,3 +291,31 @@ export interface EvidenceVaultPromotionResult {
   messageJa: string;
   error?: string;
 }
+
+/**
+ * UI-facing state for the simulated promotion preview modal (JTH-STEP 51)
+ */
+export type PromotionUiStatus =
+  | 'WAITING_REVIEW'           // 確認待ち（初期プレビュー表示）
+  | 'APPROVED'                 // オペレーター承認済み（送信準備完了）
+  | 'UPLOADING_SIMULATED'      // 模擬送信中
+  | 'VERIFYING_SIMULATED'      // 模擬照合中
+  | 'COMMITTED_CONFIRMED'      // 模擬コミット確認済み（照会確認完了）
+  | 'REVIEW_REQUIRED'          // 要確認（整合性エラー・保留）
+  | 'TIMEOUT_UNKNOWN'          // タイムアウト結果不明（照会要）
+  | 'FAILED';                  // 失敗
+
+export interface VaultPromotionModalState {
+  isOpen: boolean;
+  uiStatus: PromotionUiStatus;
+  operatorApproved: boolean;
+  operatorId: string;
+  isSubmitting: boolean;
+  validationErrors: string[];
+  canPromote: boolean;
+  resultMessage: string | null;
+  lastCommittedRecordId: string | null;
+  idempotencyKey: string | null;
+  retainedVersion: number | null;
+  auditTrailId: string | null;
+}

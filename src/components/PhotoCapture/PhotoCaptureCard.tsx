@@ -19,6 +19,11 @@ import {
   MockInventoryPhotoGateBridge
 } from '../../services/photoCaptureService';
 import { CentralInventoryPhotoAdapter } from '../../services/centralInventoryPhotoAdapter';
+import {
+  processRealPhotoImport,
+  PHOTO_QA_DISCLAIMER_JA,
+  ORIGINAL_BINARY_PRESERVATION_NOTE_JA
+} from '../../services/realPhotoImportService';
 import { evaluatePhotoListingHandoff } from '../../services/photoListingBridgeService';
 import {
   PhotoCaptureStashService,
@@ -41,6 +46,15 @@ import type {
   IPhotoDraftStorageAdapter
 } from '../../types/photoDraft';
 import { computeSha256Hex } from '../../services/photoEvidenceVaultService';
+import {
+  MockEvidenceVaultTransport,
+  EvidenceVaultPromotionCoordinator
+} from '../../services/evidenceVaultTransportService';
+import type {
+  IEvidenceVaultTransport,
+  VaultPromotionModalState,
+  PromotionUiStatus
+} from '../../types/evidenceVaultTransport';
 
 export interface TargetContextPreset {
   id: string;
@@ -188,6 +202,10 @@ export interface PhotoCaptureCardProps {
   customTestDbName?: string;
   initialShowDraftDrawer?: boolean;
   initialRestoreModal?: DraftRestoreModalState;
+  mockVaultTransport?: IEvidenceVaultTransport;
+  promotionCoordinator?: EvidenceVaultPromotionCoordinator;
+  initialShowPromotionModal?: boolean;
+  initialPromotionModalState?: Partial<VaultPromotionModalState>;
   onPhotoGateEvaluated?: (gate: { photoCaptureComplete: boolean; photoQaComplete: boolean }) => void;
   onSyncToInventory?: (result: InventoryPhotoGateSyncResult) => void;
   onListingHandoffEvaluated?: (handoff: DryRunListingPhotoHandoff) => void;
@@ -208,6 +226,10 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
   customTestDbName,
   initialShowDraftDrawer,
   initialRestoreModal,
+  mockVaultTransport,
+  promotionCoordinator,
+  initialShowPromotionModal,
+  initialPromotionModalState,
   onPhotoGateEvaluated,
   onSyncToInventory,
   onListingHandoffEvaluated
@@ -293,6 +315,88 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
   const [showStashDrawer, setShowStashDrawer] = useState<boolean>(false);
   // Drawer Discard Confirmation Target (Two-step protection)
   const [drawerDiscardTarget, setDrawerDiscardTarget] = useState<StashSessionSummary | null>(null);
+
+  // Helper: Evaluate Formal Promotion Readiness (Requirement 5 & 6)
+  const evaluatePromotionReadiness = (
+    context: PhotoCaptureTargetContext,
+    photos: Record<PhotoAngle, CapturedPhoto | null>
+  ): { canPromote: boolean; errors: string[] } => {
+    const errors: string[] = [];
+
+    // 1. Target context confirmed
+    if (!context.isConfirmed || !context.sku || !context.inventoryUnitId) {
+      errors.push('対象商品のSKUおよび個体番号（Inventory Unit ID）が確定していません。検品対象を選択または確定してください。');
+    }
+
+    // 2. Essential 4 angles completeness & QA status
+    const essentialAngles: PhotoAngle[] = ['FRONT', 'BACK', 'LEFT', 'RIGHT'];
+    for (const angle of essentialAngles) {
+      const photo = photos[angle];
+      if (!photo) {
+        errors.push(`必須アングル【${angle}】の写真が撮影されていません。`);
+      } else {
+        if (photo.qaResult.status !== 'USE_AS_IS') {
+          errors.push(`アングル【${angle}】のQA品質判定が合格（USE_AS_IS）ではありません（現在: ${photo.qaResult.status}）。`);
+        }
+        if (!photo.originalDataUrl || photo.originalDataUrl.length < 50) {
+          errors.push(`アングル【${angle}】の原本画像データが空または不正です。`);
+        }
+      }
+    }
+
+    // 3. Cross-context contamination check
+    for (const photo of Object.values(photos)) {
+      if (photo && context.isConfirmed) {
+        if (photo.sku && context.sku && photo.sku !== context.sku) {
+          errors.push(`撮影写真のSKU（${photo.sku}）と現在の対象SKU（${context.sku}）が一致しません（異個体混入の恐れ）。`);
+          break;
+        }
+        if (photo.inventoryUnitId && context.inventoryUnitId && photo.inventoryUnitId !== context.inventoryUnitId) {
+          errors.push(`撮影写真の個体ID（${photo.inventoryUnitId}）と現在の対象個体ID（${context.inventoryUnitId}）が一致しません。`);
+          break;
+        }
+      }
+    }
+
+    return { canPromote: errors.length === 0, errors };
+  };
+
+  // Evidence Vault Promotion Coordinator & Modal State (JTH-STEP 51: Isolated Simulation)
+  const [activeMockTransport] = useState<IEvidenceVaultTransport>(() =>
+    mockVaultTransport || new MockEvidenceVaultTransport()
+  );
+  const [activePromotionCoordinator] = useState<EvidenceVaultPromotionCoordinator>(() =>
+    promotionCoordinator || new EvidenceVaultPromotionCoordinator(activeMockTransport)
+  );
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [overwriteModal, setOverwriteModal] = useState<{
+    isOpen: boolean;
+    file: File | null;
+    targetAngle: PhotoAngle;
+  }>({
+    isOpen: false,
+    file: null,
+    targetAngle: 'FRONT'
+  });
+  const [promotionModal, setPromotionModal] = useState<VaultPromotionModalState>(() => {
+    const readiness = evaluatePromotionReadiness(activeTargetContext, capturedPhotos);
+    return {
+      isOpen: initialShowPromotionModal ?? false,
+      uiStatus: 'WAITING_REVIEW',
+      operatorApproved: false,
+      operatorId: 'OP-INSPECTOR-01',
+      isSubmitting: false,
+      validationErrors: readiness.errors,
+      canPromote: readiness.canPromote,
+      resultMessage: null,
+      lastCommittedRecordId: null,
+      idempotencyKey: null,
+      retainedVersion: null,
+      auditTrailId: null,
+      ...initialPromotionModalState
+    };
+  });
 
   // Synchronous lifecycle refs to protect against component unmount and SPA transitions
   const capturedPhotosRef = useRef(capturedPhotos);
@@ -872,6 +976,174 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
     });
   };
 
+  // Handle Open Promotion Modal
+  const handleOpenPromotionModal = () => {
+    const readiness = evaluatePromotionReadiness(activeTargetContext, capturedPhotos);
+    setPromotionModal((prev) => ({
+      ...prev,
+      isOpen: true,
+      uiStatus: prev.operatorApproved ? 'APPROVED' : 'WAITING_REVIEW',
+      validationErrors: readiness.errors,
+      canPromote: readiness.canPromote,
+      resultMessage: null,
+      isSubmitting: false
+    }));
+  };
+
+  // Handle Close Promotion Modal (Cancellation preserves session photos and draft!)
+  const handleClosePromotionModal = () => {
+    setPromotionModal((prev) => ({
+      ...prev,
+      isOpen: false,
+      isSubmitting: false
+    }));
+  };
+
+  // Handle Toggle Operator Approval
+  const handleToggleOperatorApproval = (approved: boolean) => {
+    setPromotionModal((prev) => ({
+      ...prev,
+      operatorApproved: approved,
+      uiStatus: approved ? 'APPROVED' : 'WAITING_REVIEW'
+    }));
+  };
+
+  // Handle Execute Simulated Promotion
+  const handleExecuteSimulatedPromotion = async () => {
+    if (!promotionModal.canPromote || !promotionModal.operatorApproved || promotionModal.isSubmitting) {
+      return;
+    }
+
+    setPromotionModal((prev) => ({
+      ...prev,
+      isSubmitting: true,
+      uiStatus: 'UPLOADING_SIMULATED',
+      resultMessage: '⏳ 原本バイナリを模擬保管庫へストリーム送信中...'
+    }));
+
+    // Build draft record from current session
+    let existingDraft: PhotoDraftRecord | null = null;
+    if (activeTargetContext.isConfirmed && activeTargetContext.sku && activeTargetContext.inventoryUnitId) {
+      try {
+        const loadRes = await activeDraftAdapter.loadDraft(activeTargetContext.sku, activeTargetContext.inventoryUnitId);
+        if (loadRes.success && loadRes.draft) {
+          existingDraft = loadRes.draft;
+        }
+      } catch {
+        // Safe ignore
+      }
+    }
+
+    const buildRes = buildPhotoDraftRecord({
+      targetContext: activeTargetContext,
+      capturedPhotos,
+      currentAngleIndex,
+      dryRunPreview,
+      listingHandoff,
+      existingDraft
+    });
+
+    if (!buildRes.success) {
+      setPromotionModal((prev) => ({
+        ...prev,
+        isSubmitting: false,
+        uiStatus: 'FAILED',
+        resultMessage: `❌ ドラフト構築失敗: ${buildRes.messageJa}`
+      }));
+      return;
+    }
+    const targetDraft = buildRes.draft;
+
+    try {
+      const promoRes = await activePromotionCoordinator.promoteDraftToFormalVault(
+        targetDraft,
+        activeTargetContext,
+        {
+          operatorApproval: true,
+          authContext: {
+            operatorId: promotionModal.operatorId,
+            operatorRole: 'QUALIFIED_INSPECTOR'
+          },
+          targetVaultDomain: 'SIMULATED_TEST_VAULT'
+        }
+      );
+
+      if (promoRes.success && promoRes.state === 'COMMITTED_PERSISTED') {
+        setPromotionModal((prev) => ({
+          ...prev,
+          isSubmitting: false,
+          uiStatus: 'COMMITTED_CONFIRMED',
+          resultMessage: '✅ 模擬正式保管テスト成功・永続保存されていません。サーバー保管庫台帳へのアトミックコミットと照会確認を実証しました。',
+          lastCommittedRecordId: promoRes.committedRecordId || null,
+          idempotencyKey: promoRes.idempotencyKey,
+          retainedVersion: promoRes.retainedPredecessorVersion || null,
+          auditTrailId: promoRes.auditTrailId || null
+        }));
+      } else if (promoRes.state === 'HOLD_UNKNOWN_TIMEOUT') {
+        setPromotionModal((prev) => ({
+          ...prev,
+          isSubmitting: false,
+          uiStatus: 'TIMEOUT_UNKNOWN',
+          idempotencyKey: promoRes.idempotencyKey,
+          resultMessage: '⚠️ 通信タイムアウト検知（状態: HOLD_UNKNOWN_TIMEOUT）。コミットの合否が未確定です。照会APIによる確認を実行してください。'
+        }));
+      } else {
+        setPromotionModal((prev) => ({
+          ...prev,
+          isSubmitting: false,
+          uiStatus: 'REVIEW_REQUIRED',
+          resultMessage: `⚠️ 昇格保留: ${promoRes.messageJa} (${promoRes.error || ''})`
+        }));
+      }
+    } catch (err: any) {
+      setPromotionModal((prev) => ({
+        ...prev,
+        isSubmitting: false,
+        uiStatus: 'FAILED',
+        resultMessage: `❌ 模擬昇格例外エラー: ${err?.message || err}`
+      }));
+    }
+  };
+
+  // Reconcile Timeout via Status Query
+  const handleReconcileTimeout = async () => {
+    if (!promotionModal.idempotencyKey) return;
+    setPromotionModal((prev) => ({
+      ...prev,
+      isSubmitting: true,
+      resultMessage: '🔍 サーバー保管庫のコミット状態を照会確認中...'
+    }));
+
+    try {
+      const qRes = await activeMockTransport.queryPromotionStatus({
+        idempotencyKey: promotionModal.idempotencyKey
+      });
+
+      if (qRes.isCommittedAndPersisted && qRes.committedRecord) {
+        setPromotionModal((prev) => ({
+          ...prev,
+          isSubmitting: false,
+          uiStatus: 'COMMITTED_CONFIRMED',
+          resultMessage: '✅ 照会確認成功: タイムアウト前にサーバー保管庫へ正常コミットされていました（模擬テスト成功・永続保存されていません）。',
+          lastCommittedRecordId: qRes.committedRecordId || null
+        }));
+      } else {
+        setPromotionModal((prev) => ({
+          ...prev,
+          isSubmitting: false,
+          uiStatus: 'REVIEW_REQUIRED',
+          resultMessage: 'ℹ️ 照会結果: サーバー保管庫へのコミットは行われていませんでした。再試行または確認が必要です。'
+        }));
+      }
+    } catch (err: any) {
+      setPromotionModal((prev) => ({
+        ...prev,
+        isSubmitting: false,
+        resultMessage: `❌ 照会通信エラー: ${err?.message || err}`
+      }));
+    }
+  };
+
   const [pedalConfig, setPedalConfig] = useState<PedalTriggerConfig>({
     enabled: true,
     triggerKey: 'Space',
@@ -941,6 +1213,84 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
         if (update.statusMessage !== undefined) setStatusMessage(update.statusMessage);
       }
     });
+  };
+
+  // Trigger file selection dialog for real photo file
+  const handleTriggerImport = () => {
+    if (isCapturingRef.current) return;
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+      fileInputRef.current.click();
+    }
+  };
+
+  // Handle file selection from local PC
+  const handleFileInputChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const targetAngle = currentAngleGuide.angle;
+    const existing = capturedPhotos[targetAngle];
+
+    if (existing) {
+      setOverwriteModal({
+        isOpen: true,
+        file,
+        targetAngle
+      });
+      return;
+    }
+
+    await executeRealPhotoImport(file, targetAngle, false);
+  };
+
+  // Execute real photo import & QA
+  const executeRealPhotoImport = async (file: File, angle: PhotoAngle, allowOverwrite: boolean) => {
+    isCapturingRef.current = true;
+    setIsCapturing(true);
+    setStatusMessage(`📁 実写真【${file.name}】を読み込み・解析中...`);
+
+    try {
+      const res = await processRealPhotoImport({
+        file,
+        targetAngle: angle,
+        targetContext: activeTargetContext,
+        existingPhoto: capturedPhotos[angle],
+        allowOverwrite
+      });
+
+      if (res.success && res.photo) {
+        setCapturedPhotos((prev) => ({
+          ...prev,
+          [angle]: res.photo!
+        }));
+        setStatusMessage(res.messageJa);
+      } else {
+        setStatusMessage(`❌ 実写真取込み拒絶: ${res.messageJa}`);
+      }
+    } catch (err: any) {
+      setStatusMessage(`❌ 実写真取込みエラー: ${err?.message || err}`);
+    } finally {
+      isCapturingRef.current = false;
+      setIsCapturing(false);
+      setOverwriteModal({ isOpen: false, file: null, targetAngle: 'FRONT' });
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleCancelOverwrite = () => {
+    setOverwriteModal({ isOpen: false, file: null, targetAngle: 'FRONT' });
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    setStatusMessage('ℹ️ 写真取込みをキャンセルしました。既存の写真データは保護されています。');
+  };
+
+  const handleConfirmOverwrite = () => {
+    if (!overwriteModal.file) return;
+    executeRealPhotoImport(overwriteModal.file, overwriteModal.targetAngle, true);
   };
 
   // Auto-Fix handler with real image transformation & re-QA
@@ -1422,6 +1772,30 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
               <span>模擬保存モード: {simulatedDraftEnabled ? 'ON' : 'OFF'}</span>
             </button>
 
+            {/* Evidence Vault Simulated Promotion Preview Button (Requirement 4: Isolated Simulation Only) */}
+            <button
+              type="button"
+              id="open-vault-promotion-modal-btn"
+              onClick={handleOpenPromotionModal}
+              style={{
+                background: 'rgba(59, 130, 246, 0.2)',
+                color: '#60a5fa',
+                border: '1px solid #3b82f6',
+                borderRadius: '6px',
+                padding: '4px 10px',
+                fontSize: '0.74rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.35rem'
+              }}
+              title="模擬Evidence Vaultへの昇格プレビュー・承認画面を開きます（完全模擬環境・本番未接続）"
+            >
+              <span>🏛️</span>
+              <span>正式保管昇格プレビュー（模擬）</span>
+            </button>
+
             {/* Evidence Vault Promotion Gate Button (Requirement 14: Safety Locked) */}
             <button
               type="button"
@@ -1443,7 +1817,7 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
               title="本番Evidence Vaultへの直接昇格は安全のため無効化されています（接続基盤・模擬テストのみ実装済み）。"
             >
               <span>🔒</span>
-              <span>正式Vault昇格（未接続・設計中）</span>
+              <span>本番Vault直接保存（未接続・無効）</span>
             </button>
 
             <div style={{ marginLeft: 'auto' }}>
@@ -2171,15 +2545,23 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
             )}
 
             {/* Quick Trigger Bar */}
-            <div style={{ marginTop: '1rem', display: 'flex', gap: '0.75rem', width: '100%', justifyContent: 'center' }}>
+            <input
+              type="file"
+              id="real-photo-file-input"
+              ref={fileInputRef}
+              accept="image/jpeg,image/png"
+              style={{ display: 'none' }}
+              onChange={handleFileInputChange}
+            />
+            <div style={{ marginTop: '1rem', display: 'flex', gap: '0.75rem', width: '100%', justifyContent: 'center', flexWrap: 'wrap' }}>
               <button
                 type="button"
                 id="capture-pedal-btn"
                 onClick={handlePedalTrigger}
                 disabled={isCapturing}
                 style={{
-                  padding: '0.85rem 1.75rem',
-                  fontSize: '1rem',
+                  padding: '0.85rem 1.5rem',
+                  fontSize: '0.95rem',
                   fontWeight: 700,
                   background: isCapturing ? '#64748b' : 'linear-gradient(135deg, #0284c7 0%, #2563eb 100%)',
                   color: 'white',
@@ -2195,9 +2577,33 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
                 <span>📸 {isCapturing ? '撮影処理中...' : `撮影実行 (${pedalConfig.triggerKey} / Pedal)`}</span>
               </button>
 
+              <button
+                type="button"
+                id="import-real-photo-btn"
+                onClick={handleTriggerImport}
+                disabled={isCapturing}
+                style={{
+                  padding: '0.85rem 1.4rem',
+                  fontSize: '0.95rem',
+                  fontWeight: 700,
+                  background: isCapturing ? '#64748b' : 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                  color: 'white',
+                  border: '1px solid #10b981',
+                  borderRadius: '10px',
+                  cursor: isCapturing ? 'not-allowed' : 'pointer',
+                  boxShadow: '0 4px 14px rgba(16,185,129,0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem'
+                }}
+              >
+                <span>📁 PCから実写真を読込</span>
+              </button>
+
               {activePhoto && activePhoto.qaResult.status === 'AUTO_FIX' && (
                 <button
                   type="button"
+                  id="apply-auto-fix-btn"
                   onClick={handleApplyAutoFix}
                   disabled={isCapturing}
                   style={{
@@ -2274,11 +2680,35 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
                   </div>
 
                   {/* Metrics Table */}
-                  <div style={{ background: '#0f172a', padding: '0.6rem', borderRadius: '6px', fontSize: '0.8rem', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                  <div id="photo-qa-metrics-box" style={{ background: '#0f172a', padding: '0.6rem', borderRadius: '6px', fontSize: '0.8rem', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '0.75rem' }}>
                     <div>ピンぼけ: <strong>{isNaN(activePhoto.qaResult.metrics.blurScore) ? '解析エラー (NaN)' : `${activePhoto.qaResult.metrics.blurScore} / 100`}</strong></div>
                     <div>露出・明るさ: <strong>{isNaN(activePhoto.qaResult.metrics.brightness) ? '解析エラー (NaN)' : `${activePhoto.qaResult.metrics.brightness} / 255`}</strong></div>
                     <div>被写体率: <strong>{isNaN(activePhoto.qaResult.metrics.framingCoverage) ? '解析エラー (NaN)' : `${activePhoto.qaResult.metrics.framingCoverage}%`}</strong></div>
                     <div>グレア反射: <strong>{isNaN(activePhoto.qaResult.metrics.glareScore) ? '解析エラー (NaN)' : `${activePhoto.qaResult.metrics.glareScore} / 100`}</strong></div>
+                  </div>
+
+                  {activePhoto.fileMetadata && (
+                    <div id="photo-file-metadata-box" style={{ background: '#0b1329', border: '1px solid #1e3a8a', padding: '0.5rem 0.75rem', borderRadius: '6px', fontSize: '0.75rem', marginBottom: '0.75rem' }}>
+                      <div style={{ color: '#60a5fa', fontWeight: 700, marginBottom: '2px' }}>
+                        📁 PC取込実ファイル ({activePhoto.fileMetadata.mimeType})
+                      </div>
+                      <div style={{ color: '#cbd5e1' }}>
+                        ファイル: <strong>{activePhoto.fileMetadata.fileName}</strong> ({Math.round(activePhoto.fileMetadata.sizeBytes / 1024)} KB)
+                      </div>
+                      <div style={{ color: '#94a3b8', wordBreak: 'break-all' }}>
+                        SHA-256: <code>{activePhoto.fileMetadata.sha256Hex.slice(0, 16)}...</code> (原本ハッシュ検証済)
+                      </div>
+                      <div style={{ color: '#94a3b8' }}>
+                        寸法: {activePhoto.fileMetadata.width} × {activePhoto.fileMetadata.height} px
+                      </div>
+                    </div>
+                  )}
+
+                  <div style={{ fontSize: '0.72rem', color: '#94a3b8', lineHeight: 1.4, marginBottom: '0.4rem' }}>
+                    {PHOTO_QA_DISCLAIMER_JA}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b', lineHeight: 1.4, marginBottom: '0.75rem' }}>
+                    {ORIGINAL_BINARY_PRESERVATION_NOTE_JA}
                   </div>
 
                   {/* Issues List */}
@@ -2461,6 +2891,88 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Overwrite Confirmation Modal for Real Photo Import */}
+      {overwriteModal.isOpen && overwriteModal.file && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '1rem'
+          }}
+        >
+          <div
+            style={{
+              background: '#0f172a',
+              border: '2px solid #f59e0b',
+              borderRadius: '12px',
+              padding: '1.5rem',
+              maxWidth: '520px',
+              width: '100%',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
+              color: '#f8fafc'
+            }}
+          >
+            <h3 style={{ margin: '0 0 1rem 0', color: '#fbbf24', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1.15rem' }}>
+              <span>⚠️ 写真の上書き確認</span>
+            </h3>
+            <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.9rem', color: '#cbd5e1', lineHeight: 1.5 }}>
+              現在選択中のアングル【<strong>{REQUIRED_ANGLES.find((a) => a.angle === overwriteModal.targetAngle)?.labelJa}</strong>】には、既に登録された写真が存在します。
+            </p>
+            <div style={{ background: '#1e293b', padding: '0.75rem', borderRadius: '8px', fontSize: '0.8rem', marginBottom: '1rem', border: '1px solid #334155' }}>
+              <div>新ファイル名: <strong>{overwriteModal.file.name}</strong> ({Math.round(overwriteModal.file.size / 1024)} KB)</div>
+              <div>対象SKU: <strong>{activeTargetContext?.sku || '未指定'}</strong></div>
+              <div>対象個体ID: <strong>{activeTargetContext?.inventoryUnitId || '未指定'}</strong></div>
+            </div>
+            <p style={{ margin: '0 0 1.25rem 0', fontSize: '0.82rem', color: '#94a3b8' }}>
+              ※ 「上書きして取り込む」を押すと現在の写真が置き換わります。「キャンセル」を押すと現在の写真データは完全に保護されます。
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <button
+                type="button"
+                id="cancel-overwrite-btn"
+                onClick={handleCancelOverwrite}
+                style={{
+                  padding: '0.6rem 1.2rem',
+                  background: '#334155',
+                  color: '#f8fafc',
+                  border: '1px solid #475569',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: 600
+                }}
+              >
+                キャンセル（既存を保持）
+              </button>
+              <button
+                type="button"
+                id="confirm-overwrite-btn"
+                onClick={handleConfirmOverwrite}
+                style={{
+                  padding: '0.6rem 1.2rem',
+                  background: '#d97706',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: 700
+                }}
+              >
+                上書きして取り込む
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Safe Switch & Unsaved Photo Protection Modal */}
       {switchModal.isOpen && switchModal.pendingContext && (
@@ -3062,6 +3574,426 @@ export const PhotoCaptureCard: React.FC<PhotoCaptureCardProps> = ({
                   {restoreModal.hasUnsavedConflict ? '⚠️ 承認して上書き復元を実行' : '🔄 復元を実行する'}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Formal Evidence Vault Promotion Preview Modal (JTH-STEP 51: Isolated Simulation) */}
+      {promotionModal.isOpen && (
+        <div
+          id="vault-promotion-modal"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.85)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '1rem',
+            backdropFilter: 'blur(4px)'
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: '#0f172a',
+              border: '1px solid #334155',
+              borderRadius: '12px',
+              maxWidth: '850px',
+              width: '100%',
+              maxHeight: '90vh',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
+              overflow: 'hidden'
+            }}
+          >
+            {/* Modal Header */}
+            <div
+              style={{
+                padding: '1rem 1.25rem',
+                background: 'linear-gradient(135deg, #1e293b, #0f172a)',
+                borderBottom: '1px solid #334155',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span style={{ fontSize: '1.2rem' }}>🏛️</span>
+                  <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#f8fafc' }}>
+                    正式証拠保管（Evidence Vault）昇格プレビュー【完全模擬テストモード】
+                  </h2>
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.2rem' }}>
+                  一時ドラフトから正式Evidence Vaultへの5段階耐久性プロトコル・暗号ハッシュ読戻し検証
+                </div>
+              </div>
+              <button
+                type="button"
+                id="close-promotion-modal-x-btn"
+                onClick={handleClosePromotionModal}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#94a3b8',
+                  fontSize: '1.25rem',
+                  cursor: 'pointer',
+                  padding: '0.25rem'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* Storage Hierarchy Disclosure Banner (Requirement 15) */}
+              <div
+                id="storage-hierarchy-banner"
+                style={{
+                  background: 'rgba(30, 41, 59, 0.6)',
+                  border: '1px solid #475569',
+                  borderRadius: '8px',
+                  padding: '0.75rem 1rem',
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(4, 1fr)',
+                  gap: '0.5rem',
+                  fontSize: '0.72rem'
+                }}
+              >
+                <div>
+                  <div style={{ color: '#64748b', fontWeight: 600 }}>1. 一時退避（Stash）</div>
+                  <div style={{ color: '#cbd5e1' }}>メモリ内セッション退避</div>
+                </div>
+                <div>
+                  <div style={{ color: '#38bdf8', fontWeight: 600 }}>2. ローカルドラフト</div>
+                  <div style={{ color: '#cbd5e1' }}>IndexedDB再起動復元用</div>
+                </div>
+                <div>
+                  <div style={{ color: '#a855f7', fontWeight: 600 }}>3. 模擬正式保管庫</div>
+                  <div style={{ color: '#f3e8ff', fontWeight: 700 }}>現在検証中（インメモリ）</div>
+                </div>
+                <div>
+                  <div style={{ color: '#ef4444', fontWeight: 600 }}>4. 本番Evidence Vault</div>
+                  <div style={{ color: '#fca5a5', fontWeight: 700 }}>未接続（オフライン）</div>
+                </div>
+              </div>
+
+              {/* Validation Target Summary */}
+              <div
+                id="promotion-target-context-display"
+                style={{
+                  background: '#1e293b',
+                  borderRadius: '8px',
+                  padding: '0.8rem 1rem',
+                  border: '1px solid #334155',
+                  display: 'grid',
+                  gridTemplateColumns: '1.5fr 1fr 1fr',
+                  gap: '0.75rem',
+                  fontSize: '0.8rem'
+                }}
+              >
+                <div>
+                  <span style={{ color: '#94a3b8' }}>対象商品 (SKU / Unit): </span>
+                  <span style={{ fontWeight: 700, color: activeTargetContext.sku ? '#f8fafc' : '#ef4444' }}>
+                    {activeTargetContext.sku || '未確定'} ({activeTargetContext.inventoryUnitId || '未割当'})
+                  </span>
+                </div>
+                <div>
+                  <span style={{ color: '#94a3b8' }}>保管先種別: </span>
+                  <span style={{ color: '#c084fc', fontWeight: 600 }}>SIMULATED_TEST_VAULT (模擬)</span>
+                </div>
+                <div>
+                  <span style={{ color: '#94a3b8' }}>撮影枚数: </span>
+                  <span style={{ color: '#f8fafc', fontWeight: 600 }}>
+                    {Object.values(capturedPhotos).filter(Boolean).length} 枚
+                  </span>
+                </div>
+              </div>
+
+              {/* Validation Warnings / Blocks (Requirement 6) */}
+              {!promotionModal.canPromote && promotionModal.validationErrors.length > 0 && (
+                <div
+                  id="promotion-validation-errors-box"
+                  style={{
+                    background: 'rgba(239, 68, 68, 0.15)',
+                    border: '1px solid #ef4444',
+                    borderRadius: '8px',
+                    padding: '0.75rem 1rem',
+                    fontSize: '0.78rem'
+                  }}
+                >
+                  <div style={{ color: '#fca5a5', fontWeight: 700, marginBottom: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <span>🚫</span> 昇格不能理由（以下の要件を解消するまで正式保管へ進めません）
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: '1.25rem', color: '#fecaca', lineHeight: '1.5' }}>
+                    {promotionModal.validationErrors.map((err, idx) => (
+                      <li key={idx}>{err}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Photos Inspection Grid (Requirement 5) */}
+              <div>
+                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#e2e8f0', marginBottom: '0.5rem' }}>
+                  📸 原本・補正画像およびSHA-256整合性検査（必須4アングル）
+                </div>
+                <div
+                  id="promotion-photos-grid"
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(4, 1fr)',
+                    gap: '0.5rem'
+                  }}
+                >
+                  {(['FRONT', 'BACK', 'LEFT', 'RIGHT'] as PhotoAngle[]).map((angle) => {
+                    const photo = capturedPhotos[angle];
+                    const hashDisplay = photo?.originalDataUrl ? computeSha256Hex(photo.originalDataUrl).slice(0, 10) + '...' : '未撮影';
+                    const isPass = photo && photo.qaResult.status === 'USE_AS_IS';
+
+                    return (
+                      <div
+                        key={angle}
+                        style={{
+                          background: photo ? '#1e293b' : 'rgba(30, 41, 59, 0.4)',
+                          border: photo ? (isPass ? '1px solid #10b981' : '1px solid #f59e0b') : '1px dashed #475569',
+                          borderRadius: '8px',
+                          padding: '0.5rem',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '0.3rem',
+                          fontSize: '0.72rem'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontWeight: 700, color: '#f8fafc' }}>{angle}</span>
+                          <span
+                            style={{
+                              fontSize: '0.65rem',
+                              padding: '1px 5px',
+                              borderRadius: '4px',
+                              background: photo ? (isPass ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)') : '#334155',
+                              color: photo ? (isPass ? '#34d399' : '#fbbf24') : '#94a3b8'
+                            }}
+                          >
+                            {photo ? photo.qaResult.status : '未撮影'}
+                          </span>
+                        </div>
+
+                        {photo ? (
+                          <div style={{ display: 'flex', gap: '4px', height: '60px' }}>
+                            <div style={{ flex: 1, position: 'relative', background: '#0f172a', borderRadius: '4px', overflow: 'hidden' }}>
+                              <img src={photo.originalDataUrl} alt="原本" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                              <span style={{ position: 'absolute', bottom: 1, left: 2, fontSize: '0.55rem', background: 'rgba(0,0,0,0.7)', color: '#93c5fd', padding: '0 2px' }}>原本</span>
+                            </div>
+                            <div style={{ flex: 1, position: 'relative', background: '#0f172a', borderRadius: '4px', overflow: 'hidden' }}>
+                              <img src={photo.dataUrl} alt="補正" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                              <span style={{ position: 'absolute', bottom: 1, left: 2, fontSize: '0.55rem', background: 'rgba(0,0,0,0.7)', color: '#34d399', padding: '0 2px' }}>補正</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ height: '60px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
+                            不足
+                          </div>
+                        )}
+
+                        <div style={{ fontSize: '0.62rem', color: '#94a3b8', wordBreak: 'break-all' }}>
+                          SHA: {hashDisplay}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Operator Approval Guard (Requirement 7) */}
+              <div
+                style={{
+                  background: promotionModal.operatorApproved ? 'rgba(16, 185, 129, 0.12)' : '#1e293b',
+                  border: promotionModal.operatorApproved ? '1px solid #10b981' : '1px solid #475569',
+                  borderRadius: '8px',
+                  padding: '0.8rem 1rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.6rem'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <input
+                    type="checkbox"
+                    id="operator-approval-checkbox"
+                    checked={promotionModal.operatorApproved}
+                    disabled={!promotionModal.canPromote || promotionModal.isSubmitting}
+                    onChange={(e) => handleToggleOperatorApproval(e.target.checked)}
+                    style={{ width: '1.15rem', height: '1.15rem', cursor: promotionModal.canPromote ? 'pointer' : 'not-allowed' }}
+                  />
+                  <label
+                    htmlFor="operator-approval-checkbox"
+                    style={{
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      color: promotionModal.operatorApproved ? '#6ee7b7' : '#e2e8f0',
+                      cursor: promotionModal.canPromote ? 'pointer' : 'not-allowed'
+                    }}
+                  >
+                    上記SKU・個体番号、必須4アングル写真、および原本暗号ハッシュ整合性を確認し、正式保管への模擬昇格を承認する
+                  </label>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.75rem' }}>
+                  <span style={{ color: '#94a3b8' }}>操作者ID:</span>
+                  <input
+                    type="text"
+                    id="operator-id-input"
+                    value={promotionModal.operatorId}
+                    disabled={promotionModal.isSubmitting}
+                    onChange={(e) => setPromotionModal((prev) => ({ ...prev, operatorId: e.target.value }))}
+                    style={{
+                      background: '#0f172a',
+                      border: '1px solid #475569',
+                      color: '#f8fafc',
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      fontSize: '0.75rem',
+                      width: '140px'
+                    }}
+                  />
+                  <span style={{ color: '#64748b' }}>※明示的な承認チェックがない限り昇格処理は実行されません</span>
+                </div>
+              </div>
+
+              {/* Promotion Status / Result Banner */}
+              {promotionModal.resultMessage && (
+                <div
+                  id="promotion-result-banner"
+                  style={{
+                    padding: '0.75rem 1rem',
+                    borderRadius: '8px',
+                    fontSize: '0.8rem',
+                    lineHeight: '1.4',
+                    background: promotionModal.uiStatus === 'COMMITTED_CONFIRMED'
+                      ? 'rgba(16, 185, 129, 0.18)'
+                      : promotionModal.uiStatus === 'TIMEOUT_UNKNOWN'
+                      ? 'rgba(245, 158, 11, 0.18)'
+                      : 'rgba(239, 68, 68, 0.18)',
+                    border: promotionModal.uiStatus === 'COMMITTED_CONFIRMED'
+                      ? '1px solid #10b981'
+                      : promotionModal.uiStatus === 'TIMEOUT_UNKNOWN'
+                      ? '1px solid #f59e0b'
+                      : '1px solid #ef4444',
+                    color: promotionModal.uiStatus === 'COMMITTED_CONFIRMED'
+                      ? '#a7f3d0'
+                      : promotionModal.uiStatus === 'TIMEOUT_UNKNOWN'
+                      ? '#fde68a'
+                      : '#fecaca'
+                  }}
+                >
+                  <div style={{ fontWeight: 700, marginBottom: '0.25rem' }}>
+                    {promotionModal.resultMessage}
+                  </div>
+                  {promotionModal.lastCommittedRecordId && (
+                    <div style={{ fontSize: '0.75rem', color: '#6ee7b7' }}>
+                      正式レコードID: {promotionModal.lastCommittedRecordId} | 監査ID: {promotionModal.auditTrailId}
+                    </div>
+                  )}
+                  {promotionModal.uiStatus === 'TIMEOUT_UNKNOWN' && (
+                    <button
+                      type="button"
+                      id="reconcile-timeout-btn"
+                      onClick={handleReconcileTimeout}
+                      disabled={promotionModal.isSubmitting}
+                      style={{
+                        marginTop: '0.5rem',
+                        background: '#d97706',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '6px',
+                        padding: '4px 12px',
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      🔄 保管状況を照会確認する
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer / Action Buttons */}
+            <div
+              style={{
+                padding: '0.8rem 1.25rem',
+                background: '#090d16',
+                borderTop: '1px solid #334155',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}
+            >
+              <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                状態: <strong style={{ color: '#94a3b8' }}>{promotionModal.uiStatus}</strong>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.6rem' }}>
+                <button
+                  type="button"
+                  id="close-promotion-modal-btn"
+                  onClick={handleClosePromotionModal}
+                  disabled={promotionModal.isSubmitting}
+                  style={{
+                    background: '#334155',
+                    color: '#ffffff',
+                    border: '1px solid #475569',
+                    borderRadius: '6px',
+                    padding: '0.5rem 1rem',
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                >
+                  🛡️ 閉じる / キャンセル（未保存写真保持）
+                </button>
+
+                <button
+                  type="button"
+                  id="submit-simulated-promotion-btn"
+                  onClick={handleExecuteSimulatedPromotion}
+                  disabled={!promotionModal.canPromote || !promotionModal.operatorApproved || promotionModal.isSubmitting || promotionModal.uiStatus === 'COMMITTED_CONFIRMED'}
+                  style={{
+                    background: (!promotionModal.canPromote || !promotionModal.operatorApproved || promotionModal.uiStatus === 'COMMITTED_CONFIRMED')
+                      ? '#334155'
+                      : 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+                    color: (!promotionModal.canPromote || !promotionModal.operatorApproved || promotionModal.uiStatus === 'COMMITTED_CONFIRMED')
+                      ? '#64748b'
+                      : '#ffffff',
+                    border: (!promotionModal.canPromote || !promotionModal.operatorApproved || promotionModal.uiStatus === 'COMMITTED_CONFIRMED')
+                      ? '1px solid #475569'
+                      : '1px solid #3b82f6',
+                    borderRadius: '6px',
+                    padding: '0.5rem 1.2rem',
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    cursor: (!promotionModal.canPromote || !promotionModal.operatorApproved || promotionModal.uiStatus === 'COMMITTED_CONFIRMED')
+                      ? 'not-allowed'
+                      : 'pointer',
+                    boxShadow: (promotionModal.canPromote && promotionModal.operatorApproved && promotionModal.uiStatus !== 'COMMITTED_CONFIRMED')
+                      ? '0 4px 6px -1px rgba(37, 99, 235, 0.4)'
+                      : 'none'
+                  }}
+                >
+                  {promotionModal.isSubmitting
+                    ? '⏳ 送信処理中...'
+                    : promotionModal.uiStatus === 'COMMITTED_CONFIRMED'
+                    ? '✅ 模擬コミット完了'
+                    : '🚀 模擬正式保管庫へ昇格送信'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

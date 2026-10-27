@@ -505,7 +505,7 @@ export function applyAutoFixToPhoto(photo: CapturedPhoto): CapturedPhoto {
 
   const originalDataUrl = photo.originalDataUrl || photo.dataUrl;
   const autoFixCount = (photo.autoFixCount || 0) + 1;
-  const imageData = extractImageDataFromInput(originalDataUrl);
+  const imageData = photo.pixelData || extractImageDataFromInput(originalDataUrl);
 
   if (!imageData) {
     return {
@@ -615,6 +615,7 @@ export function applyAutoFixToPhoto(photo: CapturedPhoto): CapturedPhoto {
       dataUrl: transformedDataUrl,
       originalDataUrl,
       autoFixCount,
+      pixelData: transformedPixelImageData,
       qaResult: {
         ...reEvaluatedResult,
         autoFixApplied: true,
@@ -629,6 +630,7 @@ export function applyAutoFixToPhoto(photo: CapturedPhoto): CapturedPhoto {
       dataUrl: transformedDataUrl,
       originalDataUrl,
       autoFixCount,
+      pixelData: transformedPixelImageData,
       qaResult: {
         ...reEvaluatedResult,
         autoFixApplied: false,

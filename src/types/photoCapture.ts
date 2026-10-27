@@ -40,6 +40,24 @@ export interface PhotoQaResult {
   suggestedAction: string;
 }
 
+export interface PixelImageData {
+  width: number;
+  height: number;
+  data: Uint8ClampedArray | number[];
+}
+
+export interface RealPhotoFileMetadata {
+  fileName: string;
+  sizeBytes: number;
+  mimeType: 'image/jpeg' | 'image/png';
+  sha256Hex: string;
+  width: number;
+  height: number;
+  isRealFile: boolean;
+  importedAt: string;
+  exifOrientation?: number;
+}
+
 export interface CapturedPhoto {
   id: string;
   angle: PhotoAngle;
@@ -52,6 +70,8 @@ export interface CapturedPhoto {
   sku?: string;             // 商品カタログ番号 (SKU)
   inventoryUnitId?: string; // 実物個体管理番号 (Unit ID)
   autoFixCount?: number;    // Number of auto-fix attempts applied
+  pixelData?: PixelImageData; // Decoded raw RGBA pixels for real photo QA and transformations
+  fileMetadata?: RealPhotoFileMetadata; // Real photo file metadata if imported from disk
 }
 
 export type HardwareValidationStatus =
